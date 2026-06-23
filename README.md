@@ -8,7 +8,7 @@ pair with a mangos-zero server: load real client assets, render the world in a
 running server while connected retail clients see the edits.**
 
 Every parser, transform, and protocol primitive here is **compiled and
-unit-tested in-tree** (114→521 core + 53 editor checks). Where a part needs a GPU/display or your
+unit-tested in-tree** (114→538 core + 72 editor checks). Where a part needs a GPU/display or your
 mangos checkout to run, it is implemented as far as it can be verified and the
 boundary is stated plainly (see `ARCHITECTURE.md`).
 
@@ -23,6 +23,7 @@ cmake --build build -j$(nproc)
 ./build/wforge-raster-demo       # render procedural terrain -> PNG
 ./build/wforge-debug-demo        # render terrain + debug overlay -> PNG
 ./build/wforge-editor-headless   # render the whole editor on the CPU -> PNG
+./build/wforge-stub-server [port]   # run the standalone bridge server (no mangos)
 ./build/wforge-dump <DataDir> <Map> [tileX tileY]   # inspect a real MPQ tree
 ```
 
@@ -76,6 +77,7 @@ automatically via CMake FetchContent.
 | `modelmesh.*`     | M2 / WMO geometry → renderer Mesh (doodad wireframe)           |
 | `byte_writer.hpp` | little-endian write counterpart to `byte_reader.hpp`           |
 | `editor/`         | ImGui panels + Viewport + fly Camera + ImGuizmo + software ImGui + bridge client |
+| `server/`         | WorldSim + standalone stub bridge server (runnable WorldForgeBridge analog) |
 
 ## Status at a glance
 

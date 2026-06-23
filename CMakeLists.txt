@@ -45,6 +45,7 @@ add_library(wforge STATIC
   src/navmesh.cpp
   src/vmap.cpp
   src/rhi_software.cpp
+  src/server/world_sim.cpp
 )
 target_include_directories(wforge PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -54,6 +55,22 @@ target_link_libraries(wforge PUBLIC storm)
 
 add_executable(wforge-dump src/main.cpp)
 target_link_libraries(wforge-dump PRIVATE wforge)
+
+# ---------------------------------------------------------------------------
+# Standalone bridge server: the runnable WorldForgeBridge analog (sockets +
+# WorldSim, no mangos headers). Lets the full editor<->server round-trip run
+# and be tested here, and gives the real editor a target to point at.
+# ---------------------------------------------------------------------------
+find_package(Threads REQUIRED)
+add_library(wforge-server STATIC src/server/stub_server.cpp)
+target_include_directories(wforge-server PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(wforge-server PUBLIC wforge Threads::Threads)
+if(WIN32)
+  target_link_libraries(wforge-server PUBLIC ws2_32)
+endif()
+
+add_executable(wforge-stub-server tools/stub_server_main.cpp)
+target_link_libraries(wforge-stub-server PRIVATE wforge-server)
 
 # ---------------------------------------------------------------------------
 # Unit tests. Most modules (math, coords, terrain parsing) need no MPQ data,
@@ -79,6 +96,7 @@ add_executable(wforge-tests
   tests/test_integration.cpp
   tests/test_serverdata.cpp
   tests/test_rhi.cpp
+  tests/test_world_sim.cpp
 )
 target_link_libraries(wforge-tests PRIVATE wforge)
 target_include_directories(wforge-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
@@ -169,8 +187,9 @@ if(WFORGE_EDITOR)
     tests/editor/test_software_imgui.cpp
     tests/editor/test_viewport.cpp
     tests/editor/test_bridge_client.cpp
+    tests/editor/test_e2e.cpp
   )
-  target_link_libraries(wforge-editor-tests PRIVATE wforge-editor)
+  target_link_libraries(wforge-editor-tests PRIVATE wforge-editor wforge-server)
   target_include_directories(wforge-editor-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
   add_test(NAME editor COMMAND wforge-editor-tests)
 

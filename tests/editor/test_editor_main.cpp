@@ -11,6 +11,7 @@ void test_gizmo_controller();
 void test_software_imgui();
 void test_viewport();
 void test_bridge_client();
+void test_e2e();
 
 static void setupHeadlessImGui() {
     IMGUI_CHECKVERSION();
@@ -36,6 +37,7 @@ int main() {
     test_software_imgui();
     test_viewport();
     test_bridge_client();
+    test_e2e();
     ImGui::DestroyContext();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);

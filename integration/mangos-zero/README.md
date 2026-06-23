@@ -52,6 +52,14 @@ it ships the panels' framed `EDITOR_*` packets to this module's port and folds
 the server's `EDITOR_DEBUG_*` stream back into the viewport overlay. Bind this
 module to the same host/port (default `127.0.0.1:7878`).
 
+## Try it without mangos first
+
+`wforge-stub-server` (built from `src/server/`) is the same protocol backed by an
+in-memory `WorldSim` instead of mangos -- run it, point the editor at it, and the
+full round-trip (ops in, world mutated, acks + debug streamed back) works with no
+server tree. The dispatch here mirrors that stub's; swap `WorldSim` calls for the
+mangos calls below.
+
 ## Security
 
 The bridge is an authenticated local control channel, **not** part of the game

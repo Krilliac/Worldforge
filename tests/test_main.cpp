@@ -24,6 +24,7 @@ void test_navmesh();
 void test_rhi();
 void test_vmap();
 void test_storage();
+void test_world_sim();
 
 int main() {
     test_math();
@@ -50,6 +51,7 @@ int main() {
     test_rhi();
     test_vmap();
     test_storage();
+    test_world_sim();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;
