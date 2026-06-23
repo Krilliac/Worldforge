@@ -22,6 +22,7 @@
 #include "wow_files.hpp"
 #include "coords.hpp"
 #include "asset_loader.hpp"
+#include "client_data.hpp"
 #include "raster.hpp"
 #include "image.hpp"
 #include "math.hpp"
@@ -37,35 +38,12 @@ namespace fs = std::filesystem;
 
 namespace {
 
-// Canonical vanilla 1.12.1 archive priority (LOW priority first; patches win).
-// Locale archives are appended after, with {locale} substituted.
-const char* kBaseArchives[] = {
-    "base.MPQ", "dbc.MPQ", "interface.MPQ", "misc.MPQ", "model.MPQ",
-    "sound.MPQ", "speech.MPQ", "terrain.MPQ", "texture.MPQ", "wmo.MPQ",
-    "patch.MPQ", "patch-2.MPQ",
-};
-const char* kLocaleArchives[] = {
-    "locale-{loc}.MPQ", "speech-{loc}.MPQ", "patch-{loc}.MPQ", "patch-{loc}-2.MPQ",
-};
-
-std::string replaceLoc(std::string s, const std::string& loc) {
-    const std::string token = "{loc}";
-    for (size_t p; (p = s.find(token)) != std::string::npos; )
-        s.replace(p, token.size(), loc);
-    return s;
-}
-
 void openChain(wf::MpqManager& mpq, const fs::path& dataDir, const std::string& locale) {
-    auto tryOpen = [&](const fs::path& p) {
-        if (!fs::exists(p)) return;
-        if (mpq.addArchive(p.string()))
-            std::printf("  + %s\n", p.filename().string().c_str());
-        else
-            std::printf("  ! failed to open %s\n", p.string().c_str());
-    };
-    for (const char* a : kBaseArchives)   tryOpen(dataDir / a);
-    const fs::path locDir = dataDir / locale;
-    for (const char* a : kLocaleArchives) tryOpen(locDir / replaceLoc(a, locale));
+    wf::mountWowClient(mpq, dataDir, locale, [](const std::string& path, bool ok) {
+        const fs::path p = path;
+        if (ok) std::printf("  + %s\n", p.filename().string().c_str());
+        else    std::printf("  ! failed to open %s\n", path.c_str());
+    });
 }
 
 void dumpTile(const wf::MpqManager& mpq, const std::string& map, int x, int y) {
@@ -147,16 +125,19 @@ bool renderTile(const wf::MpqManager& mpq, const std::string& map, int x, int y,
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::fprintf(stderr,
-            "usage: %s <DataDir> <MapName> [tileX tileY] [--locale enUS]\n", argv[0]);
+            "usage: %s <DataDir|WoWInstallDir|.> <MapName> [tileX tileY] "
+            "[--locale enUS] [--render out.png]\n"
+            "  The first argument may be a Data dir, a WoW install root (next to\n"
+            "  WoW.exe), or '.' to auto-detect from the current directory.\n", argv[0]);
         return 2;
     }
 
-    const fs::path dataDir = argv[1];
+    const fs::path dataHint = argv[1];
     const std::string map  = argv[2];
 
     int  onlyX = -1, onlyY = -1;
     bool single = false;
-    std::string locale = "enUS";
+    std::string locale;            // empty -> auto-detect
     std::string renderPng;
 
     for (int i = 3; i < argc; ++i) {
@@ -171,6 +152,20 @@ int main(int argc, char** argv) {
             onlyY  = std::stoi(argv[++i]);
             single = true;
         }
+    }
+
+    // Resolve the Data directory: accept a Data dir, a WoW install root (next to
+    // WoW.exe), or any ancestor of one. Fall back to the literal hint so the
+    // "no archives" error below still reports something useful.
+    fs::path dataDir = wf::findDataDir(dataHint);
+    if (dataDir.empty()) dataDir = dataHint;
+    else if (dataDir != dataHint)
+        std::printf("Auto-detected Data dir: %s\n", dataDir.string().c_str());
+
+    if (locale.empty()) {
+        locale = wf::detectLocale(dataDir);
+        if (locale.empty()) locale = "enUS";   // sensible default
+        else std::printf("Auto-detected locale: %s\n", locale.c_str());
     }
 
     std::printf("Opening archive chain from %s (locale %s):\n",

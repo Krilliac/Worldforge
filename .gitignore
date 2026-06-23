@@ -2,6 +2,22 @@
 /build/
 build/
 
+# In-source CMake build artifacts (when configured at the repo root)
+/CMakeCache.txt
+/CMakeFiles/
+/cmake_install.cmake
+/Makefile
+/_deps/
+/wforge-dump
+/wforge-tests
+/wforge-stub-server
+/wforge-*-demo
+/wforge-editor-tests
+/wforge-editor-headless
+/wforge-model-viewer
+*.o
+*.a
+
 # Generated render output (reference is render_sample.png, committed)
 /worldforge_terrain.png
 /worldforge_debug.png
