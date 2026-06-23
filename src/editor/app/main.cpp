@@ -191,7 +191,8 @@ int main() {
         bool gizmoActive = viewport.draw((ImTextureID)(intptr_t)sceneTex, giz, &selected,
                                          &view, &mesh, &tileScene, &sceneSel);
         debugVis.draw(debug);
-        inspector.draw(view, &sceneSel); // live entities + selected static object
+        // live entities + selected static object + spawn/despawn authoring ops
+        inspector.draw(view, &sceneSel, &outgoing);
 
         // Dragging the gizmo on a selected entity relocates it on the server.
         {

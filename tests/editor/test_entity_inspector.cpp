@@ -90,4 +90,24 @@ void test_entity_inspector() {
         ImGui::Render();
         CHECK(ImGui::GetDrawData()->Valid);    // scene-object section drew fine
     }
+
+    // --- authoring op builders ----------------------------------------------
+    panel.spawnEntry = 299; panel.spawnMapId = 1;
+    SpawnCreature sp = panel.spawnOp({10, 20, 30});
+    CHECK(sp.entry == 299 && sp.mapId == 1);
+    CHECK_APPROX(sp.pos.y, 20.0f);
+    CHECK(sp.opId == 1);
+    Despawn dp = panel.despawnOp(0xF130000000000005ull);
+    CHECK(dp.guid == 0xF130000000000005ull && dp.opId == 2);   // opId sequences
+
+    // The authoring section draws (with an ops sink) without crashing.
+    {
+        WorldPick sceneSel; sceneSel.kind = WorldPick::Kind::Terrain;
+        sceneSel.point = {1,2,3};
+        std::vector<std::vector<uint8_t>> ops;
+        ImGui::NewFrame();
+        panel.draw(view, &sceneSel, &ops);
+        ImGui::Render();
+        CHECK(ImGui::GetDrawData()->Valid);
+    }
 }

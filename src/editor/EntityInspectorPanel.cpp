@@ -36,7 +36,21 @@ const char* EntityInspectorPanel::sceneKindName(WorldPick::Kind kind) {
     }
 }
 
-uint64_t EntityInspectorPanel::draw(WorldView& view, const WorldPick* sceneSel) {
+SpawnCreature EntityInspectorPanel::spawnOp(const Vec3& at) {
+    SpawnCreature s;
+    s.entry = static_cast<uint32_t>(spawnEntry);
+    s.mapId = static_cast<uint32_t>(spawnMapId);
+    s.pos = at; s.orientation = 0.0f; s.opId = nextOpId_++;
+    return s;
+}
+
+Despawn EntityInspectorPanel::despawnOp(uint64_t guid) {
+    Despawn d; d.guid = guid; d.opId = nextOpId_++;
+    return d;
+}
+
+uint64_t EntityInspectorPanel::draw(WorldView& view, const WorldPick* sceneSel,
+                                    std::vector<std::vector<uint8_t>>* ops) {
     ImGui::Begin("Entities");
 
     // --- a selected static scene object (terrain / doodad / WMO) -------------
@@ -129,6 +143,29 @@ uint64_t EntityInspectorPanel::draw(WorldView& view, const WorldPick* sceneSel) 
         ImGui::Text("Updates: %u   Last seen: %u ms", sel->updates, sel->lastSeenMs);
     } else {
         ImGui::TextDisabled("No selection -- click an entity above.");
+    }
+
+    // --- authoring: spawn at the picked point / despawn the selection --------
+    if (ops) {
+        ImGui::Separator();
+        ImGui::TextUnformatted("Authoring");
+        ImGui::InputInt("Entry", &spawnEntry);
+        ImGui::InputInt("Map",   &spawnMapId);
+
+        const bool canSpawn = sceneSel && sceneSel->hit();
+        if (!canSpawn) ImGui::BeginDisabled();
+        if (ImGui::Button("Spawn at pick") && canSpawn)
+            ops->push_back(encode(spawnOp(sceneSel->point)));
+        if (!canSpawn) ImGui::EndDisabled();
+        if (canSpawn)
+            ImGui::SameLine(), ImGui::Text("(%.0f, %.0f, %.0f)",
+                                           sceneSel->point.x, sceneSel->point.y, sceneSel->point.z);
+
+        const bool canDespawn = view.hasSelection();
+        if (!canDespawn) ImGui::BeginDisabled();
+        if (ImGui::Button("Despawn selected") && canDespawn)
+            ops->push_back(encode(despawnOp(view.selected())));
+        if (!canDespawn) ImGui::EndDisabled();
     }
 
     ImGui::End();
