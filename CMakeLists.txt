@@ -59,6 +59,7 @@ add_library(wforge STATIC
   src/picking.cpp
   src/bounds.cpp
   src/scene_pick.cpp
+  src/wmo_render.cpp
 )
 target_include_directories(wforge PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src

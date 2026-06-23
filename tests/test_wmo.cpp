@@ -1,5 +1,6 @@
 #include "test.hpp"
 #include "wmo.hpp"
+#include "wmo_render.hpp"
 
 #include <cstring>
 #include <vector>
@@ -159,4 +160,15 @@ void test_wmo() {
     CHECK(wg.triMaterial.size() == 1 && wg.triMaterial[0] == 1);
     CHECK(wg.batches.size() == 1);
     CHECK(wg.batches[0].indexCount == 3 && wg.batches[0].materialId == 1);
+
+    // ---------------- render parts ----------------
+    // The single triangle uses material 1 -> resolves to texture "B.blp", and
+    // carries the position/normal/UV the textured rasteriser needs.
+    WmoModel model; model.root = wr; model.groups.push_back(wg);
+    std::vector<WmoRenderPart> parts = wmoRenderParts(model);
+    CHECK(parts.size() == 1);
+    CHECK(parts[0].texture == "B.blp");
+    CHECK(parts[0].mesh.vertices.size() == 3 && parts[0].mesh.indices.size() == 3);
+    CHECK_APPROX(parts[0].mesh.vertices[1].position.x, 1.0f);
+    CHECK_APPROX(parts[0].mesh.vertices[0].normal.z, 1.0f);
 }

@@ -5,6 +5,7 @@
 #include "blp.hpp"
 #include "coords.hpp"
 #include "m2_render.hpp"
+#include "wmo_render.hpp"
 
 namespace wf {
 
@@ -28,6 +29,8 @@ Mat4 wmoMatrix(const WmoDef& w) {
 void TileScene::render(Framebuffer& fb, const Mat4& viewProj, Vec3 lightDir) const {
     terrain.renderTerrain(fb, viewProj, lightDir);
     for (const Inst& in : instances)
+        rasterTexMesh(fb, meshes[in.mesh], viewProj * in.transform, *textures[in.tex], lightDir);
+    for (const Inst& in : wmoRenderInstances)
         rasterTexMesh(fb, meshes[in.mesh], viewProj * in.transform, *textures[in.tex], lightDir);
     DebugDrawOptions opt; opt.depthTest = true;
     rasterDebug(fb, markers, viewProj, opt);
@@ -248,9 +251,18 @@ TileScene AssetLoader::buildTileScene(const std::string& map, int x, int y, bool
         Vec3 world = placementToWorld(Vec3{ w.pos[0], w.pos[1], w.pos[2] });
         ts.markers.cross(world, 4.0f, Rgba{120, 180, 255, 255}, DebugCategory::DoodadWire);
         if (auto wm = wmo(w.modelName)) {
+            Mat4 xform = wmoMatrix(w);
             Mesh pm = wmoPickMesh(*wm);
             if (!pm.indices.empty())
-                ts.wmoInstances.push_back({ std::move(pm), wmoMatrix(w), w.uniqueId });
+                ts.wmoInstances.push_back({ std::move(pm), xform, w.uniqueId });
+            // Textured render parts (one per material) -> the shared mesh/texture
+            // pools, drawn like doodads.
+            for (WmoRenderPart& part : wmoRenderParts(*wm)) {
+                if (part.mesh.indices.empty()) continue;
+                ts.meshes.push_back(std::move(part.mesh));
+                ts.textures.push_back(part.texture.empty() ? fallback() : texture(part.texture));
+                ts.wmoRenderInstances.push_back({ ts.meshes.size() - 1, ts.textures.size() - 1, xform });
+            }
         }
     }
 

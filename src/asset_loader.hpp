@@ -53,7 +53,8 @@ struct TileScene {
     std::vector<TexMesh>                      meshes;     // doodad/WMO meshes (owned)
     std::vector<std::shared_ptr<const Image>> textures;   // their textures (keep-alive)
     struct Inst { size_t mesh; size_t tex; Mat4 transform; };
-    std::vector<Inst> instances;
+    std::vector<Inst> instances;            // placed M2 doodads
+    std::vector<Inst> wmoRenderInstances;   // textured WMO parts (index into meshes/textures)
 
     // Placed WMO geometry (for per-triangle picking / wireframe). Kept as a plain
     // Mesh in WMO-local space + its MODF world transform + the placement id.

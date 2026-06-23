@@ -112,12 +112,20 @@ std::vector<uint8_t> makeMcnk() {
 // loading. Chunk magics are stored reversed on disk (chunk() reverses them).
 std::vector<uint8_t> makeWmoRoot() {
     std::vector<uint8_t> root, mohd;
-    p32(mohd,0); p32(mohd,1); p32(mohd,0); p32(mohd,0);   // nTex,nGroups,nPortals,nLights
+    p32(mohd,1); p32(mohd,1); p32(mohd,0); p32(mohd,0);   // nTex,nGroups,nPortals,nLights
     p32(mohd,0); p32(mohd,0); p32(mohd,0);                // doodadNames/Defs/Sets
     p32(mohd,0); p32(mohd,1);                             // ambColor, wmoID
     pf(mohd,0);pf(mohd,0);pf(mohd,0); pf(mohd,4);pf(mohd,4);pf(mohd,1);   // bbox
     p16(mohd,0); p16(mohd,0);
     chunk(root,"MOHD",mohd);
+    // One texture + one material referencing it, so a render part resolves to it.
+    std::vector<uint8_t> motx; for (char c : std::string("test.blp")) motx.push_back((uint8_t)c);
+    motx.push_back(0); while (motx.size()%4) motx.push_back(0);
+    chunk(root,"MOTX",motx);
+    std::vector<uint8_t> momt;
+    p32(momt,0); p32(momt,0); p32(momt,0); p32(momt,0);   // flags,shader,blend,diffuseOffset=0
+    for (int i=0;i<12;i++) p32(momt,0);
+    chunk(root,"MOMT",momt);
     std::vector<uint8_t> mogn; mogn.push_back(0); mogn.push_back(0);
     chunk(root,"MOGN",mogn);
     std::vector<uint8_t> mogi;
@@ -277,9 +285,14 @@ void test_asset() {
     CHECK(scene.wmoCount() == 1);
     CHECK(!scene.wmoInstances[0].mesh.indices.empty());
     CHECK(scene.wmoInstances[0].uniqueId == 2001);
-    CHECK(scene.meshes.size() == 1 && scene.textures.size() == 1);
+    // ...and a textured render part whose material resolves to our green BLP.
+    CHECK(scene.wmoRenderInstances.size() == 1);
+    CHECK(scene.textures[scene.wmoRenderInstances[0].tex].get() == t.get());
+    CHECK(!scene.meshes[scene.wmoRenderInstances[0].mesh].vertices.empty());
+    // Pools hold the doodad (index 0) + the WMO render part (index 1).
+    CHECK(scene.meshes.size() == 2 && scene.textures.size() == 2);
     CHECK(!scene.meshes[0].vertices.empty());
-    CHECK(scene.textures[0].get() == t.get());             // model's MTEX -> green BLP
+    CHECK(scene.textures[0].get() == t.get());             // doodad MTEX -> green BLP
 
     // The instance transform translates to the placement's world position.
     Vec3 world = placementToWorld(Vec3{100.f, 200.f, 300.f});
