@@ -50,8 +50,11 @@ Rgba sampleTextureWrap(const Image& tex, float u, float v);
 // sampling (UV wraps/repeats), modulated by directional + ambient lighting.
 // Texels with alpha < 8 are discarded (alpha-test) so cutout textures (foliage)
 // read correctly.
+// With alphaBlend, texels are composited over the framebuffer by their alpha and
+// do NOT write depth (translucent surfaces, e.g. WMO blend-mode >= 2); otherwise
+// it is the opaque alpha-tested path.
 void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
-                   const Image& texture, Vec3 lightDir);
+                   const Image& texture, Vec3 lightDir, bool alphaBlend = false);
 
 struct DebugDrawOptions {
     bool depthTest  = true;    // overlay respects the z-buffer (hidden by terrain)

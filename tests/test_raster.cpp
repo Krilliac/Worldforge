@@ -87,4 +87,29 @@ void test_raster() {
                 if (fb2.color.at(x,y).r || fb2.color.at(x,y).g) anyLit = true;
         CHECK(!anyLit);
     }
+
+    // ---- rasterTexMesh alpha-blend: a translucent quad composites over bg ----
+    {
+        Framebuffer fb(32, 32);
+        fb.clear(Rgba{0, 0, 200, 255});               // blue background
+        Mat4 mvp = Mat4::perspective(60.0, 1.0, 0.1, 100.0) *
+                   Mat4::lookAt({0,0,5}, {0,0,0}, {0,1,0});
+
+        // A camera-facing quad with a half-alpha red texture.
+        TexMesh q;
+        q.vertices = {
+            { {-2,-2,0}, {0,0,1}, {0,0} }, { {2,-2,0}, {0,0,1}, {1,0} },
+            { {2,2,0},   {0,0,1}, {1,1} }, { {-2,2,0}, {0,0,1}, {0,1} },
+        };
+        q.indices = { 0,1,2, 0,2,3 };
+        Image red(2,2);
+        for (auto& p : red.pixels) p = Rgba{255, 0, 0, 128};   // 50% alpha red
+
+        rasterTexMesh(fb, q, mvp, red, {0,0,1}, /*alphaBlend*/true);
+
+        // Centre pixel: red over blue at ~50% -> noticeable red AND surviving blue.
+        Rgba c = fb.color.at(16,16);
+        CHECK(c.r > 90 && c.b > 70);                   // blend of both, not pure either
+        CHECK(c.r > c.b);                              // the red is on top
+    }
 }

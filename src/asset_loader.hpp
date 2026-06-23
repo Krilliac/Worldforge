@@ -52,7 +52,7 @@ struct TileScene {
     TileRender terrain;
     std::vector<TexMesh>                      meshes;     // doodad/WMO meshes (owned)
     std::vector<std::shared_ptr<const Image>> textures;   // their textures (keep-alive)
-    struct Inst { size_t mesh; size_t tex; Mat4 transform; };
+    struct Inst { size_t mesh; size_t tex; Mat4 transform; bool blend = false; };
     std::vector<Inst> instances;            // placed M2 doodads
     std::vector<Inst> wmoRenderInstances;   // textured WMO parts (index into meshes/textures)
 

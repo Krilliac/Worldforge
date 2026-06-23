@@ -1,5 +1,6 @@
 #include "wmo_render.hpp"
 
+#include <algorithm>
 #include <map>
 
 namespace wf {
@@ -31,10 +32,19 @@ std::vector<WmoRenderPart> wmoRenderParts(const WmoModel& wmo) {
     for (auto& kv : byMaterial) {
         WmoRenderPart part;
         part.mesh = std::move(kv.second);
-        if (kv.first < wmo.root.materials.size())
-            part.texture = wmo.root.materials[kv.first].diffuseTexture;
+        if (kv.first < wmo.root.materials.size()) {
+            const WmoMaterial& m = wmo.root.materials[kv.first];
+            part.texture   = m.diffuseTexture;
+            part.blendMode = m.blendMode;
+            part.flags     = m.flags;
+        }
         parts.push_back(std::move(part));
     }
+    // Opaque / alpha-test first, alpha-blended (>=2) last (painter's order).
+    std::stable_sort(parts.begin(), parts.end(),
+                     [](const WmoRenderPart& a, const WmoRenderPart& b){
+                         return (a.blendMode >= 2 ? 1 : 0) < (b.blendMode >= 2 ? 1 : 0);
+                     });
     return parts;
 }
 

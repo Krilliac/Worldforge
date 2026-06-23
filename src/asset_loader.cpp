@@ -31,7 +31,8 @@ void TileScene::render(Framebuffer& fb, const Mat4& viewProj, Vec3 lightDir) con
     for (const Inst& in : instances)
         rasterTexMesh(fb, meshes[in.mesh], viewProj * in.transform, *textures[in.tex], lightDir);
     for (const Inst& in : wmoRenderInstances)
-        rasterTexMesh(fb, meshes[in.mesh], viewProj * in.transform, *textures[in.tex], lightDir);
+        rasterTexMesh(fb, meshes[in.mesh], viewProj * in.transform, *textures[in.tex],
+                      lightDir, in.blend);
     DebugDrawOptions opt; opt.depthTest = true;
     rasterDebug(fb, markers, viewProj, opt);
 }
@@ -259,9 +260,11 @@ TileScene AssetLoader::buildTileScene(const std::string& map, int x, int y, bool
             // pools, drawn like doodads.
             for (WmoRenderPart& part : wmoRenderParts(*wm)) {
                 if (part.mesh.indices.empty()) continue;
+                bool blended = part.blendMode >= 2;        // alpha-blended material
                 ts.meshes.push_back(std::move(part.mesh));
                 ts.textures.push_back(part.texture.empty() ? fallback() : texture(part.texture));
-                ts.wmoRenderInstances.push_back({ ts.meshes.size() - 1, ts.textures.size() - 1, xform });
+                ts.wmoRenderInstances.push_back(
+                    { ts.meshes.size() - 1, ts.textures.size() - 1, xform, blended });
             }
         }
     }

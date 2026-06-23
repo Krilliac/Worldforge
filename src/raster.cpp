@@ -135,7 +135,7 @@ Rgba sampleTextureWrap(const Image& tex, float u, float v) {
 }
 
 void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
-                   const Image& tex, Vec3 lightDir) {
+                   const Image& tex, Vec3 lightDir, bool alphaBlend) {
     int W = fb.color.width, H = fb.color.height;
     Vec3 L = normalize(lightDir);
 
@@ -200,9 +200,18 @@ void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                 c.r = clamp8(texel.r * light);
                 c.g = clamp8(texel.g * light);
                 c.b = clamp8(texel.b * light);
-                c.a = 255;
-                dref = z;
-                fb.color.at(px, py) = c;
+                if (alphaBlend) {
+                    // Composite over the framebuffer; translucent -> no depth write.
+                    float a = texel.a / 255.0f;
+                    Rgba& d = fb.color.at(px, py);
+                    d.r = clamp8(c.r * a + d.r * (1.0f - a));
+                    d.g = clamp8(c.g * a + d.g * (1.0f - a));
+                    d.b = clamp8(c.b * a + d.b * (1.0f - a));
+                } else {
+                    c.a = 255;
+                    dref = z;
+                    fb.color.at(px, py) = c;
+                }
             }
         }
     }

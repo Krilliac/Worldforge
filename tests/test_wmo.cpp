@@ -171,4 +171,20 @@ void test_wmo() {
     CHECK(parts[0].mesh.vertices.size() == 3 && parts[0].mesh.indices.size() == 3);
     CHECK_APPROX(parts[0].mesh.vertices[1].position.x, 1.0f);
     CHECK_APPROX(parts[0].mesh.vertices[0].normal.z, 1.0f);
+
+    // Two materials, one alpha-blended: parts come back opaque-first, with the
+    // material's blend mode + texture resolved.
+    WmoModel mm;
+    mm.root.materials.resize(2);
+    mm.root.materials[0].blendMode = 0; mm.root.materials[0].diffuseTexture = "opaque.blp";
+    mm.root.materials[1].blendMode = 3; mm.root.materials[1].diffuseTexture = "glass.blp";
+    WmoGroup g2;
+    g2.vertices = { {0,0,0},{1,0,0},{0,1,0}, {2,0,0},{3,0,0},{2,1,0} };
+    g2.indices  = { 0,1,2, 3,4,5 };
+    g2.triMaterial = { 1, 0 };                  // tri0 -> glass (blend), tri1 -> opaque
+    mm.groups.push_back(g2);
+    std::vector<WmoRenderPart> p2 = wmoRenderParts(mm);
+    CHECK(p2.size() == 2);
+    CHECK(p2[0].blendMode == 0 && p2[0].texture == "opaque.blp");   // opaque first
+    CHECK(p2[1].blendMode == 3 && p2[1].texture == "glass.blp");    // blended last
 }
