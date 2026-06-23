@@ -28,6 +28,28 @@ enum Opcode : uint32_t {
     CMSG_PLAYER_LOGIN   = 0x03D,
     SMSG_UPDATE_OBJECT  = 0x0A9,
     SMSG_MONSTER_MOVE   = 0x0DD,
+
+    // "The client already knows how to render it" server opcodes -- spectacle /
+    // atmosphere / HUD that need only an id or a short body. Values verified for
+    // build 5875 against mangos-zero and cmangos Opcodes.h. Builders in
+    // clientfx.hpp. NB: SMSG_OVERRIDE_LIGHT (0x411) is deliberately absent -- it
+    // is a TBC+ opcode with no handler in a 1.12.1 client.
+    SMSG_LOGIN_SETTIMESPEED     = 0x042,
+    SMSG_GAMEOBJECT_CUSTOM_ANIM = 0x0B3,
+    SMSG_TRIGGER_CINEMATIC      = 0x0FA,
+    SMSG_NOTIFICATION           = 0x1CB,
+    MSG_MINIMAP_PING            = 0x1D5,
+    SMSG_PLAY_SPELL_VISUAL      = 0x1F3,
+    SMSG_PLAY_SPELL_IMPACT      = 0x1F7,
+    SMSG_ZONE_UNDER_ATTACK      = 0x254,
+    SMSG_PLAY_MUSIC             = 0x277,
+    SMSG_PLAY_OBJECT_SOUND      = 0x278,
+    SMSG_SERVER_MESSAGE         = 0x291,
+    SMSG_AREA_TRIGGER_MESSAGE   = 0x2B8,
+    SMSG_INIT_WORLD_STATES      = 0x2C2,
+    SMSG_UPDATE_WORLD_STATE     = 0x2C3,
+    SMSG_PLAY_SOUND             = 0x2D2,
+    SMSG_WEATHER                = 0x2F4,
 };
 
 // Rolling add/xor header cipher. Send and receive directions keep independent

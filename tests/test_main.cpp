@@ -15,6 +15,7 @@ void test_bridge();
 void test_db_export();
 void test_debugdraw();
 void test_modelmesh();
+void test_clientfx();
 
 int main() {
     test_math();
@@ -32,6 +33,7 @@ int main() {
     test_db_export();
     test_debugdraw();
     test_modelmesh();
+    test_clientfx();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;
