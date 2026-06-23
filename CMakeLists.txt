@@ -147,6 +147,7 @@ if(WFORGE_EDITOR)
     src/editor/AtmospherePanel.cpp
     src/editor/DebugVisPanel.cpp
     src/editor/GizmoController.cpp
+    src/editor/SoftwareImGui.cpp
   )
   target_include_directories(wforge-editor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(wforge-editor PUBLIC wforge imgui)
@@ -158,10 +159,15 @@ if(WFORGE_EDITOR)
     tests/editor/test_editor_main.cpp
     tests/editor/test_panels.cpp
     tests/editor/test_gizmo_controller.cpp
+    tests/editor/test_software_imgui.cpp
   )
   target_link_libraries(wforge-editor-tests PRIVATE wforge-editor)
   target_include_directories(wforge-editor-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
   add_test(NAME editor COMMAND wforge-editor-tests)
+
+  # Headless editor: composites the CPU scene + CPU ImGui to a PNG (no GPU).
+  add_executable(wforge-editor-headless src/editor/headless_main.cpp)
+  target_link_libraries(wforge-editor-headless PRIVATE wforge-editor)
 endif()
 
 # Runnable windowed editor: ImGui GLFW + OpenGL3 backends (bundled in the

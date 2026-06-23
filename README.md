@@ -8,7 +8,7 @@ pair with a mangos-zero server: load real client assets, render the world in a
 running server while connected retail clients see the edits.**
 
 Every parser, transform, and protocol primitive here is **compiled and
-unit-tested in-tree** (114→521 core + 27 editor checks). Where a part needs a GPU/display or your
+unit-tested in-tree** (114→521 core + 32 editor checks). Where a part needs a GPU/display or your
 mangos checkout to run, it is implemented as far as it can be verified and the
 boundary is stated plainly (see `ARCHITECTURE.md`).
 
@@ -18,12 +18,18 @@ boundary is stated plainly (see `ARCHITECTURE.md`).
 git clone --recurse-submodules <repo>          # Dear ImGui is a submodule
 cmake -S . -B build
 cmake --build build -j$(nproc)
-./build/wforge-tests          # core unit tests
-./build/wforge-editor-tests   # editor panel tests (headless ImGui)
-./build/wforge-raster-demo    # render procedural terrain -> PNG
-./build/wforge-debug-demo     # render terrain + debug overlay -> PNG
+./build/wforge-tests             # core unit tests
+./build/wforge-editor-tests      # editor panel tests (headless ImGui)
+./build/wforge-raster-demo       # render procedural terrain -> PNG
+./build/wforge-debug-demo        # render terrain + debug overlay -> PNG
+./build/wforge-editor-headless   # render the whole editor on the CPU -> PNG
 ./build/wforge-dump <DataDir> <Map> [tileX tileY]   # inspect a real MPQ tree
 ```
+
+No GPU? The editor has a **CPU/NullRHI fallback**: the software rasteriser
+(`rhi_software`) draws the 3D scene and a software ImGui backend
+(`editor/SoftwareImGui`) draws the UI, so `wforge-editor-headless` composites the
+whole editor to a PNG with no display (the analog of Spark's llvmpipe path).
 
 If you already cloned without submodules: `git submodule update --init --recursive`.
 The ImGui editor panels build headlessly (`WFORGE_EDITOR`, ON). The runnable
@@ -69,7 +75,7 @@ automatically via CMake FetchContent.
 | `debugdraw.*`     | category-tagged debug primitives (waypoints/collision/triggers/wireframe) |
 | `modelmesh.*`     | M2 / WMO geometry → renderer Mesh (doodad wireframe)           |
 | `byte_writer.hpp` | little-endian write counterpart to `byte_reader.hpp`           |
-| `editor/`         | Dear ImGui panels — Atmosphere (FX) + DebugVis + ImGuizmo gizmo |
+| `editor/`         | ImGui panels (Atmosphere/DebugVis) + ImGuizmo + software ImGui backend |
 
 ## Status at a glance
 

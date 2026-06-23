@@ -5,6 +5,7 @@ build/
 # Generated render output (reference is render_sample.png, committed)
 /worldforge_terrain.png
 /worldforge_debug.png
+/worldforge_editor.png
 
 # Editor / OS cruft
 .DS_Store
