@@ -9,6 +9,8 @@ void test_wmo();
 void test_anim();
 void test_proto();
 void test_raster();
+void test_editing();
+void test_gizmo();
 
 int main() {
     test_math();
@@ -20,6 +22,8 @@ int main() {
     test_anim();
     test_proto();
     test_raster();
+    test_editing();
+    test_gizmo();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;
