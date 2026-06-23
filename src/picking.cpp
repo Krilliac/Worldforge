@@ -1,5 +1,6 @@
 #include "picking.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace wf {
@@ -32,11 +33,44 @@ float pickRadius(const EntityState& s, float pad, float fallback) {
     return (s.boundingRadius > 0.0f ? s.boundingRadius : fallback) + pad;
 }
 
+float rayObb(const Ray& r, const Vec3& pos, float yaw, const Vec3& localMin, const Vec3& localMax) {
+    // Transform the ray into the box's local frame (un-yaw about +Z, untranslate).
+    const float c = std::cos(yaw), s = std::sin(yaw);
+    Vec3 d = r.origin - pos;
+    Vec3 o{  d.x * c + d.y * s, -d.x * s + d.y * c, d.z };          // Rz(-yaw) * d
+    Vec3 dir{ r.dir.x * c + r.dir.y * s, -r.dir.x * s + r.dir.y * c, r.dir.z };
+
+    float tmin = -1e30f, tmax = 1e30f;
+    const float lo[3] = { localMin.x, localMin.y, localMin.z };
+    const float hi[3] = { localMax.x, localMax.y, localMax.z };
+    const float oo[3] = { o.x, o.y, o.z };
+    const float dd[3] = { dir.x, dir.y, dir.z };
+    for (int i = 0; i < 3; ++i) {
+        if (std::fabs(dd[i]) < 1e-8f) {
+            if (oo[i] < lo[i] || oo[i] > hi[i]) return -1.0f;      // parallel & outside
+        } else {
+            float inv = 1.0f / dd[i];
+            float t1 = (lo[i] - oo[i]) * inv, t2 = (hi[i] - oo[i]) * inv;
+            if (t1 > t2) { float tmp = t1; t1 = t2; t2 = tmp; }
+            tmin = std::max(tmin, t1);
+            tmax = std::min(tmax, t2);
+            if (tmin > tmax) return -1.0f;
+        }
+    }
+    if (tmax < 0.0f) return -1.0f;                                 // box behind the ray
+    return tmin >= 0.0f ? tmin : tmax;                            // 0 if origin inside
+}
+
 PickResult pickEntity(const Ray& r, const WorldView& view, float pad, float fallback) {
     PickResult best;
     float bestT = 1e30f;
     for (const LiveEntity& le : view.entities()) {
-        float t = raySphere(r, le.state.pos, pickRadius(le.state, pad, fallback));
+        const EntityState& s = le.state;
+        // Use the real model box when present (tight WMO/long-object picking),
+        // otherwise the bounding sphere.
+        float t = s.hasBox()
+                    ? rayObb(r, s.pos, s.orientation, s.aabbMin, s.aabbMax)
+                    : raySphere(r, s.pos, pickRadius(s, pad, fallback));
         if (t >= 0.0f && t < bestT) {
             bestT = t;
             best.kind = PickResult::Kind::Entity;

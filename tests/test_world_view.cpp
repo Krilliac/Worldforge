@@ -81,6 +81,19 @@ void test_world_view() {
     // Colours distinguish kinds.
     CHECK(WorldView::kindColor(1).b > WorldView::kindColor(0).b);   // player bluer
 
+    // An entity with a model box draws its oriented box (extra edges).
+    {
+        WorldView vbox; EntityState eb; eb.guid = 1; eb.pos = {0,0,0};
+        eb.aabbMin = {-1,-1,-1}; eb.aabbMax = {1,1,1};
+        vbox.apply(eb);
+        DebugDraw db; vbox.buildDebug(db);
+        WorldView vno; EntityState en; en.guid = 2; en.pos = {0,0,0};
+        vno.apply(en);                         // no box
+        DebugDraw dn; vno.buildDebug(dn);
+        CHECK(db.categoryBuffers(DebugCategory::Marker).lines.size() >
+              dn.categoryBuffers(DebugCategory::Marker).lines.size());
+    }
+
     // --- server status ingest via frame -------------------------------------
     CHECK(!view.hasServerStatus());
     ServerStatus ss; ss.simTimeMs = 5000; ss.entityCount = 9; ss.weatherType = 1;

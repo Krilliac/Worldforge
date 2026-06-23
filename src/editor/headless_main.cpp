@@ -65,9 +65,17 @@ int main() {
         { 301, { place(70,60),   place(60,120),  place(110,110) } },
         { 302, { place(250,120), place(260,180), place(200,150) } },
     };
-    for (const Npc& n : npcs) { uint64_t g = sim.spawnCreature(n.entry, 0, n.wp[0], 0); sim.setWaypoints(g, n.wp); }
+    bool firstNpc = true;
+    for (const Npc& n : npcs) {
+        uint64_t g = sim.spawnCreature(n.entry, 0, n.wp[0], 0);
+        sim.setWaypoints(g, n.wp);
+        // Give one NPC a real model box (as AssetLoader::modelBounds would yield)
+        // so its tight oriented selectable bounds render in the overlay.
+        if (firstNpc) { sim.setModelBox(g, {-1.5f,-1.5f,0}, {1.5f,1.5f,6.0f}); firstNpc = false; }
+    }
     uint64_t player = sim.spawnPlayer(0, place(150,150), 0, "Worldforge");
     sim.setWaypoints(player, { place(150,150), place(150,240), place(220,240) });
+    sim.setModelBox(player, {-1.0f,-1.0f,0}, {1.0f,1.0f,3.0f});   // a humanoid box
     for (int i = 0; i < 27; ++i) sim.tick(0.2f);   // let them spread along the paths
 
     WorldView view;
@@ -75,7 +83,9 @@ int main() {
         EntityState e;
         e.guid = o.guid; e.kind = static_cast<uint8_t>(o.kind);
         e.entry = o.entry; e.mapId = o.mapId; e.pos = o.pos;
-        e.orientation = o.orientation; e.moving = o.moving; e.speed = o.speed; e.name = o.name;
+        e.orientation = o.orientation; e.moving = o.moving; e.speed = o.speed;
+        e.boundingRadius = o.radius; e.aabbMin = o.boundsMin; e.aabbMax = o.boundsMax;
+        e.name = o.name;
         view.apply(e, static_cast<uint32_t>(sim.simTimeMs()));
     }
     view.select(player);

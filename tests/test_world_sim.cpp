@@ -82,6 +82,11 @@ void test_world_sim() {
     CHECK(w.setBounds(s, 8.0f));
     CHECK_APPROX(w.find(s)->radius, 8.0f);
     CHECK(!w.setBounds(999999, 1.0f));                 // unknown guid
+
+    // A model box (e.g. derived from AssetLoader::modelBounds) for tight picking.
+    CHECK(w.setModelBox(s, {-1,-1,0}, {1,1,4}));
+    CHECK_APPROX(w.find(s)->boundsMax.z, 4.0f);
+    CHECK(!w.setModelBox(999999, {0,0,0}, {1,1,1}));   // unknown guid
     std::vector<SimObject> snap = w.snapshot();
     CHECK(snap.size() == 3);
     for (size_t i = 1; i < snap.size(); ++i) CHECK(snap[i-1].guid < snap[i].guid);

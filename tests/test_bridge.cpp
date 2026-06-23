@@ -138,7 +138,8 @@ void test_bridge() {
     EntityState es;
     es.guid = 0xF130000000000099ull; es.kind = 1; es.entry = 1234; es.mapId = 0;
     es.pos = {-9440.5f, 70.25f, 56.0f}; es.orientation = 2.5f;
-    es.moving = true; es.speed = 7.0f; es.boundingRadius = 3.25f; es.name = "Thrall";
+    es.moving = true; es.speed = 7.0f; es.boundingRadius = 3.25f;
+    es.aabbMin = {-2,-3,-1}; es.aabbMax = {2,3,9}; es.name = "Thrall";
     CHECK(readFrame(encode(es), fr, used) && fr.opcode == EDITOR_ENTITY_STATE);
     EntityState eb = decodeEntityState(fr.payload);
     CHECK(eb.guid == es.guid && eb.kind == 1 && eb.entry == 1234);
@@ -147,6 +148,9 @@ void test_bridge() {
     CHECK(eb.moving && eb.name == "Thrall");
     CHECK_APPROX(eb.speed, 7.0f);
     CHECK_APPROX(eb.boundingRadius, 3.25f);
+    CHECK(eb.hasBox());
+    CHECK_APPROX(eb.aabbMin.y, -3.0f);
+    CHECK_APPROX(eb.aabbMax.z, 9.0f);
 
     EntityRemove er; er.guid = es.guid;
     CHECK(readFrame(encode(er), fr, used) && fr.opcode == EDITOR_ENTITY_REMOVE);

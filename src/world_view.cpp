@@ -99,6 +99,23 @@ void WorldView::buildDebug(DebugDraw& dd) const {
         Vec3 dir{ std::cos(s.orientation), std::sin(s.orientation), 0.0f };
         dd.arrow(s.pos, s.pos + dir * (size + 1.0f), col, DebugCategory::Marker);
 
+        // If the entity carries a real model box, draw it oriented (the tight
+        // selectable bounds), otherwise the marker/arrow above stands in.
+        if (s.hasBox()) {
+            Vec3 lc{ (s.aabbMin.x + s.aabbMax.x) * 0.5f,
+                     (s.aabbMin.y + s.aabbMax.y) * 0.5f,
+                     (s.aabbMin.z + s.aabbMax.z) * 0.5f };
+            float cy = std::cos(s.orientation), sy = std::sin(s.orientation);
+            Vec3 worldC{ s.pos.x + lc.x * cy - lc.y * sy,
+                         s.pos.y + lc.x * sy + lc.y * cy,
+                         s.pos.z + lc.z };
+            Vec3 half{ (s.aabbMax.x - s.aabbMin.x) * 0.5f,
+                       (s.aabbMax.y - s.aabbMin.y) * 0.5f,
+                       (s.aabbMax.z - s.aabbMin.z) * 0.5f };
+            Quat rot{ 0.0f, 0.0f, std::sin(s.orientation * 0.5f), std::cos(s.orientation * 0.5f) };
+            dd.box(worldC, half, rot, col, DebugCategory::Marker);
+        }
+
         // Highlight the selection with a ring so it's easy to find.
         if (sel) dd.circle(s.pos, Vec3{0,0,1}, size + 1.5f, Rgba{255,255,255,255},
                            DebugCategory::Marker);

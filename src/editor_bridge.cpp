@@ -177,6 +177,7 @@ std::vector<uint8_t> encode(const EntityState& e) {
     w.u64(e.guid); w.u8(e.kind); w.u32(e.entry); w.u32(e.mapId);
     putVec3(w, e.pos); w.f32(e.orientation); w.u8(e.moving ? 1 : 0); w.f32(e.speed);
     w.f32(e.boundingRadius);
+    putVec3(w, e.aabbMin); putVec3(w, e.aabbMax);
     putStr(w, e.name);
     return frame(EDITOR_ENTITY_STATE, w.data());
 }
@@ -189,6 +190,7 @@ EntityState decodeEntityState(const std::vector<uint8_t>& p) {
     e.guid = r.u64(); e.kind = r.u8(); e.entry = r.u32(); e.mapId = r.u32();
     e.pos = getVec3(r); e.orientation = r.f32(); e.moving = r.u8() != 0; e.speed = r.f32();
     e.boundingRadius = r.f32();
+    e.aabbMin = getVec3(r); e.aabbMax = getVec3(r);
     e.name = getStr(r);
     return e;
 }

@@ -62,6 +62,27 @@ void test_picking() {
     CHECK(pe.guid == 200);                                  // nearest wins
     CHECK_APPROX(pe.distance, 8.0f);                        // 10 - radius 2
 
+    // --- ray vs oriented box (tight WMO/long-object picking) ----------------
+    // A box long in local +X, placed at (20,0,0). At yaw 0 it extends to world
+    // x in [20,30] (front at 20); rotated 180 deg it extends to [10,20] (front
+    // at 10) -- so the rotation is actually applied.
+    Vec3 lo{0,-1,-1}, hi{10,1,1};
+    CHECK_APPROX(rayObb(c, Vec3{20,0,0}, 0.0f, lo, hi), 20.0f);
+    CHECK_APPROX(rayObb(c, Vec3{20,0,0}, 3.14159265f, lo, hi), 10.0f);
+    CHECK(rayObb(c, Vec3{20,5,0}, 0.0f, lo, hi) < 0.0f);   // box offset off the ray
+
+    // pickEntity uses the box when an entity carries one.
+    {
+        WorldView vb;
+        EntityState eb; eb.guid = 0x55; eb.pos = {20,0,0}; eb.orientation = 0.0f;
+        eb.aabbMin = {0,-1,-1}; eb.aabbMax = {10,1,1};
+        CHECK(eb.hasBox());
+        vb.apply(eb);
+        PickResult pr = pickEntity(c, vb, 0.0f);
+        CHECK(pr.hit() && pr.guid == 0x55);
+        CHECK_APPROX(pr.distance, 20.0f);                  // box front, not a sphere
+    }
+
     // --- per-entity bounds: a big object is clickable where a small one isn't -
     // Both sit 4 yards off the ray's axis at x=30.
     WorldView wbig;   wbig.apply(mk(1, {30,4,0}, 6.0f));    // big bounds -> hit

@@ -94,7 +94,14 @@ struct EntityState {
     bool        moving = false;
     float       speed  = 0.0f;
     float       boundingRadius = 0.0f;   // selectable/model radius (0 = unknown)
+    Vec3        aabbMin;                  // model-local box (degenerate = none),
+    Vec3        aabbMax;                  // placed at pos + yaw(orientation)
     std::string name;
+
+    // True when a real model box was supplied (use OBB picking, else the sphere).
+    bool hasBox() const {
+        return aabbMax.x > aabbMin.x || aabbMax.y > aabbMin.y || aabbMax.z > aabbMin.z;
+    }
 };
 struct EntityRemove { uint64_t guid = 0; };
 

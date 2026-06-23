@@ -67,6 +67,14 @@ bool WorldSim::setBounds(uint64_t guid, float radius) {
     return true;
 }
 
+bool WorldSim::setModelBox(uint64_t guid, const Vec3& localMin, const Vec3& localMax) {
+    auto it = objects_.find(guid);
+    if (it == objects_.end()) return false;
+    it->second.boundsMin = localMin;
+    it->second.boundsMax = localMax;
+    return true;
+}
+
 size_t WorldSim::tick(float dt) {
     if (dt < 0.0f) dt = 0.0f;
     simTimeMs_ += static_cast<uint64_t>(dt * 1000.0f + 0.5f);

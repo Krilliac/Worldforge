@@ -27,6 +27,10 @@ Ray screenRay(const Vec3& eye, const Vec3& forward, const Vec3& right, const Vec
 // (Ray-triangle / ray-mesh come from gizmo.hpp: rayTriangle / pickMesh.)
 float raySphere(const Ray& r, const Vec3& center, float radius);
 
+// Ray vs oriented box: the local AABB [localMin,localMax] placed at `pos` and
+// yawed about +Z by `yaw`. Nearest positive hit distance, or < 0 for a miss.
+float rayObb(const Ray& r, const Vec3& pos, float yaw, const Vec3& localMin, const Vec3& localMax);
+
 // What a click resolved to.
 struct PickResult {
     enum class Kind { None, Entity, Terrain };

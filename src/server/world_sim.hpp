@@ -30,6 +30,8 @@ struct SimObject {
     float       orientation = 0.0f;
     float       speed   = 5.0f;             // yards/sec while patrolling
     float       radius  = 1.5f;             // selectable/model bounding radius
+    Vec3        boundsMin;                   // model-local box (degenerate = none)
+    Vec3        boundsMax;
     bool        moving  = false;            // advanced by the last tick
     std::vector<Vec3> waypoints;
     size_t      wpIndex = 0;                // current target waypoint
@@ -58,6 +60,7 @@ public:
     bool setWaypoints(uint64_t guid, const std::vector<Vec3>& path);
     bool setSpeed(uint64_t guid, float speed);
     bool setBounds(uint64_t guid, float radius);   // selectable/model radius
+    bool setModelBox(uint64_t guid, const Vec3& localMin, const Vec3& localMax);
 
     // Advance the world by `dt` seconds: every object with a patrol path walks
     // toward its next waypoint at its speed, looping, facing its direction of
