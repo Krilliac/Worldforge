@@ -326,11 +326,13 @@ Status: ✅ done · ◻ remaining (GPU/display- or mangos-gated, the stated ceil
    interface on OpenGL 3.3 (FBO + shader + readback), gated `WFORGE_RHI_GL` — it
    needs a GL context/loader so it builds on a desktop, not headless CI. The
    software device is the runtime-verified oracle. *(ARCHITECTURE.md §2.)*
-2. ◑ **ImGui editor shell** — ✅ Dear ImGui vendored (submodule); `wforge-editor`
-   panels (`AtmospherePanel`, `DebugVisPanel`) build headlessly and are smoke-
-   tested (`wforge-editor-tests`), gated by `WFORGE_EDITOR`. ◻ The runnable
-   windowed shell (GLFW + GL3 backend, dockspace/theme, viewport) is
-   `WFORGE_EDITOR_APP` (OFF) — needs a window/GL context. ImGuizmo still to add.
+2. ✅ **ImGui editor shell** — Dear ImGui (docking branch) + ImGuizmo vendored;
+   `AtmospherePanel`, `DebugVisPanel`, an embedded `ViewportPanel` (CPU-rendered
+   scene + gizmo), and a WASD fly `Camera`, all headless-tested. A **software
+   ImGui backend** + the software rasteriser give a CPU/NullRHI fallback, so
+   `wforge-editor-headless` composites the whole editor to a PNG with no GPU. The
+   runnable windowed shell (GLFW + GL3, dockspace) is `WFORGE_EDITOR_APP` (OFF,
+   desktop). Remaining: bridge the panels' emitted ops to a live socket.
 3. ✅ **MCAL write path** — `encodeAlphaMap` / `packAlphaLayers` (inverse of
    `decodeAlphaMap`); round-trip tested. *(Renderer still owes the 63→64 edge fix
    at draw time.)*
