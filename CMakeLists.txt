@@ -43,6 +43,7 @@ add_library(wforge STATIC
   src/dbc_defs.cpp
   src/gridmap.cpp
   src/navmesh.cpp
+  src/vmap.cpp
   src/rhi_software.cpp
 )
 target_include_directories(wforge PUBLIC

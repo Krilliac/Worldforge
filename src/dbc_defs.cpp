@@ -12,7 +12,40 @@ float fieldF32(const Dbc& dbc, uint32_t rec, uint32_t field) {
     std::memcpy(&f, &bits, sizeof(f));
     return f;
 }
+void put32(std::vector<uint8_t>& b, uint32_t v) {
+    for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xFF));
+}
 } // namespace
+
+uint32_t DbcBuilder::addString(const std::string& s) {
+    if (s.empty()) return 0;
+    auto it = stringOffsets_.find(s);
+    if (it != stringOffsets_.end()) return it->second;
+    uint32_t off = static_cast<uint32_t>(strings_.size());
+    stringOffsets_.emplace(s, off);
+    strings_ += s;
+    strings_.push_back('\0');
+    return off;
+}
+
+void DbcBuilder::addRecord(const std::vector<uint32_t>& fields) {
+    std::vector<uint32_t> row(fieldCount_, 0);
+    for (uint32_t i = 0; i < fieldCount_ && i < fields.size(); ++i) row[i] = fields[i];
+    records_.push_back(std::move(row));
+}
+
+std::vector<uint8_t> DbcBuilder::build() const {
+    std::vector<uint8_t> b;
+    b.push_back('W'); b.push_back('D'); b.push_back('B'); b.push_back('C');
+    put32(b, static_cast<uint32_t>(records_.size()));
+    put32(b, fieldCount_);
+    put32(b, fieldCount_ * 4);                          // recordSize
+    put32(b, static_cast<uint32_t>(strings_.size()));   // stringSize
+    for (const auto& row : records_)
+        for (uint32_t v : row) put32(b, v);
+    b.insert(b.end(), strings_.begin(), strings_.end());
+    return b;
+}
 
 MapEntry mapEntry(const Dbc& dbc, uint32_t rec) {
     MapEntry e;

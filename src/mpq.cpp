@@ -1,7 +1,43 @@
 #include "mpq.hpp"
 #include <StormLib.h>
 
+#include <cstdio>
+
 namespace wf {
+
+bool writeMpqArchive(const std::string& path,
+                     const std::vector<std::pair<std::string, std::vector<uint8_t>>>& files) {
+    std::remove(path.c_str());   // overwrite: SFileCreateArchive won't clobber
+
+    HANDLE hMpq = nullptr;
+    // Vanilla 1.12 uses MPQ format v1. Hash table sized to comfortably hold the
+    // files plus the (listfile).
+    DWORD maxFiles = static_cast<DWORD>(files.size() + 2);
+    if (!SFileCreateArchive(path.c_str(),
+                            MPQ_CREATE_ARCHIVE_V1 | MPQ_CREATE_LISTFILE,
+                            maxFiles, &hMpq))
+        return false;
+
+    bool ok = true;
+    for (const auto& f : files) {
+        const std::string& name = f.first;
+        const std::vector<uint8_t>& data = f.second;
+        HANDLE hFile = nullptr;
+        if (!SFileCreateFile(hMpq, name.c_str(), 0, static_cast<DWORD>(data.size()),
+                             0, MPQ_FILE_COMPRESS, &hFile)) {
+            ok = false; break;
+        }
+        if (!SFileWriteFile(hFile, data.data(), static_cast<DWORD>(data.size()),
+                            MPQ_COMPRESSION_ZLIB)) {
+            SFileFinishFile(hFile); ok = false; break;
+        }
+        SFileFinishFile(hFile);
+    }
+
+    SFileCloseArchive(hMpq);
+    if (!ok) std::remove(path.c_str());
+    return ok;
+}
 
 MpqManager::~MpqManager() {
     for (void* h : handles_) {

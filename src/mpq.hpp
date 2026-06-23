@@ -6,9 +6,18 @@
 // ---------------------------------------------------------------------------
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wf {
+
+// Create (or overwrite) an MPQ archive at `path` and add the given in-memory
+// files (archived name -> bytes; use backslash paths like
+// "DBFilesClient\\Map.dbc"). Returns false on any StormLib failure. This is the
+// patch-MPQ writer for custom content -- e.g. package an edited DBC into a
+// patch-4.mpq the client loads, leaving the base data untouched.
+bool writeMpqArchive(const std::string& path,
+                     const std::vector<std::pair<std::string, std::vector<uint8_t>>>& files);
 
 class MpqManager {
 public:

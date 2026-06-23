@@ -10,10 +10,32 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "wow_files.hpp"   // Dbc
 
 namespace wf {
+
+// Builds a WDBC blob (the inverse of Dbc::parse) for editing DBCs / custom
+// content -- e.g. tweak a record and repackage via writeMpqArchive. Records are
+// fixed-width rows of `fieldCount` uint32s; string fields hold an offset
+// returned by addString. Dedups strings; offset 0 is always the empty string.
+class DbcBuilder {
+public:
+    explicit DbcBuilder(uint32_t fieldCount) : fieldCount_(fieldCount) {
+        strings_.push_back('\0');     // offset 0 == ""
+    }
+    uint32_t addString(const std::string& s);
+    void addRecord(const std::vector<uint32_t>& fields);  // padded/truncated to fieldCount
+    std::vector<uint8_t> build() const;
+
+private:
+    uint32_t fieldCount_;
+    std::vector<std::vector<uint32_t>> records_;
+    std::string strings_;
+    std::unordered_map<std::string, uint32_t> stringOffsets_;
+};
 
 struct MapEntry {
     uint32_t    id           = 0;   // field 0

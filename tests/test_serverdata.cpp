@@ -2,10 +2,14 @@
 #include "dbc_defs.hpp"
 #include "gridmap.hpp"
 #include "navmesh.hpp"
+#include "vmap.hpp"
+#include "mpq.hpp"
 #include "wow_files.hpp"
 
+#include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace wf;
@@ -225,4 +229,89 @@ void test_navmesh() {
     DebugDraw dd;
     addNavMesh(dd, t, Rgba{0, 255, 0, 255}, DebugCategory::NavMesh);
     CHECK(dd.categoryBuffers(DebugCategory::NavMesh).lines.size() == 4u * 2u);
+}
+
+void test_vmap() {
+    std::printf("[vmap]\n");
+
+    std::vector<uint8_t> buf;
+    for (char c : std::string("VMAP_4.0")) buf.push_back((uint8_t)c);   // 8-byte magic
+    praw(buf, "WMOD"); p32(buf, 8); p32(buf, 1234);   // chunkSize, rootWmoId
+
+    // group meta (AABox 6 floats + flags + wmoId = 32 bytes) precedes VERT.
+    pf(buf,-1); pf(buf,-1); pf(buf,-1); pf(buf,2); pf(buf,2); pf(buf,0);
+    p32(buf, 0x4); p32(buf, 7);
+
+    // VERT: 4 verts (a quad on z=0).
+    praw(buf, "VERT"); p32(buf, 4 + 12*4); p32(buf, 4);
+    pf(buf,0);pf(buf,0);pf(buf,0);  pf(buf,1);pf(buf,0);pf(buf,0);
+    pf(buf,1);pf(buf,1);pf(buf,0);  pf(buf,0);pf(buf,1);pf(buf,0);
+    // TRIM: 2 triangles.
+    praw(buf, "TRIM"); p32(buf, 4 + 12*2); p32(buf, 2);
+    p32(buf,0); p32(buf,1); p32(buf,2);
+    p32(buf,0); p32(buf,2); p32(buf,3);
+
+    VmapModel m = parseWorldModel(buf);
+    CHECK(m.rootWmoId == 1234);
+    CHECK(m.groups.size() == 1);
+    const VmapGroup& g = m.groups[0];
+    CHECK(g.flags == 0x4 && g.wmoId == 7);
+    CHECK_APPROX(g.bmax.x, 2.0f);
+    CHECK(g.vertices.size() == 4);
+    CHECK(g.triangles.size() == 2);
+    CHECK(g.triangles[1][1] == 2u);
+    CHECK_APPROX(g.vertices[2].x, 1.0f);
+
+    Mesh mesh = vmapGroupToMesh(g);
+    CHECK(mesh.vertices.size() == 4 && mesh.indices.size() == 6);
+
+    DebugDraw dd;
+    addCollision(dd, m, Rgba{255,0,0,255});
+    // 2 triangles * 3 edges * 2 verts = 12 line vertices.
+    CHECK(dd.categoryBuffers(DebugCategory::Collision).lines.size() == 12u);
+}
+
+void test_storage() {
+    std::printf("[storage]\n");
+
+    // --- DBC builder round-trips through Dbc::parse -------------------------
+    DbcBuilder b(5);
+    uint32_t off = b.addString("Azeroth");
+    uint32_t off2 = b.addString("Azeroth");          // dedup -> same offset
+    CHECK(off == off2 && off != 0);
+    b.addRecord({ 0, off, 2, 0, 0 });
+    b.addRecord({ 1, b.addString("Kalimdor"), 0, 0, 0 });
+    std::vector<uint8_t> blob = b.build();
+
+    Dbc dbc = Dbc::parse(blob);
+    CHECK(dbc.recordCount() == 2 && dbc.fieldCount() == 5);
+    CHECK(dbc.getU32(0, 0) == 0 && dbc.getU32(0, 2) == 2);
+    CHECK(dbc.getString(0, 1) == "Azeroth");
+    CHECK(dbc.getString(1, 1) == "Kalimdor");
+    CHECK(dbc.getString(0, 4) == "");                // offset 0 -> empty
+
+    // The typed view reads the built record.
+    MapEntry me = mapEntry(dbc, 1);
+    CHECK(me.id == 1);
+
+    // --- patch-MPQ writer: write, reopen read-only, verify byte-identical ---
+    const char* path = "wforge_test_patch.mpq";
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> files = {
+        { "DBFilesClient\\Map.dbc", blob },
+        { "Custom\\hello.txt", std::vector<uint8_t>{ 'h','i',0 } },
+    };
+    bool wrote = writeMpqArchive(path, files);
+    CHECK(wrote);
+    if (wrote) {
+        MpqManager mgr;
+        CHECK(mgr.addArchive(path));
+        CHECK(mgr.contains("DBFilesClient\\Map.dbc"));
+        std::vector<uint8_t> back;
+        CHECK(mgr.readFile("DBFilesClient\\Map.dbc", back));
+        CHECK(back == blob);                          // exact round-trip
+        std::vector<uint8_t> txt;
+        CHECK(mgr.readFile("Custom\\hello.txt", txt));
+        CHECK(txt.size() == 3 && txt[0] == 'h');
+    }
+    std::remove(path);
 }

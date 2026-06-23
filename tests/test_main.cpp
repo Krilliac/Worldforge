@@ -22,6 +22,8 @@ void test_dbc_defs();
 void test_gridmap();
 void test_navmesh();
 void test_rhi();
+void test_vmap();
+void test_storage();
 
 int main() {
     test_math();
@@ -46,6 +48,8 @@ int main() {
     test_gridmap();
     test_navmesh();
     test_rhi();
+    test_vmap();
+    test_storage();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;
