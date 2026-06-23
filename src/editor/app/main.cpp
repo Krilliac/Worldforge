@@ -20,6 +20,8 @@
 #include "editor/DebugVisPanel.hpp"
 #include "editor/ViewportPanel.hpp"
 #include "editor/Camera.hpp"
+#include "editor/BridgeClient.hpp"
+#include "editor_bridge.hpp"
 #include "debugdraw.hpp"
 #include "math.hpp"
 
@@ -72,6 +74,12 @@ int main() {
     editor::GizmoController  giz;
     Mat4 selected = Mat4::translate(Vec3{150, 150, heightAt(150,150) + 4});
 
+    // Connect to the running mangos-zero bridge (optional; the editor still runs
+    // offline if it's down). When connected, panel ops go out and the server's
+    // .debug vis stream comes back into the overlay.
+    editor::BridgeClient bridge;
+    bridge.connect("127.0.0.1", 7878);
+
     GLuint sceneTex = 0;
     glGenTextures(1, &sceneTex);
 
@@ -114,7 +122,19 @@ int main() {
         atmosphere.draw(outgoing);
         viewport.draw((ImTextureID)(intptr_t)sceneTex, giz, &selected);
         debugVis.draw(debug);
-        // TODO: for (auto& pkt : outgoing) bridge.send(pkt);
+
+        // Ship the panels' ops; fold the server's debug stream into the overlay.
+        for (auto& pkt : outgoing) bridge.send(pkt);
+        for (const auto& f : bridge.poll()) {
+            switch (f.opcode) {
+                case EDITOR_DEBUG_LINE:   apply(debug, decodeDebugLine(f.payload));   break;
+                case EDITOR_DEBUG_PATH:   apply(debug, decodeDebugPath(f.payload));   break;
+                case EDITOR_DEBUG_VOLUME: apply(debug, decodeDebugVolume(f.payload)); break;
+                case EDITOR_DEBUG_MARKER: apply(debug, decodeDebugMarker(f.payload)); break;
+                case EDITOR_DEBUG_CLEAR:  debug.clear(); break;
+                default: break;
+            }
+        }
 
         ImGui::Render();
         int w, h; glfwGetFramebufferSize(win, &w, &h);

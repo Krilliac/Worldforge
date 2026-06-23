@@ -45,6 +45,13 @@ mangos calls use the actual class/method names from the current tree.
 4. Gate the listener to admin access (mirror `RASocket`'s `RA.MinLevel` auth) and
    bind to localhost; this link is trusted and unceremoniously powerful.
 
+## Editor side
+
+The editor connects with `wf::editor::BridgeClient` (`src/editor/BridgeClient.*`):
+it ships the panels' framed `EDITOR_*` packets to this module's port and folds
+the server's `EDITOR_DEBUG_*` stream back into the viewport overlay. Bind this
+module to the same host/port (default `127.0.0.1:7878`).
+
 ## Security
 
 The bridge is an authenticated local control channel, **not** part of the game

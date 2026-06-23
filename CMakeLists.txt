@@ -149,9 +149,15 @@ if(WFORGE_EDITOR)
     src/editor/GizmoController.cpp
     src/editor/SoftwareImGui.cpp
     src/editor/ViewportPanel.cpp
+    src/editor/BridgeClient.cpp
   )
   target_include_directories(wforge-editor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(wforge-editor PUBLIC wforge imgui)
+  find_package(Threads REQUIRED)
+  target_link_libraries(wforge-editor PUBLIC Threads::Threads)
+  if(WIN32)
+    target_link_libraries(wforge-editor PUBLIC ws2_32)
+  endif()
   if(NOT MSVC)
     target_compile_options(wforge-editor PRIVATE -Wall -Wextra)
   endif()
@@ -162,6 +168,7 @@ if(WFORGE_EDITOR)
     tests/editor/test_gizmo_controller.cpp
     tests/editor/test_software_imgui.cpp
     tests/editor/test_viewport.cpp
+    tests/editor/test_bridge_client.cpp
   )
   target_link_libraries(wforge-editor-tests PRIVATE wforge-editor)
   target_include_directories(wforge-editor-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
