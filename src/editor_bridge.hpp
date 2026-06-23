@@ -14,9 +14,12 @@
 // framing code is shared with worldproto.
 // ---------------------------------------------------------------------------
 #include <cstdint>
+#include <string>
 #include <vector>
 
+#include "image.hpp"     // Rgba
 #include "math.hpp"
+#include "debugdraw.hpp" // DebugDraw / DebugCategory (apply* helpers)
 
 namespace wf {
 
@@ -29,7 +32,39 @@ enum EditorOpcode : uint32_t {
     EDITOR_DESPAWN        = 0x4003,  // remove a live object
     EDITOR_SET_WAYPOINTS  = 0x4004,  // install a patrol path
     EDITOR_ACK            = 0x4005,  // server -> editor op result
+
+    // Debug-visualisation stream (server -> editor). Mirrors the mangoszero
+    // `.debug vis ...` outputs (server PR #386) so the WorldForge viewport can
+    // render the same cells / LoS / paths / collision data natively as a second
+    // consumer, instead of (or alongside) the in-world GO markers.
+    EDITOR_DEBUG_CLEAR    = 0x4010,  // drop all debug primitives
+    EDITOR_DEBUG_MARKER   = 0x4011,  // a point + captured value + label
+    EDITOR_DEBUG_LINE     = 0x4012,  // a ray/segment with an optional hit point
+    EDITOR_DEBUG_PATH     = 0x4013,  // a navmesh path (good or bad)
+    EDITOR_DEBUG_VOLUME   = 0x4014,  // a cell/trigger box or sphere
 };
+
+// The server's DV_* marker types (stable wire values; map to DebugCategory).
+enum class DebugVisType : uint8_t {
+    Generic = 0,
+    Cell,        // DV_CELL
+    LosOk,       // DV_LOS_OK
+    LosBlock,    // DV_LOS_BLOCK
+    Path,        // DV_PATH
+    PathBad,     // DV_PATH_BAD
+    Collision,   // DV_COLLISION
+    HitPoint,    // DV_HITPOINT
+    Height,      // DV_HEIGHT
+};
+
+// Map a server DV_* type onto the renderer's toggleable layer.
+DebugCategory categoryFor(DebugVisType t);
+
+// ---- debug-stream messages (mirror the server's captured data) ----
+struct DebugMarker { DebugVisType type = DebugVisType::Generic; Vec3 pos; Rgba color; float value = 0.0f; std::string label; };
+struct DebugLine   { DebugVisType type = DebugVisType::LosOk;    Vec3 from; Vec3 to; Rgba color; bool hasHit = false; Vec3 hit; };
+struct DebugPath   { uint64_t guid = 0; bool bad = false; std::vector<Vec3> points; Rgba color; };
+struct DebugVolume { uint8_t kind = 0; /*0 box, 1 sphere*/ Vec3 center; Vec3 half; float radius = 0.0f; Rgba color; DebugVisType type = DebugVisType::Cell; };
 
 // Every mutating op carries a client-side opId for ack/undo correlation.
 struct MoveObject   { uint64_t guid = 0; Vec3 pos; float orientation = 0.0f; uint32_t opId = 0; };
@@ -61,5 +96,21 @@ SpawnCreature decodeSpawnCreature(const std::vector<uint8_t>& payload);
 Despawn       decodeDespawn(const std::vector<uint8_t>& payload);
 SetWaypoints  decodeSetWaypoints(const std::vector<uint8_t>& payload);
 Ack           decodeAck(const std::vector<uint8_t>& payload);
+
+// ---- debug stream encode / decode ----
+std::vector<uint8_t> encode(const DebugMarker&);
+std::vector<uint8_t> encode(const DebugLine&);
+std::vector<uint8_t> encode(const DebugPath&);
+std::vector<uint8_t> encode(const DebugVolume&);
+DebugMarker decodeDebugMarker(const std::vector<uint8_t>& payload);
+DebugLine   decodeDebugLine(const std::vector<uint8_t>& payload);
+DebugPath   decodeDebugPath(const std::vector<uint8_t>& payload);
+DebugVolume decodeDebugVolume(const std::vector<uint8_t>& payload);
+
+// ---- apply a decoded debug message into a renderable DebugDraw ----
+void apply(DebugDraw& dd, const DebugMarker&);
+void apply(DebugDraw& dd, const DebugLine&);
+void apply(DebugDraw& dd, const DebugPath&);
+void apply(DebugDraw& dd, const DebugVolume&);
 
 } // namespace wf

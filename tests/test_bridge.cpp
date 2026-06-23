@@ -1,6 +1,7 @@
 #include "test.hpp"
 #include "editor_bridge.hpp"
 #include "db_export.hpp"
+#include "debugdraw.hpp"
 
 #include <string>
 #include <vector>
@@ -70,6 +71,54 @@ void test_bridge() {
     CHECK(readFrame(twoFrames, fr, used) && fr.opcode == EDITOR_DESPAWN);
     std::vector<uint8_t> rest(twoFrames.begin() + used, twoFrames.end());
     CHECK(readFrame(rest, fr, used) && fr.opcode == EDITOR_ACK);
+
+    // --- debug stream: marker round-trips (incl. label string) --------------
+    DebugMarker dm;
+    dm.type = DebugVisType::Height; dm.pos = {12.0f, 34.0f, 56.0f};
+    dm.color = {0,255,0,255}; dm.value = 4.25f; dm.label = "groundZ";
+    CHECK(readFrame(encode(dm), fr, used) && fr.opcode == EDITOR_DEBUG_MARKER);
+    DebugMarker mb = decodeDebugMarker(fr.payload);
+    CHECK(mb.type == DebugVisType::Height);
+    CHECK_APPROX(mb.pos.z, 56.0f);
+    CHECK_APPROX(mb.value, 4.25f);
+    CHECK(mb.label == "groundZ");
+
+    // --- debug line with a hit point (DV_LOS_BLOCK) -------------------------
+    DebugLine dl;
+    dl.type = DebugVisType::LosBlock; dl.from = {0,0,0}; dl.to = {10,0,5};
+    dl.color = {255,0,0,255}; dl.hasHit = true; dl.hit = {6,0,3};
+    CHECK(readFrame(encode(dl), fr, used) && fr.opcode == EDITOR_DEBUG_LINE);
+    DebugLine lb = decodeDebugLine(fr.payload);
+    CHECK(lb.type == DebugVisType::LosBlock && lb.hasHit);
+    CHECK_APPROX(lb.hit.x, 6.0f);
+
+    // --- debug path (DV_PATH) ----------------------------------------------
+    DebugPath dpth; dpth.guid = 7; dpth.bad = false; dpth.color = {0,200,255,255};
+    dpth.points = { {0,0,0}, {5,5,0}, {10,0,0} };
+    CHECK(readFrame(encode(dpth), fr, used) && fr.opcode == EDITOR_DEBUG_PATH);
+    DebugPath pb = decodeDebugPath(fr.payload);
+    CHECK(pb.guid == 7 && pb.points.size() == 3);
+    CHECK_APPROX(pb.points[1].x, 5.0f);
+
+    // --- debug volume: a cell box and a trigger sphere ----------------------
+    DebugVolume dv; dv.kind = 0; dv.type = DebugVisType::Cell;
+    dv.center = {100,100,10}; dv.half = {16,16,8}; dv.color = {120,120,120,255};
+    CHECK(readFrame(encode(dv), fr, used) && fr.opcode == EDITOR_DEBUG_VOLUME);
+    DebugVolume vb = decodeDebugVolume(fr.payload);
+    CHECK(vb.kind == 0 && vb.type == DebugVisType::Cell);
+    CHECK_APPROX(vb.half.x, 16.0f);
+
+    // --- category mapping + apply produces renderable primitives ------------
+    CHECK(categoryFor(DebugVisType::LosOk)    == DebugCategory::LineOfSight);
+    CHECK(categoryFor(DebugVisType::PathBad)  == DebugCategory::NavPath);
+    CHECK(categoryFor(DebugVisType::HitPoint) == DebugCategory::HitPoint);
+
+    DebugDraw dd;
+    apply(dd, lb);   // a LoS line + a hit point
+    CHECK(dd.categoryBuffers(DebugCategory::LineOfSight).lines.size() == 2);
+    CHECK(dd.categoryBuffers(DebugCategory::HitPoint).points.size() == 1);
+    apply(dd, vb);   // a cell box -> 12 edges
+    CHECK(dd.categoryBuffers(DebugCategory::Cell).lines.size() == 24);
 }
 
 void test_db_export() {

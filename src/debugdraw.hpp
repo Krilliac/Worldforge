@@ -37,6 +37,11 @@ enum class DebugCategory : uint32_t {
     Normal,        // surface normals
     Grid,          // world reference grid
     Frustum,       // camera frustum
+    // Mirrors of mangoszero `.debug vis` outputs (server PR #386 DV_* types):
+    Cell,          // DV_CELL    -- grid cell markers
+    LineOfSight,   // DV_LOS_*   -- LoS rays (colour = ok/blocked)
+    HitPoint,      // DV_HITPOINT-- collision hit points
+    Height,        // DV_HEIGHT  -- ground elevation markers
     Count
 };
 

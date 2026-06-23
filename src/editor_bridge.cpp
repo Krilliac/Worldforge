@@ -8,7 +8,37 @@ namespace wf {
 namespace {
 void putVec3(ByteWriter& w, const Vec3& v) { w.f32(v.x); w.f32(v.y); w.f32(v.z); }
 Vec3 getVec3(ByteReader& r) { float x = r.f32(), y = r.f32(), z = r.f32(); return {x, y, z}; }
+
+void putRgba(ByteWriter& w, Rgba c) { w.u8(c.r); w.u8(c.g); w.u8(c.b); w.u8(c.a); }
+Rgba getRgba(ByteReader& r) { Rgba c; c.r = r.u8(); c.g = r.u8(); c.b = r.u8(); c.a = r.u8(); return c; }
+
+void putStr(ByteWriter& w, const std::string& s) {
+    uint16_t n = static_cast<uint16_t>(s.size() > 0xFFFF ? 0xFFFF : s.size());
+    w.u16(n);
+    w.bytes(reinterpret_cast<const uint8_t*>(s.data()), n);
+}
+std::string getStr(ByteReader& r) {
+    uint16_t n = r.u16();
+    std::string s(reinterpret_cast<const char*>(r.ptr()), n);
+    r.skip(n);
+    return s;
+}
 } // namespace
+
+DebugCategory categoryFor(DebugVisType t) {
+    switch (t) {
+        case DebugVisType::Cell:      return DebugCategory::Cell;
+        case DebugVisType::LosOk:
+        case DebugVisType::LosBlock:  return DebugCategory::LineOfSight;
+        case DebugVisType::Path:
+        case DebugVisType::PathBad:   return DebugCategory::NavPath;
+        case DebugVisType::Collision: return DebugCategory::Collision;
+        case DebugVisType::HitPoint:  return DebugCategory::HitPoint;
+        case DebugVisType::Height:    return DebugCategory::Height;
+        case DebugVisType::Generic:   break;
+    }
+    return DebugCategory::Generic;
+}
 
 std::vector<uint8_t> frame(uint32_t opcode, const std::vector<uint8_t>& payload) {
     std::vector<uint8_t> out = writeClientHeader(opcode, static_cast<uint32_t>(payload.size()));
@@ -76,6 +106,81 @@ SetWaypoints decodeSetWaypoints(const std::vector<uint8_t>& p) {
 }
 Ack decodeAck(const std::vector<uint8_t>& p) {
     ByteReader r(p); Ack a; a.opId = r.u32(); a.status = r.u8(); return a;
+}
+
+// ---- debug stream encode ----
+std::vector<uint8_t> encode(const DebugMarker& m) {
+    ByteWriter w; w.u8(static_cast<uint8_t>(m.type)); putVec3(w, m.pos);
+    putRgba(w, m.color); w.f32(m.value); putStr(w, m.label);
+    return frame(EDITOR_DEBUG_MARKER, w.data());
+}
+std::vector<uint8_t> encode(const DebugLine& l) {
+    ByteWriter w; w.u8(static_cast<uint8_t>(l.type)); putVec3(w, l.from); putVec3(w, l.to);
+    putRgba(w, l.color); w.u8(l.hasHit ? 1 : 0); putVec3(w, l.hit);
+    return frame(EDITOR_DEBUG_LINE, w.data());
+}
+std::vector<uint8_t> encode(const DebugPath& p) {
+    ByteWriter w; w.u64(p.guid); w.u8(p.bad ? 1 : 0); putRgba(w, p.color);
+    w.u32(static_cast<uint32_t>(p.points.size()));
+    for (const Vec3& v : p.points) putVec3(w, v);
+    return frame(EDITOR_DEBUG_PATH, w.data());
+}
+std::vector<uint8_t> encode(const DebugVolume& v) {
+    ByteWriter w; w.u8(v.kind); w.u8(static_cast<uint8_t>(v.type));
+    putVec3(w, v.center); putVec3(w, v.half); w.f32(v.radius); putRgba(w, v.color);
+    return frame(EDITOR_DEBUG_VOLUME, w.data());
+}
+
+// ---- debug stream decode ----
+DebugMarker decodeDebugMarker(const std::vector<uint8_t>& p) {
+    ByteReader r(p); DebugMarker m;
+    m.type = static_cast<DebugVisType>(r.u8()); m.pos = getVec3(r);
+    m.color = getRgba(r); m.value = r.f32(); m.label = getStr(r);
+    return m;
+}
+DebugLine decodeDebugLine(const std::vector<uint8_t>& p) {
+    ByteReader r(p); DebugLine l;
+    l.type = static_cast<DebugVisType>(r.u8()); l.from = getVec3(r); l.to = getVec3(r);
+    l.color = getRgba(r); l.hasHit = r.u8() != 0; l.hit = getVec3(r);
+    return l;
+}
+DebugPath decodeDebugPath(const std::vector<uint8_t>& p) {
+    ByteReader r(p); DebugPath d;
+    d.guid = r.u64(); d.bad = r.u8() != 0; d.color = getRgba(r);
+    uint32_t n = r.u32(); d.points.reserve(n);
+    for (uint32_t i = 0; i < n; ++i) d.points.push_back(getVec3(r));
+    return d;
+}
+DebugVolume decodeDebugVolume(const std::vector<uint8_t>& p) {
+    ByteReader r(p); DebugVolume v;
+    v.kind = r.u8(); v.type = static_cast<DebugVisType>(r.u8());
+    v.center = getVec3(r); v.half = getVec3(r); v.radius = r.f32(); v.color = getRgba(r);
+    return v;
+}
+
+// ---- apply into a DebugDraw ----
+void apply(DebugDraw& dd, const DebugMarker& m) {
+    DebugCategory cat = categoryFor(m.type);
+    dd.cross(m.pos, 2.0f, m.color, cat);
+    dd.point(m.pos, m.color, cat);
+}
+void apply(DebugDraw& dd, const DebugLine& l) {
+    DebugCategory cat = categoryFor(l.type);
+    dd.line(l.from, l.to, l.color, cat);
+    if (l.hasHit) dd.point(l.hit, l.color, DebugCategory::HitPoint);
+}
+void apply(DebugDraw& dd, const DebugPath& d) {
+    dd.path(d.points, d.color, DebugCategory::NavPath, /*markers*/true);
+}
+void apply(DebugDraw& dd, const DebugVolume& v) {
+    DebugCategory cat = categoryFor(v.type);
+    if (v.kind == 1) {
+        dd.sphere(v.center, v.radius, v.color, cat);
+    } else {
+        Vec3 mn{ v.center.x - v.half.x, v.center.y - v.half.y, v.center.z - v.half.z };
+        Vec3 mx{ v.center.x + v.half.x, v.center.y + v.half.y, v.center.z + v.half.z };
+        dd.aabb(mn, mx, v.color, cat);
+    }
 }
 
 } // namespace wf
