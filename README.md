@@ -8,7 +8,7 @@ pair with a mangos-zero server: load real client assets, render the world in a
 running server while connected retail clients see the edits.**
 
 Every parser, transform, and protocol primitive here is **compiled and
-unit-tested in-tree** (114→391 checks). Where a part needs a GPU/display or your
+unit-tested in-tree** (114→427 checks). Where a part needs a GPU/display or your
 mangos checkout to run, it is implemented as far as it can be verified and the
 boundary is stated plainly (see `ARCHITECTURE.md`).
 
@@ -46,6 +46,7 @@ automatically via CMake FetchContent.
 | `srp6.*`          | WoW-flavour SRP6 logon (client + server)                      |
 | `worldproto.hpp`  | vanilla header cipher + opcode framing                        |
 | `clientfx.*`      | vanilla server-FX packet builders (sound/weather/cinematic/world-state) |
+| `fxbridge.*`      | scope-aware Atmosphere/World FX editor RPCs → realise to clientfx SMSG |
 | `raster.*`        | software rasteriser (z-buffer, perspective-correct)            |
 | `rhi.hpp`         | GPU render-hardware interface (backend-agnostic)              |
 | `editing.*`       | brush falloff + terrain-height / alpha-coverage edit tools      |
@@ -68,6 +69,8 @@ WoW client RE reference, mangos-zero hook points, and the build roadmap.
 `docs/SERVER_OPCODES.md` documents the verified vanilla server-FX opcode
 builders, plus using `SMSG_OVERRIDE_LIGHT` as a server-handled custom opcode
 over the trusted editor↔server link (it is not a vanilla *client* render path).
+`integration/mangos-zero/` is a drop-in server-side bridge module sketch that
+applies the editor RPCs to the live world.
 
 ## Provenance
 

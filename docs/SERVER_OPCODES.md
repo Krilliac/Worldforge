@@ -86,12 +86,30 @@ The other override commands (`.weather/.music/.sound/.cinematic/.worldstate/
 .zoneattack/.screenmsg/.timespeed`) map onto opcodes that exist for vanilla and
 are covered directly by `clientfx`.
 
+## Editor FX bridge (`fxbridge`)
+
+The editor doesn't usually send raw SMSG; it sends a **scope-aware request** and
+the server realises it. `fxbridge` defines those `EDITOR_FX_*` ops — `WeatherFx`,
+`SoundFx`, `CinematicFx`, `WorldStateFx`, `ScreenMsgFx`, `TimeSpeedFx`,
+`ZoneAttackFx` (plus `OverrideLight`) — each carrying an `FxTarget {
+scope(self/target/zone/server), guid, zoneId }`. `wf::realise(op)` maps each to
+the verified `clientfx` SMSG, so the editor→server→packet path is unit-tested
+in-tree and is the exact reference the server copies.
+
+```
+editor encode(WeatherFx{Snow, scope=Zone, zone=1519})
+   --bridge--> server decodeWeatherFx --> realise() == buildWeather(...)
+   --> broadcast SMSG_WEATHER to every player in zone 1519
+```
+
 ## How it plugs in
 
-- **Server side:** wrap each builder's layout in the existing `WorldPacket` +
-  `SendPacket` pattern; register `.light/.weather/...` as chat handlers (the
-  live-override plan). `clientfx` is the layout reference.
-- **WorldForge engine:** call a builder, hand the bytes to
-  `WorldHeaderCrypt::encryptSend`, and write to the socket — the editor's future
-  Atmosphere/World panel drives these directly for a connected client, or routes
-  them through the editor bridge to the server (`EDITOR_RESEARCH.md` D.4).
+- **Server side:** drop in `integration/mangos-zero/WorldForgeBridge.{h,cpp}` —
+  it drains frames at the `World::Update` tick, decodes `EDITOR_*`, calls
+  `wf::realise()` for FX (or the authoritative `Map::CreatureRelocation` /
+  `SummonCreature` / `ForcedDespawn` / `MotionMaster` for object edits), and
+  broadcasts to the op's scope. `clientfx`/`fxbridge` are the byte-exact
+  reference; the `.light/.weather/...` chat commands can share the same realise().
+- **WorldForge engine:** call a builder (or `realise`), hand the bytes to
+  `WorldHeaderCrypt::encryptSend`, and write to the socket — the editor's
+  Atmosphere/World panel drives these via the bridge (`EDITOR_RESEARCH.md` D.4).
