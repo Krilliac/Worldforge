@@ -13,8 +13,11 @@
 #include "editor/AtmospherePanel.hpp"
 #include "editor/DebugVisPanel.hpp"
 #include "editor/ViewportPanel.hpp"
+#include "editor/EntityInspectorPanel.hpp"
 #include "editor/SoftwareImGui.hpp"
 
+#include "server/world_sim.hpp"
+#include "world_view.hpp"
 #include "debugdraw.hpp"
 #include "image.hpp"
 #include "math.hpp"
@@ -49,6 +52,35 @@ int main() {
     dd.path(path, Rgba{255,220,60,255}, DebugCategory::Waypoint, true);
     dd.aabb({200,60,heightAt(200,60)}, {245,105,heightAt(222,82)+35}, Rgba{80,255,140,255}, DebugCategory::Trigger);
 
+    // --- a live world: NPCs + a player patrolling, mirrored into a WorldView --
+    // We run the same WorldSim the bridge server runs, tick it forward, then feed
+    // its snapshot into the engine's WorldView -- exactly the runtime-data path,
+    // minus the socket. The view draws every entity as a moving marker and the
+    // inspector lists them.
+    auto place = [&](float x, float y){ return Vec3{ x, y, heightAt(x,y) + 2.0f }; };
+    WorldSim sim;
+    struct Npc { uint32_t entry; std::vector<Vec3> wp; } npcs[] = {
+        { 299, { place(40,150),  place(120,160), place(120,90)  } },
+        { 300, { place(180,200), place(240,210), place(210,260) } },
+        { 301, { place(70,60),   place(60,120),  place(110,110) } },
+        { 302, { place(250,120), place(260,180), place(200,150) } },
+    };
+    for (const Npc& n : npcs) { uint64_t g = sim.spawnCreature(n.entry, 0, n.wp[0], 0); sim.setWaypoints(g, n.wp); }
+    uint64_t player = sim.spawnPlayer(0, place(150,150), 0, "Worldforge");
+    sim.setWaypoints(player, { place(150,150), place(150,240), place(220,240) });
+    for (int i = 0; i < 27; ++i) sim.tick(0.2f);   // let them spread along the paths
+
+    WorldView view;
+    for (const SimObject& o : sim.snapshot()) {
+        EntityState e;
+        e.guid = o.guid; e.kind = static_cast<uint8_t>(o.kind);
+        e.entry = o.entry; e.mapId = o.mapId; e.pos = o.pos;
+        e.orientation = o.orientation; e.moving = o.moving; e.speed = o.speed; e.name = o.name;
+        view.apply(e, static_cast<uint32_t>(sim.simTimeMs()));
+    }
+    view.select(player);
+    view.buildDebug(dd);                            // moving NPC/player markers
+
     // --- ImGui (CPU) -------------------------------------------------------
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -61,10 +93,11 @@ int main() {
     io.Fonts->GetTexDataAsRGBA32(&atlas, &aw, &ah);
     io.Fonts->SetTexID(kAtlasTex);
 
-    editor::AtmospherePanel atmosphere;
-    editor::DebugVisPanel    debugVis;
-    editor::ViewportPanel    viewport(820, 540);
-    editor::GizmoController  giz;
+    editor::AtmospherePanel       atmosphere;
+    editor::DebugVisPanel         debugVis;
+    editor::EntityInspectorPanel  inspector;
+    editor::ViewportPanel         viewport(820, 540);
+    editor::GizmoController        giz;
     giz.op = editor::GizmoController::Op::Translate;
 
     // A selected doodad sitting on the terrain -> the gizmo draws over it.
@@ -87,9 +120,15 @@ int main() {
     ImGui::SetNextWindowSize(ImVec2(848, 580), ImGuiCond_Always);
     viewport.draw(kSceneTex, giz, &selected);
 
+    const float rightH = (H - 24) * 0.5f;
     ImGui::SetNextWindowPos(ImVec2(W - 280, 24), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(280, H - 24), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(280, rightH), ImGuiCond_Always);
     debugVis.draw(dd);
+
+    // The runtime-data inspector: the live entity list + selected detail.
+    ImGui::SetNextWindowPos(ImVec2(W - 280, 24 + rightH), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(280, rightH), ImGuiCond_Always);
+    inspector.draw(view);
     ImGui::Render();
 
     // Composite: dark desktop background, then ImGui (which samples the atlas

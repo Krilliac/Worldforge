@@ -13,6 +13,7 @@ void test_viewport();
 void test_bridge_client();
 void test_e2e();
 void test_model_viewer();
+void test_entity_inspector();
 
 static void setupHeadlessImGui() {
     IMGUI_CHECKVERSION();
@@ -40,6 +41,7 @@ int main() {
     test_bridge_client();
     test_e2e();
     test_model_viewer();
+    test_entity_inspector();
     ImGui::DestroyContext();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);

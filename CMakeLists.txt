@@ -206,6 +206,7 @@ if(WFORGE_EDITOR)
     src/editor/ViewportPanel.cpp
     src/editor/BridgeClient.cpp
     src/editor/ModelViewerPanel.cpp
+    src/editor/EntityInspectorPanel.cpp
   )
   target_include_directories(wforge-editor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(wforge-editor PUBLIC wforge imgui)
@@ -227,6 +228,7 @@ if(WFORGE_EDITOR)
     tests/editor/test_bridge_client.cpp
     tests/editor/test_e2e.cpp
     tests/editor/test_model_viewer.cpp
+    tests/editor/test_entity_inspector.cpp
   )
   target_link_libraries(wforge-editor-tests PRIVATE wforge-editor wforge-server)
   target_include_directories(wforge-editor-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
