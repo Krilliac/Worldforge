@@ -39,4 +39,44 @@ void test_world_sim() {
 
     sim.fx().weatherCount++;
     CHECK(sim.fx().weatherCount == 1);
+
+    // --- movement: a creature patrols its waypoints, looping --------------
+    WorldSim w;
+    uint64_t c = w.spawnCreature(299, 0, {0, 0, 0}, 0.0f);
+    CHECK(w.setSpeed(c, 10.0f));                       // 10 yd/s, easy arithmetic
+    std::vector<Vec3> loop = { {0,0,0}, {20,0,0}, {20,20,0} };
+    CHECK(w.setWaypoints(c, loop));
+
+    // It starts on node 0, so the first tick skips that arrival and walks 5
+    // yards along the +X leg toward node 1.
+    CHECK(w.simTimeMs() == 0);
+    w.tick(0.5f);                                      // 5 yards
+    const SimObject* co = w.find(c);
+    CHECK(co->moving);
+    CHECK_APPROX(co->pos.x, 5.0f);
+    CHECK_APPROX(co->pos.y, 0.0f);
+    CHECK_APPROX(co->orientation, 0.0f);               // facing +X
+    CHECK(w.simTimeMs() == 500);
+
+    // Four more 5-yard steps: reach node 1 (x=20) and start up the +Y leg toward
+    // node 2, so it is now facing +Y (~pi/2).
+    for (int i = 0; i < 4; ++i) w.tick(0.5f);
+    co = w.find(c);
+    CHECK_APPROX(co->pos.x, 20.0f);
+    CHECK_APPROX(co->pos.y, 5.0f);
+    CHECK(co->orientation > 1.0f);                     // turned toward +Y
+
+    // A lone creature with no path stays put and reports not moving.
+    uint64_t s = w.spawnCreature(300, 0, {5,5,5}, 0.0f);
+    w.tick(1.0f);
+    CHECK(!w.find(s)->moving);
+    CHECK_APPROX(w.find(s)->pos.x, 5.0f);
+
+    // Players spawn in the PLAYER guid space and snapshot is GUID-sorted.
+    uint64_t p = w.spawnPlayer(0, {1,2,3}, 0.0f, "Tester");
+    CHECK((p >> 48) == 0);                             // low guid -> player
+    CHECK(w.find(p)->kind == EntityKind::Player && w.find(p)->name == "Tester");
+    std::vector<SimObject> snap = w.snapshot();
+    CHECK(snap.size() == 3);
+    for (size_t i = 1; i < snap.size(); ++i) CHECK(snap[i-1].guid < snap[i].guid);
 }
