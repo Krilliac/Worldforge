@@ -235,6 +235,7 @@ if(WFORGE_EDITOR)
     tests/editor/test_e2e.cpp
     tests/editor/test_model_viewer.cpp
     tests/editor/test_entity_inspector.cpp
+    tests/editor/test_move_emitter.cpp
   )
   target_link_libraries(wforge-editor-tests PRIVATE wforge-editor wforge-server)
   target_include_directories(wforge-editor-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)

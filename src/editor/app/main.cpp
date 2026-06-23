@@ -20,6 +20,7 @@
 #include "editor/DebugVisPanel.hpp"
 #include "editor/ViewportPanel.hpp"
 #include "editor/EntityInspectorPanel.hpp"
+#include "editor/MoveEmitter.hpp"
 #include "editor/Camera.hpp"
 #include "editor/BridgeClient.hpp"
 #include "editor_bridge.hpp"
@@ -84,6 +85,7 @@ int main() {
         tileScene.terrain.chunkMeshes.push_back(std::move(chunk));
     }
     WorldPick sceneSel;   // the currently-selected static object (if any)
+    editor::MoveEmitter mover;   // gizmo drag on a selected entity -> MoveObject
 
     editor::AtmospherePanel      atmosphere;
     editor::DebugVisPanel        debugVis;
@@ -183,10 +185,18 @@ int main() {
         // Unified click-to-select: a left-click picks the nearest of the live
         // entities and the loaded tile -- an entity sets the WorldView
         // selection, a static object (terrain/doodad/WMO) goes to sceneSel.
-        viewport.draw((ImTextureID)(intptr_t)sceneTex, giz, &selected,
-                      &view, &mesh, &tileScene, &sceneSel);
+        bool gizmoActive = viewport.draw((ImTextureID)(intptr_t)sceneTex, giz, &selected,
+                                         &view, &mesh, &tileScene, &sceneSel);
         debugVis.draw(debug);
         inspector.draw(view, &sceneSel); // live entities + selected static object
+
+        // Dragging the gizmo on a selected entity relocates it on the server.
+        {
+            const Vec3 gpos{ selected.at(0,3), selected.at(1,3), selected.at(2,3) };
+            float ori = view.hasSelection() ? view.find(view.selected())->state.orientation : 0.0f;
+            if (auto op = mover.update(gizmoActive, view.selected(), gpos, ori))
+                bridge.send(encode(*op));
+        }
 
         // Ship the panels' ops to the server.
         for (auto& pkt : outgoing) bridge.send(pkt);
