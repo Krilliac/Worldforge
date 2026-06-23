@@ -8,7 +8,7 @@ pair with a mangos-zero server: load real client assets, render the world in a
 running server while connected retail clients see the edits.**
 
 Every parser, transform, and protocol primitive here is **compiled and
-unit-tested in-tree** (114→314 checks). Where a part needs a GPU/display or your
+unit-tested in-tree** (114→382 checks). Where a part needs a GPU/display or your
 mangos checkout to run, it is implemented as far as it can be verified and the
 boundary is stated plainly (see `ARCHITECTURE.md`).
 
@@ -45,6 +45,7 @@ automatically via CMake FetchContent.
 | `crypto.*`        | SHA-1 + arbitrary-precision modpow                             |
 | `srp6.*`          | WoW-flavour SRP6 logon (client + server)                      |
 | `worldproto.hpp`  | vanilla header cipher + opcode framing                        |
+| `clientfx.*`      | vanilla server-FX packet builders (sound/weather/cinematic/world-state) |
 | `raster.*`        | software rasteriser (z-buffer, perspective-correct)            |
 | `rhi.hpp`         | GPU render-hardware interface (backend-agnostic)              |
 | `editing.*`       | brush falloff + terrain-height / alpha-coverage edit tools      |
@@ -64,6 +65,8 @@ table, and `docs/EDITOR_RESEARCH.md` for the editor UI/architecture design,
 WoW client RE reference, mangos-zero hook points, and the build roadmap.
 `docs/DEBUG_VISUALIZATION.md` covers rendering server-side debug data
 (waypoints/pathing/collision/triggers, aligned with mangoszero `.debug vis`).
+`docs/SERVER_OPCODES.md` documents the verified vanilla server-FX opcode
+builders (and why `SMSG_OVERRIDE_LIGHT` is not usable on 1.12.1).
 
 ## Provenance
 
