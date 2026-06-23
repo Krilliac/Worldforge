@@ -2,6 +2,7 @@
 #include "asset_loader.hpp"
 #include "bounds.hpp"
 #include "picking.hpp"
+#include "scene_pick.hpp"
 #include "mpq.hpp"
 #include "wmo.hpp"
 #include "math.hpp"
@@ -111,4 +112,51 @@ void test_wmo_pick() {
     CHECK(pickMeshXform(down(1.0f,   1.0f), pm, place) < 0.0f);
 
     std::remove(mpqPath);
+
+    // --- pickScene: terrain vs doodad vs WMO, nearest wins ------------------
+    TileScene scene;
+    // A big flat terrain chunk on z=0.
+    TexMesh ground;
+    ground.vertices = {
+        { Vec3{-50,-50,0}, Vec3{0,0,1}, Vec2{0,0} },
+        { Vec3{ 50,-50,0}, Vec3{0,0,1}, Vec2{0,0} },
+        { Vec3{ 50, 50,0}, Vec3{0,0,1}, Vec2{0,0} },
+        { Vec3{-50, 50,0}, Vec3{0,0,1}, Vec2{0,0} },
+    };
+    ground.indices = { 0,1,2, 0,2,3 };
+    scene.terrain.chunkMeshes.push_back(ground);
+
+    // A doodad: a small quad floating at z=5 around (10,10).
+    TexMesh dood;
+    dood.vertices = {
+        { Vec3{-1,-1,0}, Vec3{0,0,1}, Vec2{0,0} },
+        { Vec3{ 1,-1,0}, Vec3{0,0,1}, Vec2{0,0} },
+        { Vec3{ 1, 1,0}, Vec3{0,0,1}, Vec2{0,0} },
+        { Vec3{-1, 1,0}, Vec3{0,0,1}, Vec2{0,0} },
+    };
+    dood.indices = { 0,1,2, 0,2,3 };
+    scene.meshes.push_back(dood);
+    scene.instances.push_back({ 0, 0, Mat4::translate(Vec3{10,10,5}) });
+
+    // A WMO instance (the triangle pick mesh) placed at (30,0,2).
+    scene.wmoInstances.push_back({ pm, Mat4::translate(Vec3{30,0,2}), 7777u });
+
+    // Over open ground -> terrain.
+    ScenePick sg = pickScene(down(-20.0f, -20.0f), scene);
+    CHECK(sg.hit() && sg.kind == ScenePick::Kind::Terrain);
+    CHECK_APPROX(sg.point.z, 0.0f);
+
+    // Over the doodad -> the doodad (z=5) wins over the ground beneath it.
+    ScenePick sd = pickScene(down(10.0f, 10.0f), scene);
+    CHECK(sd.hit() && sd.kind == ScenePick::Kind::Doodad);
+    CHECK_APPROX(sd.point.z, 5.0f);
+
+    // Over the WMO triangle interior (local (1,1) + offset 30,0 -> world ~31,1).
+    ScenePick sw = pickScene(down(31.0f, 1.0f), scene);
+    CHECK(sw.hit() && sw.kind == ScenePick::Kind::Wmo);
+    CHECK(sw.uniqueId == 7777u);
+    CHECK_APPROX(sw.point.z, 2.0f);
+
+    // A ray into empty space misses everything.
+    CHECK(!pickScene(Ray{ Vec3{0,0,10}, Vec3{0,0,1} }, scene).hit());
 }

@@ -54,9 +54,16 @@ struct TileScene {
     std::vector<std::shared_ptr<const Image>> textures;   // their textures (keep-alive)
     struct Inst { size_t mesh; size_t tex; Mat4 transform; };
     std::vector<Inst> instances;
+
+    // Placed WMO geometry (for per-triangle picking / wireframe). Kept as a plain
+    // Mesh in WMO-local space + its MODF world transform + the placement id.
+    struct WmoInst { Mesh mesh; Mat4 transform; uint32_t uniqueId; };
+    std::vector<WmoInst> wmoInstances;
+
     DebugDraw markers;                                    // WMO/doodad placement markers
 
     size_t doodadCount() const { return instances.size(); }
+    size_t wmoCount()    const { return wmoInstances.size(); }
     void render(Framebuffer& fb, const Mat4& viewProj, Vec3 lightDir) const;
 };
 

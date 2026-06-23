@@ -242,11 +242,16 @@ TileScene AssetLoader::buildTileScene(const std::string& map, int x, int y, bool
                                  doodadMatrix(d) });
     }
 
-    // WMO map objects get a placement marker for now (full multi-file WMO
-    // geometry is a follow-up); their world position proves the MODF transform.
+    // WMO map objects: load the real group geometry (for per-triangle picking /
+    // wireframe) placed by the MODF transform; a marker still records the spot.
     for (const WmoDef& w : adt.wmos) {
         Vec3 world = placementToWorld(Vec3{ w.pos[0], w.pos[1], w.pos[2] });
         ts.markers.cross(world, 4.0f, Rgba{120, 180, 255, 255}, DebugCategory::DoodadWire);
+        if (auto wm = wmo(w.modelName)) {
+            Mesh pm = wmoPickMesh(*wm);
+            if (!pm.indices.empty())
+                ts.wmoInstances.push_back({ std::move(pm), wmoMatrix(w), w.uniqueId });
+        }
     }
 
     return ts;

@@ -58,6 +58,7 @@ add_library(wforge STATIC
   src/world_view.cpp
   src/picking.cpp
   src/bounds.cpp
+  src/scene_pick.cpp
 )
 target_include_directories(wforge PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src

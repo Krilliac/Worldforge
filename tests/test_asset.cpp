@@ -108,6 +108,48 @@ std::vector<uint8_t> makeMcnk() {
     std::vector<uint8_t> out; chunk(out, "MCNK", body); return out;
 }
 
+// A minimal WMO root (one group) + its group file, for buildTileScene's WMO
+// loading. Chunk magics are stored reversed on disk (chunk() reverses them).
+std::vector<uint8_t> makeWmoRoot() {
+    std::vector<uint8_t> root, mohd;
+    p32(mohd,0); p32(mohd,1); p32(mohd,0); p32(mohd,0);   // nTex,nGroups,nPortals,nLights
+    p32(mohd,0); p32(mohd,0); p32(mohd,0);                // doodadNames/Defs/Sets
+    p32(mohd,0); p32(mohd,1);                             // ambColor, wmoID
+    pf(mohd,0);pf(mohd,0);pf(mohd,0); pf(mohd,4);pf(mohd,4);pf(mohd,1);   // bbox
+    p16(mohd,0); p16(mohd,0);
+    chunk(root,"MOHD",mohd);
+    std::vector<uint8_t> mogn; mogn.push_back(0); mogn.push_back(0);
+    chunk(root,"MOGN",mogn);
+    std::vector<uint8_t> mogi;
+    p32(mogi,0x8); pf(mogi,0);pf(mogi,0);pf(mogi,0); pf(mogi,4);pf(mogi,4);pf(mogi,1); p32(mogi,0);
+    chunk(root,"MOGI",mogi);
+    return root;
+}
+std::vector<uint8_t> makeWmoGroup() {
+    std::vector<uint8_t> movt;
+    pf(movt,0);pf(movt,0);pf(movt,0); pf(movt,4);pf(movt,0);pf(movt,0); pf(movt,0);pf(movt,4);pf(movt,0);
+    std::vector<uint8_t> monr; for(int i=0;i<3;i++){ pf(monr,0);pf(monr,0);pf(monr,1); }
+    std::vector<uint8_t> motv; for(int i=0;i<3;i++){ pf(motv,0);pf(motv,0); }
+    std::vector<uint8_t> movi; p16(movi,0); p16(movi,1); p16(movi,2);
+    std::vector<uint8_t> mopy; mopy.push_back(0); mopy.push_back(0);
+    std::vector<uint8_t> mogp(0x44, 0);
+    { uint32_t fl=0x8; for(int i=0;i<4;i++) mogp[0x08+i]=(fl>>(8*i))&0xFF; }
+    chunk(mogp,"MOVT",movt); chunk(mogp,"MONR",monr); chunk(mogp,"MOTV",motv);
+    chunk(mogp,"MOVI",movi); chunk(mogp,"MOPY",mopy);
+    std::vector<uint8_t> group; chunk(group,"MOGP",mogp);
+    return group;
+}
+
+// MODF entry (64 bytes): mwidIndex, uniqueId, pos[3], rot[3], extents[6], flags,
+// doodadSet, nameSet, pad.
+void modfEntry(std::vector<uint8_t>& b, uint32_t mwid, uint32_t uid) {
+    p32(b, mwid); p32(b, uid);
+    pf(b,100);pf(b,200);pf(b,50);          // pos
+    pf(b,0);pf(b,0);pf(b,0);               // rot
+    for (int i=0;i<6;i++) pf(b,0);         // extents
+    p16(b,0); p16(b,0); p16(b,0); p16(b,0);
+}
+
 // MDDF entry (36 bytes): mmidIndex, uniqueId, pos[3], rot[3], scale16, flags16.
 void mddfEntry(std::vector<uint8_t>& b, uint32_t mmid, uint32_t uid,
                float px, float py, float pz, uint16_t scale) {
@@ -129,11 +171,20 @@ std::vector<uint8_t> makeAdt() {
     mddfEntry(mddf, 0, 1001, 100.f, 200.f, 300.f, 1024);      // -> doodad.m2 (present)
     mddfEntry(mddf, 1, 1002, 10.f,  20.f,  30.f,  1024);      // -> missing.m2 (skipped)
 
+    // One WMO placement referencing "wmo\Box.wmo".
+    std::string wmoName = std::string("wmo\\Box.wmo");
+    std::vector<uint8_t> mwmo(wmoName.begin(), wmoName.end()); mwmo.push_back(0);
+    std::vector<uint8_t> mwid; p32(mwid, 0);
+    std::vector<uint8_t> modf; modfEntry(modf, 0, 2001);
+
     std::vector<uint8_t> adt;
     chunk(adt, "MTEX", mtex);
     chunk(adt, "MMDX", mmdx);
     chunk(adt, "MMID", mmid);
     chunk(adt, "MDDF", mddf);
+    chunk(adt, "MWMO", mwmo);
+    chunk(adt, "MWID", mwid);
+    chunk(adt, "MODF", modf);
     std::vector<uint8_t> mcnk = makeMcnk();
     adt.insert(adt.end(), mcnk.begin(), mcnk.end());
     return adt;
@@ -158,6 +209,8 @@ void test_asset() {
     std::vector<std::pair<std::string, std::vector<uint8_t>>> files = {
         { "test.blp", makeRawBlp(2, 2, Rgba{40, 200, 60, 255}) },
         { "doodad.m2", makeM2("test.blp") },
+        { "wmo\\Box.wmo", makeWmoRoot() },
+        { "wmo\\Box_000.wmo", makeWmoGroup() },
         { "World\\Maps\\TestMap\\TestMap.wdt", makeWdt() },
         { "World\\Maps\\TestMap\\TestMap_32_32.adt", makeAdt() },
     };
@@ -220,6 +273,10 @@ void test_asset() {
     CHECK(!scene.terrain.empty());
     // Two MDDF entries authored; only doodad.m2 resolves -> exactly one instance.
     CHECK(scene.doodadCount() == 1);
+    // The WMO placement loaded its group geometry into a pickable instance.
+    CHECK(scene.wmoCount() == 1);
+    CHECK(!scene.wmoInstances[0].mesh.indices.empty());
+    CHECK(scene.wmoInstances[0].uniqueId == 2001);
     CHECK(scene.meshes.size() == 1 && scene.textures.size() == 1);
     CHECK(!scene.meshes[0].vertices.empty());
     CHECK(scene.textures[0].get() == t.get());             // model's MTEX -> green BLP

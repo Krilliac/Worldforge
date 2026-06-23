@@ -12,6 +12,7 @@
 
 #include "math.hpp"
 #include "terrain.hpp"     // Mesh
+#include "raster.hpp"      // TexMesh
 #include "gizmo.hpp"       // Ray, rayTriangle, pickMesh (shared picking math)
 #include "world_view.hpp"
 
@@ -35,6 +36,8 @@ float rayObb(const Ray& r, const Vec3& pos, float yaw, const Vec3& localMin, con
 // triangle into world space and ray-tests it -- no matrix inverse needed -- so
 // a WMO instance can be picked per-triangle. Nearest hit distance, or < 0.
 float pickMeshXform(const Ray& r, const Mesh& mesh, const Mat4& xform);
+// Same, for a textured mesh (terrain chunks / placed doodads).
+float pickTexMeshXform(const Ray& r, const TexMesh& mesh, const Mat4& xform);
 
 // What a click resolved to.
 struct PickResult {
