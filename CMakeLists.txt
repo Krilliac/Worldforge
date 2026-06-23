@@ -48,6 +48,7 @@ add_library(wforge STATIC
   src/server/world_sim.cpp
   src/m2_render.cpp
   src/scene.cpp
+  src/terrain_render.cpp
 )
 target_include_directories(wforge PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -123,6 +124,9 @@ target_link_libraries(wforge-raster-demo PRIVATE wforge)
 
 add_executable(wforge-debug-demo src/debug_demo.cpp)
 target_link_libraries(wforge-debug-demo PRIVATE wforge)
+
+add_executable(wforge-terrain-demo src/terrain_demo.cpp)
+target_link_libraries(wforge-terrain-demo PRIVATE wforge)
 
 # ---------------------------------------------------------------------------
 # Editor: Dear ImGui panels. ImGui core compiles with no GPU/display (it only

@@ -8,6 +8,7 @@ build/
 /worldforge_editor.png
 /worldforge_model_viewer.png
 /worldforge_scene.png
+/worldforge_terrain_tex.png
 
 # Editor / OS cruft
 .DS_Store

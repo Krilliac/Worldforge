@@ -2,6 +2,10 @@
 #include "raster.hpp"
 #include "m2_render.hpp"
 #include "scene.hpp"
+#include "terrain_render.hpp"
+#include "modelmesh.hpp"
+#include "terrain.hpp"
+#include "wmo.hpp"
 #include "m2.hpp"
 #include "image.hpp"
 #include "math.hpp"
@@ -110,5 +114,64 @@ void test_render() {
         for (const Rgba& p : fb.color.pixels)
             if (!(p.r==10 && p.g==10 && p.b==14)) ++lit;
         CHECK(lit > 200);                         // terrain + instance + overlay drawn
+    }
+
+    // --- terrain MCAL splat: blend a base + alpha-mapped overlay ----------
+    {
+        Image grass(1,1); grass.at(0,0) = Rgba{40,160,40,255};
+        Image rock(1,1);  rock.at(0,0)  = Rgba{150,150,150,255};
+
+        AlphaMap am;                              // layer-1 coverage
+        std::vector<TerrainLayer> layers = { { &grass, nullptr }, { &rock, &am } };
+
+        am.texels.fill(0);                        // no rock -> pure grass
+        Rgba c0 = splatSample(layers, 0.5f, 0.5f, 1.0f);
+        CHECK(c0.g > 120 && c0.r < 80);
+
+        am.texels.fill(255);                      // full rock -> grey
+        Rgba c1 = splatSample(layers, 0.5f, 0.5f, 1.0f);
+        CHECK(c1.r > 120 && c1.g > 120 && c1.b > 120);
+
+        am.texels.fill(128);                      // half -> blend between
+        Rgba ch = splatSample(layers, 0.5f, 0.5f, 1.0f);
+        CHECK(ch.r > c0.r && ch.r < c1.r);
+    }
+
+    // --- buildChunkTexMesh: 145 verts with chunk-space UVs ----------------
+    {
+        MapChunk mc;
+        mc.position = {0,0,0};
+        for (int i = 0; i < 145; ++i) mc.heights[i] = 0.0f;
+        for (auto& n : mc.normals) n = {0,0,1};
+        TexMesh tm = buildChunkTexMesh(mc, 32, 32);
+        CHECK(tm.vertices.size() == 145);
+        CHECK_APPROX(tm.vertices[0].uv.x, 0.0f);          // outer (0,0)
+        CHECK_APPROX(tm.vertices[0].uv.y, 0.0f);
+        CHECK_APPROX(tm.vertices[80].uv.x, 1.0f);         // outer (8,8)
+        CHECK_APPROX(tm.vertices[80].uv.y, 1.0f);
+
+        // It rasterises with the splat.
+        Image grass(1,1); grass.at(0,0) = Rgba{40,160,40,255};
+        std::vector<TerrainLayer> layers = { { &grass, nullptr } };
+        Framebuffer fb(64,64); fb.clear(Rgba{0,0,0,255});
+        Mat4 view = Mat4::lookAt({16,16,40}, {16,16,0}, {0,1,0});
+        Mat4 proj = Mat4::perspective(60.0, 1.0, 0.5, 500.0);
+        rasterTerrainSplat(fb, tm, proj*view, layers, 4.0f, {0,0,1});
+        bool green = false;
+        for (const Rgba& p : fb.color.pixels) if (p.g > 60 && p.g > p.r) { green = true; break; }
+        CHECK(green);
+    }
+
+    // --- WMO group -> textured mesh preserves UVs -------------------------
+    {
+        WmoGroup g;
+        g.vertices = { {0,0,0}, {1,0,0}, {0,1,0} };
+        g.normals  = { {0,0,1}, {0,0,1}, {0,0,1} };
+        g.uvs      = { {0,0}, {1,0}, {0,1} };
+        g.indices  = { 0,1,2 };
+        TexMesh tm = wmoGroupToTexMesh(g);
+        CHECK(tm.vertices.size() == 3 && tm.indices.size() == 3);
+        CHECK_APPROX(tm.vertices[1].uv.x, 1.0f);
+        CHECK_APPROX(tm.vertices[2].uv.y, 1.0f);
     }
 }

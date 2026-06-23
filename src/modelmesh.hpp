@@ -7,6 +7,7 @@
 // transform. Pure data, unit-tested headless.
 // ---------------------------------------------------------------------------
 #include "terrain.hpp"   // Mesh / Vertex
+#include "raster.hpp"    // TexMesh
 #include "m2.hpp"
 #include "wmo.hpp"
 
@@ -18,5 +19,8 @@ Mesh m2ToMesh(const M2Model& model);
 
 // WMO group (MOVT/MONR/MOVI) -> Mesh, 1:1 with the group's vertex/index arrays.
 Mesh wmoGroupToMesh(const WmoGroup& group);
+
+// WMO group -> textured mesh (MOVT/MONR/MOTV/MOVI), for textured rendering.
+TexMesh wmoGroupToTexMesh(const WmoGroup& group);
 
 } // namespace wf

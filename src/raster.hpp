@@ -42,6 +42,10 @@ void rasterMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp, Vec3 lightDi
 struct TexVertex { Vec3 position; Vec3 normal; Vec2 uv; };
 struct TexMesh   { std::vector<TexVertex> vertices; std::vector<uint32_t> indices; };
 
+// Nearest-sample a texture with UV repeat (wrap). Shared by the model and
+// terrain texturing paths.
+Rgba sampleTextureWrap(const Image& tex, float u, float v);
+
 // Render a textured mesh: perspective-correct UV interpolation, nearest texel
 // sampling (UV wraps/repeats), modulated by directional + ambient lighting.
 // Texels with alpha < 8 are discarded (alpha-test) so cutout textures (foliage)

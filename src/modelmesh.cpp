@@ -39,4 +39,19 @@ Mesh wmoGroupToMesh(const WmoGroup& group) {
     return mesh;
 }
 
+TexMesh wmoGroupToTexMesh(const WmoGroup& group) {
+    TexMesh mesh;
+    mesh.vertices.reserve(group.vertices.size());
+    for (size_t i = 0; i < group.vertices.size(); ++i) {
+        Vec3 n  = (i < group.normals.size()) ? group.normals[i] : Vec3{0, 0, 1};
+        Vec2 uv = (i < group.uvs.size())     ? group.uvs[i]     : Vec2{0, 0};
+        mesh.vertices.push_back({ group.vertices[i], n, uv });
+    }
+    mesh.indices.reserve(group.indices.size());
+    for (uint16_t idx : group.indices)
+        if (idx < mesh.vertices.size()) mesh.indices.push_back(idx);
+    mesh.indices.resize(mesh.indices.size() - (mesh.indices.size() % 3));
+    return mesh;
+}
+
 } // namespace wf

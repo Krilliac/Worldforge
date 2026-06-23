@@ -8,7 +8,7 @@ pair with a mangos-zero server: load real client assets, render the world in a
 running server while connected retail clients see the edits.**
 
 Every parser, transform, and protocol primitive here is **compiled and
-unit-tested in-tree** (114→546 core + 76 editor checks). Where a part needs a GPU/display or your
+unit-tested in-tree** (114→558 core + 76 editor checks). Where a part needs a GPU/display or your
 mangos checkout to run, it is implemented as far as it can be verified and the
 boundary is stated plainly (see `ARCHITECTURE.md`).
 
@@ -25,6 +25,7 @@ cmake --build build -j$(nproc)
 ./build/wforge-editor-headless   # render the whole editor on the CPU -> PNG
 ./build/wforge-scene-demo        # terrain + textured animated model instances -> PNG
 ./build/wforge-model-viewer      # animated M2 in a model-viewer panel -> PNG
+./build/wforge-terrain-demo      # textured terrain (MCAL grass+rock splat) -> PNG
 ./build/wforge-stub-server [port]   # run the standalone bridge server (no mangos)
 ./build/wforge-dump <DataDir> <Map> [tileX tileY]   # inspect a real MPQ tree
 ```
@@ -69,6 +70,7 @@ automatically via CMake FetchContent.
 | `raster.*`        | software rasteriser: shaded mesh + textured (UV) mesh          |
 | `m2_render.*`     | M2 skinning: bone pose → posed textured mesh (animation)       |
 | `scene.*`         | compose terrain + textured model instances + overlay → render  |
+| `terrain_render.*`| MCNK/MCAL multi-layer alpha-splat textured terrain             |
 | `rhi.hpp`         | GPU render-hardware interface (backend-agnostic)              |
 | `rhi_software.*`  | RHI realised on the rasteriser (tested headless)               |
 | `rhi_gl.*`        | RHI realised on OpenGL 3.3 (gated `WFORGE_RHI_GL`, desktop)    |
@@ -78,7 +80,7 @@ automatically via CMake FetchContent.
 | `editor_bridge.*` | editor↔server RPC: `EDITOR_*` op structs + `.debug vis` stream |
 | `db_export.*`     | placements → mangos `creature`/`gameobject`/`creature_movement` SQL |
 | `debugdraw.*`     | category-tagged debug primitives (waypoints/collision/triggers/wireframe) |
-| `modelmesh.*`     | M2 / WMO geometry → renderer Mesh (doodad wireframe)           |
+| `modelmesh.*`     | M2 / WMO geometry → Mesh + textured TexMesh                     |
 | `byte_writer.hpp` | little-endian write counterpart to `byte_reader.hpp`           |
 | `editor/`         | ImGui panels + Viewport + fly Camera + ImGuizmo + software ImGui + bridge client |
 | `server/`         | WorldSim + standalone stub bridge server (runnable WorldForgeBridge analog) |

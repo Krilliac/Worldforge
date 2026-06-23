@@ -126,16 +126,13 @@ void rasterMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp, Vec3 lightDi
     }
 }
 
-namespace {
-// Nearest-sample a texture with UV repeat.
-inline Rgba sampleWrap(const Image& tex, float u, float v) {
+Rgba sampleTextureWrap(const Image& tex, float u, float v) {
     if (tex.width <= 0 || tex.height <= 0) return Rgba{255, 0, 255, 255};
     u -= std::floor(u); v -= std::floor(v);
     int tx = std::min(tex.width  - 1, (int)(u * tex.width));
     int ty = std::min(tex.height - 1, (int)(v * tex.height));
     return tex.at(tx, ty);
 }
-} // namespace
 
 void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                    const Image& tex, Vec3 lightDir) {
@@ -192,7 +189,7 @@ void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                 float iw = l0*iw0 + l1*iw1 + l2*iw2;
                 float u = (l0*V0.uv.x*iw0 + l1*V1.uv.x*iw1 + l2*V2.uv.x*iw2) / iw;
                 float v = (l0*V0.uv.y*iw0 + l1*V1.uv.y*iw1 + l2*V2.uv.y*iw2) / iw;
-                Rgba texel = sampleWrap(tex, u, v);
+                Rgba texel = sampleTextureWrap(tex, u, v);
                 if (texel.a < 8) continue;                 // alpha-test cutout
 
                 Vec3 n = (V0.normal*(l0*iw0) + V1.normal*(l1*iw1) + V2.normal*(l2*iw2)) * (1.0f/iw);
