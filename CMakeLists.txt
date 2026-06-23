@@ -95,3 +95,67 @@ target_link_libraries(wforge-raster-demo PRIVATE wforge)
 
 add_executable(wforge-debug-demo src/debug_demo.cpp)
 target_link_libraries(wforge-debug-demo PRIVATE wforge)
+
+# ---------------------------------------------------------------------------
+# Editor: Dear ImGui panels. ImGui core compiles with no GPU/display (it only
+# emits draw data), so the panels + a headless smoke test build everywhere.
+# The runnable windowed app (GLFW + OpenGL backend) is gated separately.
+# ---------------------------------------------------------------------------
+option(WFORGE_EDITOR     "Build the ImGui editor panels + headless tests" ON)
+option(WFORGE_EDITOR_APP "Build the runnable windowed editor (needs GLFW + OpenGL)" OFF)
+
+set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/imgui)
+
+if(WFORGE_EDITOR)
+  if(NOT EXISTS ${IMGUI_DIR}/imgui.cpp)
+    message(FATAL_ERROR "Dear ImGui submodule missing. Run: git submodule update --init --recursive")
+  endif()
+
+  add_library(imgui STATIC
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/imgui_demo.cpp
+  )
+  target_include_directories(imgui PUBLIC ${IMGUI_DIR})
+
+  add_library(wforge-editor STATIC
+    src/editor/AtmospherePanel.cpp
+    src/editor/DebugVisPanel.cpp
+  )
+  target_include_directories(wforge-editor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(wforge-editor PUBLIC wforge imgui)
+  if(NOT MSVC)
+    target_compile_options(wforge-editor PRIVATE -Wall -Wextra)
+  endif()
+
+  add_executable(wforge-editor-tests
+    tests/editor/test_editor_main.cpp
+    tests/editor/test_panels.cpp
+  )
+  target_link_libraries(wforge-editor-tests PRIVATE wforge-editor)
+  target_include_directories(wforge-editor-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  add_test(NAME editor COMMAND wforge-editor-tests)
+endif()
+
+# Runnable windowed editor: ImGui GLFW + OpenGL3 backends (bundled in the
+# submodule). OFF by default -- needs a GL/GLFW toolchain + a display, so it is
+# built on a desktop, not in headless CI.
+if(WFORGE_EDITOR_APP)
+  find_package(OpenGL REQUIRED)
+  find_package(glfw3 QUIET)
+  if(NOT glfw3_FOUND)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    add_subdirectory(external/glfw)   # provide via: git submodule add .../glfw external/glfw
+  endif()
+  add_executable(wforge-editor-app
+    src/editor/app/main.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
+  )
+  target_include_directories(wforge-editor-app PRIVATE ${IMGUI_DIR}/backends)
+  target_link_libraries(wforge-editor-app PRIVATE wforge-editor glfw OpenGL::GL)
+endif()
