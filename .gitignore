@@ -8,6 +8,9 @@ build/
 /cmake_install.cmake
 /Makefile
 /_deps/
+/CPackConfig.cmake
+/CPackSourceConfig.cmake
+/CTestTestfile.cmake
 /wforge-dump
 /wforge-tests
 /wforge-stub-server

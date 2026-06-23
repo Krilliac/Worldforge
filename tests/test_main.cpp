@@ -28,6 +28,7 @@ void test_world_sim();
 void test_render();
 void test_asset();
 void test_client_data();
+void test_audio();
 
 int main() {
     test_math();
@@ -58,6 +59,7 @@ int main() {
     test_render();
     test_asset();
     test_client_data();
+    test_audio();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;

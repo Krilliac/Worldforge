@@ -51,6 +51,10 @@ add_library(wforge STATIC
   src/terrain_render.cpp
   src/asset_loader.cpp
   src/client_data.cpp
+  src/wav.cpp
+  src/audio.cpp
+  src/sound_entries.cpp
+  src/sound_player.cpp
 )
 target_include_directories(wforge PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -105,6 +109,7 @@ add_executable(wforge-tests
   tests/test_render.cpp
   tests/test_asset.cpp
   tests/test_client_data.cpp
+  tests/test_audio.cpp
 )
 target_link_libraries(wforge-tests PRIVATE wforge)
 target_include_directories(wforge-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
@@ -140,6 +145,25 @@ target_link_libraries(wforge-terrain-demo PRIVATE wforge)
 option(WFORGE_EDITOR     "Build the ImGui editor panels + headless tests" ON)
 option(WFORGE_EDITOR_APP "Build the runnable windowed editor (needs GLFW + OpenGL)" OFF)
 option(WFORGE_RHI_GL     "Build the OpenGL 3.3 RHI backend (needs glad + a GL context)" OFF)
+option(WFORGE_AUDIO      "Build the miniaudio host backend (needs an audio device)" OFF)
+
+# Audio host backend -- the device realisation of AudioDevice, backed by
+# miniaudio (single-header). OFF by default like the GL RHI: it opens a real
+# audio device, while NullAudioDevice is the tested realisation here. When ON,
+# FetchContent pulls miniaudio and a wforge-audio library is built; the engine
+# core (NullAudioDevice, WAV codec, SoundPlayer) builds everywhere regardless.
+if(WFORGE_AUDIO)
+  include(FetchContent)
+  FetchContent_Declare(miniaudio
+    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+    GIT_TAG        0.11.21)
+  FetchContent_MakeAvailable(miniaudio)
+  add_library(wforge-audio STATIC src/audio_miniaudio.cpp)
+  target_compile_definitions(wforge-audio PUBLIC WFORGE_AUDIO)
+  target_include_directories(wforge-audio PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src ${miniaudio_SOURCE_DIR})
+  target_link_libraries(wforge-audio PUBLIC wforge ${CMAKE_DL_LIBS} Threads::Threads)
+endif()
 
 # OpenGL RHI backend -- the GPU realisation of rhi::Device. OFF by default: it
 # needs a GL 3.3 loader (glad) and a current context, so it builds on a desktop,

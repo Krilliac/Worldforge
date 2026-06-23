@@ -22,6 +22,7 @@
 #include "image.hpp"
 #include "m2.hpp"
 #include "debugdraw.hpp"
+#include "audio.hpp"
 
 namespace wf {
 
@@ -74,6 +75,15 @@ public:
 
     // Parse an M2 model by archived path (cached). nullptr if missing/malformed.
     std::shared_ptr<const M2Model> model(const std::string& path);
+
+    // Extract a sound/music file's raw bytes from the chain (e.g. the sound
+    // MPQ). False if the archived path is absent. Not cached -- audio buffers
+    // are large and usually streamed once.
+    bool sound(const std::string& path, std::vector<uint8_t>& out) const;
+
+    // Extract + wrap as an AudioClip: WAV decoded to PCM, MP3 kept as encoded
+    // bytes. An absent path yields an empty clip (codec None), never throws.
+    AudioClip soundClip(const std::string& path) const;
 
     // Build a tile's textured terrain (MCNK meshes + MCAL splat layers from
     // MTEX). bigAlpha selects the 8-bit vs 4-bit MCAL form (WDT MPHD flag).

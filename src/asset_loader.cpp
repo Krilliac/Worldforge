@@ -102,6 +102,16 @@ std::shared_ptr<const M2Model> AssetLoader::model(const std::string& path) {
     return result;
 }
 
+bool AssetLoader::sound(const std::string& path, std::vector<uint8_t>& out) const {
+    return mpq_.readFile(path, out);
+}
+
+AudioClip AssetLoader::soundClip(const std::string& path) const {
+    std::vector<uint8_t> buf;
+    if (!mpq_.readFile(path, buf)) return AudioClip{};   // empty (codec None)
+    return makeClip(path, buf);
+}
+
 TileRender AssetLoader::buildTile(const std::string& map, int x, int y, bool bigAlpha) {
     Adt adt;
     std::vector<MapChunk> chunks;
