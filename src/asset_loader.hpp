@@ -20,8 +20,16 @@
 #include "terrain_render.hpp"
 #include "raster.hpp"
 #include "image.hpp"
+#include "m2.hpp"
+#include "debugdraw.hpp"
 
 namespace wf {
+
+// MDDF doodad / MODF WMO placement -> world transform (translate * rotate *
+// scale). Rotation is the stored Euler (degrees); the axis/order is the one
+// item to confirm against a real tile (same risk class as MODF extent order).
+Mat4 doodadMatrix(const DoodadDef& d);
+Mat4 wmoMatrix(const WmoDef& w);
 
 // Owns the meshes / textures / alpha maps for one rendered tile, so the
 // TerrainLayer pointers stay valid while the tile is drawn.
@@ -35,6 +43,19 @@ struct TileRender {
     bool empty() const { return chunkMeshes.empty(); }
     // Rasterise every chunk's terrain splat into `fb` through `mvp`.
     void renderTerrain(Framebuffer& fb, const Mat4& mvp, Vec3 lightDir) const;
+};
+
+// A fully-populated tile: textured terrain + placed model instances + markers.
+struct TileScene {
+    TileRender terrain;
+    std::vector<TexMesh>                      meshes;     // doodad/WMO meshes (owned)
+    std::vector<std::shared_ptr<const Image>> textures;   // their textures (keep-alive)
+    struct Inst { size_t mesh; size_t tex; Mat4 transform; };
+    std::vector<Inst> instances;
+    DebugDraw markers;                                    // WMO/doodad placement markers
+
+    size_t doodadCount() const { return instances.size(); }
+    void render(Framebuffer& fb, const Mat4& viewProj, Vec3 lightDir) const;
 };
 
 class AssetLoader {
@@ -51,17 +72,29 @@ public:
     // Parse one ADT tile: placements (Adt) + terrain chunks. False if absent.
     bool loadAdt(const std::string& map, int x, int y, Adt& adt, std::vector<MapChunk>& chunks);
 
+    // Parse an M2 model by archived path (cached). nullptr if missing/malformed.
+    std::shared_ptr<const M2Model> model(const std::string& path);
+
     // Build a tile's textured terrain (MCNK meshes + MCAL splat layers from
     // MTEX). bigAlpha selects the 8-bit vs 4-bit MCAL form (WDT MPHD flag).
     TileRender buildTile(const std::string& map, int x, int y, bool bigAlpha = false);
+
+    // Build a fully-populated tile: terrain + every resolvable M2 doodad placed
+    // by its MDDF transform; WMO placements get a marker (full WMO geometry is a
+    // multi-file follow-up). Missing models are skipped, never fatal.
+    TileScene buildTileScene(const std::string& map, int x, int y, bool bigAlpha = false);
 
 private:
     static std::string wdtPath(const std::string& map);
     static std::string adtPath(const std::string& map, int x, int y);
     std::shared_ptr<const Image> fallback();
 
+    TileRender buildTerrain(const Adt& adt, const std::vector<MapChunk>& chunks,
+                            int x, int y, bool bigAlpha);
+
     const MpqManager& mpq_;
-    std::unordered_map<std::string, std::shared_ptr<const Image>> texCache_;
+    std::unordered_map<std::string, std::shared_ptr<const Image>>   texCache_;
+    std::unordered_map<std::string, std::shared_ptr<const M2Model>> modelCache_;
     std::shared_ptr<const Image> fallback_;
 };
 

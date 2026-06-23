@@ -114,8 +114,9 @@ void dumpTile(const wf::MpqManager& mpq, const std::string& map, int x, int y) {
 bool renderTile(const wf::MpqManager& mpq, const std::string& map, int x, int y,
                 const std::string& outPng) {
     wf::AssetLoader loader(mpq);
-    wf::TileRender tile = loader.buildTile(map, x, y);
-    if (tile.empty()) { std::printf("## render: tile %d,%d empty / not found\n", x, y); return false; }
+    wf::TileScene scene = loader.buildTileScene(map, x, y);
+    if (scene.terrain.empty()) { std::printf("## render: tile %d,%d empty / not found\n", x, y); return false; }
+    const wf::TileRender& tile = scene.terrain;
 
     // Fit a camera to the tile's vertex bounds.
     wf::Vec3 lo{ +1e30f, +1e30f, +1e30f }, hi{ -1e30f, -1e30f, -1e30f };
@@ -132,11 +133,12 @@ bool renderTile(const wf::MpqManager& mpq, const std::string& map, int x, int y,
     fb.clear(wf::Rgba{ 24, 28, 40, 255 });
     wf::Mat4 view = wf::Mat4::lookAt(c + wf::Vec3{ r*0.9f, r*0.9f, r*0.8f }, c, { 0, 0, 1 });
     wf::Mat4 proj = wf::Mat4::perspective(55.0, double(W)/H, 1.0, r * 6.0 + 100.0);
-    tile.renderTerrain(fb, proj * view, wf::Vec3{ 0.5f, 0.4f, 0.8f });
+    scene.render(fb, proj * view, wf::Vec3{ 0.5f, 0.4f, 0.8f });
 
     if (!wf::writePng(fb.color, outPng)) { std::fprintf(stderr, "render: write failed\n"); return false; }
-    std::printf("## render: wrote %s  (%zu chunks, %zu textures)\n",
-                outPng.c_str(), tile.chunkMeshes.size(), tile.textures.size());
+    std::printf("## render: wrote %s  (%zu chunks, %zu textures, %zu doodads)\n",
+                outPng.c_str(), tile.chunkMeshes.size(), tile.textures.size(),
+                scene.doodadCount());
     return true;
 }
 

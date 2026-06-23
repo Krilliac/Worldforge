@@ -4,6 +4,7 @@
 #include "raster.hpp"
 #include "image.hpp"
 #include "math.hpp"
+#include "coords.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -19,6 +20,58 @@ void p16(std::vector<uint8_t>& b, uint16_t v){ b.push_back(v&0xFF); b.push_back(
 void p32(std::vector<uint8_t>& b, uint32_t v){ for(int i=0;i<4;i++) b.push_back((v>>(8*i))&0xFF); }
 void pf (std::vector<uint8_t>& b, float f){ uint32_t v; std::memcpy(&v,&f,4); p32(b,v); }
 void praw(std::vector<uint8_t>& b, const char* s){ for(int i=0;i<4;i++) b.push_back((uint8_t)s[i]); }
+void patch32(std::vector<uint8_t>& b, size_t at, uint32_t v){ for(int i=0;i<4;i++) b[at+i]=(v>>(8*i))&0xFF; }
+void align4(std::vector<uint8_t>& b){ while (b.size() % 4) b.push_back(0); }
+
+// A minimal vanilla M2 (MD20 v0x100): one textured triangle whose texture
+// record points at `texName`. Mirrors tests/test_m2.cpp's synthetic builder.
+std::vector<uint8_t> makeM2(const std::string& texName) {
+    std::vector<uint8_t> f(0x150, 0);
+    f[0]='M'; f[1]='D'; f[2]='2'; f[3]='0';
+    patch32(f, 0x004, 0x100);
+
+    uint32_t nameOff = (uint32_t)f.size();
+    for (char c : std::string("Doodad")) f.push_back((uint8_t)c);
+    f.push_back(0); align4(f);
+
+    uint32_t vtxOff = (uint32_t)f.size();
+    for (int i = 0; i < 3; ++i) {
+        pf(f,(float)i); pf(f,(float)(i*2)); pf(f,(float)(i*3));   // pos
+        for (int k=0;k<4;k++) f.push_back(k==0?255:0);           // bone weights
+        for (int k=0;k<4;k++) f.push_back(0);                     // bone indices
+        pf(f,0.f); pf(f,0.f); pf(f,1.f);                          // normal
+        pf(f,i*0.1f); pf(f,i*0.2f);                               // uv
+        pf(f,0.f); pf(f,0.f);                                     // uv set 2
+    }
+
+    uint32_t texNameOff = (uint32_t)f.size();
+    for (char c : texName) f.push_back((uint8_t)c);
+    f.push_back(0); align4(f);
+    uint32_t texOff = (uint32_t)f.size();
+    p32(f,0); p32(f,0); p32(f,(uint32_t)texName.size()+1); p32(f,texNameOff);
+
+    uint32_t lookupOff = (uint32_t)f.size();
+    p16(f,0); p16(f,1); p16(f,2);
+    uint32_t triOff = (uint32_t)f.size();
+    p16(f,0); p16(f,1); p16(f,2);
+    uint32_t subOff = (uint32_t)f.size();
+    p16(f,0); p16(f,0); p16(f,0); p16(f,3); p16(f,0); p16(f,3);
+    for (int i=0;i<20;i++) f.push_back(0);
+
+    uint32_t viewOff = (uint32_t)f.size();
+    p32(f,3); p32(f,lookupOff);
+    p32(f,3); p32(f,triOff);
+    p32(f,0); p32(f,0);
+    p32(f,1); p32(f,subOff);
+    p32(f,0); p32(f,0);
+    p32(f,0);
+
+    patch32(f, 0x008, 7);  patch32(f, 0x00C, nameOff);
+    patch32(f, 0x044, 3);  patch32(f, 0x048, vtxOff);
+    patch32(f, 0x04C, 1);  patch32(f, 0x050, viewOff);
+    patch32(f, 0x05C, 1);  patch32(f, 0x060, texOff);
+    return f;
+}
 void chunk(std::vector<uint8_t>& b, const char* m, const std::vector<uint8_t>& p){
     // ADT chunk magics are stored reversed on disk; forEachChunk un-reverses.
     b.push_back(m[3]); b.push_back(m[2]); b.push_back(m[1]); b.push_back(m[0]);
@@ -55,10 +108,32 @@ std::vector<uint8_t> makeMcnk() {
     std::vector<uint8_t> out; chunk(out, "MCNK", body); return out;
 }
 
+// MDDF entry (36 bytes): mmidIndex, uniqueId, pos[3], rot[3], scale16, flags16.
+void mddfEntry(std::vector<uint8_t>& b, uint32_t mmid, uint32_t uid,
+               float px, float py, float pz, uint16_t scale) {
+    p32(b, mmid); p32(b, uid);
+    pf(b, px); pf(b, py); pf(b, pz);
+    pf(b, 0.f); pf(b, 0.f); pf(b, 0.f);
+    p16(b, scale); p16(b, 0);
+}
+
 std::vector<uint8_t> makeAdt() {
     std::vector<uint8_t> mtex; for (char c : std::string("test.blp")) mtex.push_back((uint8_t)c); mtex.push_back(0);
+
+    // Two model names: one present in the archive, one deliberately missing.
+    std::string names = std::string("doodad.m2") + '\0' + "missing.m2" + '\0';
+    std::vector<uint8_t> mmdx(names.begin(), names.end());
+    std::vector<uint8_t> mmid; p32(mmid, 0); p32(mmid, 10);   // offsets into MMDX
+
+    std::vector<uint8_t> mddf;
+    mddfEntry(mddf, 0, 1001, 100.f, 200.f, 300.f, 1024);      // -> doodad.m2 (present)
+    mddfEntry(mddf, 1, 1002, 10.f,  20.f,  30.f,  1024);      // -> missing.m2 (skipped)
+
     std::vector<uint8_t> adt;
     chunk(adt, "MTEX", mtex);
+    chunk(adt, "MMDX", mmdx);
+    chunk(adt, "MMID", mmid);
+    chunk(adt, "MDDF", mddf);
     std::vector<uint8_t> mcnk = makeMcnk();
     adt.insert(adt.end(), mcnk.begin(), mcnk.end());
     return adt;
@@ -82,6 +157,7 @@ void test_asset() {
     const char* mpqPath = "wforge_asset_test.mpq";
     std::vector<std::pair<std::string, std::vector<uint8_t>>> files = {
         { "test.blp", makeRawBlp(2, 2, Rgba{40, 200, 60, 255}) },
+        { "doodad.m2", makeM2("test.blp") },
         { "World\\Maps\\TestMap\\TestMap.wdt", makeWdt() },
         { "World\\Maps\\TestMap\\TestMap_32_32.adt", makeAdt() },
     };
@@ -128,9 +204,39 @@ void test_asset() {
     for (const Rgba& p : fb.color.pixels) if (p.g > 80 && p.g > p.r && p.g > p.b) { green = true; break; }
     CHECK(green);
 
+    // --- model(): M2 parse + cache + missing -------------------------------
+    auto mdl = loader.model("doodad.m2");
+    CHECK(mdl && mdl->vertices.size() == 3);
+    CHECK(loader.model("doodad.m2").get() == mdl.get());   // cached
+    CHECK(loader.model("missing.m2") == nullptr);          // graceful nullptr
+
+    // --- buildTileScene: terrain + placed doodads --------------------------
+    TileScene scene = loader.buildTileScene("TestMap", 32, 32);
+    CHECK(!scene.terrain.empty());
+    // Two MDDF entries authored; only doodad.m2 resolves -> exactly one instance.
+    CHECK(scene.doodadCount() == 1);
+    CHECK(scene.meshes.size() == 1 && scene.textures.size() == 1);
+    CHECK(!scene.meshes[0].vertices.empty());
+    CHECK(scene.textures[0].get() == t.get());             // model's MTEX -> green BLP
+
+    // The instance transform translates to the placement's world position.
+    Vec3 world = placementToWorld(Vec3{100.f, 200.f, 300.f});
+    const Mat4& m = scene.instances[0].transform;
+    CHECK_APPROX(m.at(0,3), world.x);
+    CHECK_APPROX(m.at(1,3), world.y);
+    CHECK_APPROX(m.at(2,3), world.z);
+
+    // The missing doodad still left a marker (skipped, not fatal).
+    CHECK(scene.markers.stats().points > 0 || scene.markers.stats().lines > 0);
+
+    // It renders without crashing and puts green terrain on screen.
+    Framebuffer fb2(64, 64); fb2.clear(Rgba{0,0,0,255});
+    scene.render(fb2, proj * view, {0,0,1});
+
     // --- a missing tile loads as empty, not a crash -------------------------
     TileRender none = loader.buildTile("TestMap", 5, 5);
     CHECK(none.empty());
+    CHECK(loader.buildTileScene("TestMap", 5, 5).terrain.empty());
 
     std::remove(mpqPath);
 }
