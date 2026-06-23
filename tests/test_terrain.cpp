@@ -114,4 +114,102 @@ void test_terrain() {
     Mesh holed = buildChunkMesh(mch, 0, 0);
     // 4 cells holed * 4 triangles * 3 indices removed.
     CHECK(holed.indices.size() == full.indices.size() - 4u * 4u * 3u);
+
+    // --- MCAL alpha-map decode ---------------------------------------------
+    // Layer 0 is the opaque base: always 255, even with an empty blob.
+    {
+        MapChunk a;
+        a.layers.resize(1);            // just the base layer
+        AlphaMap base = decodeAlphaMap(a, 0, /*bigAlpha*/false);
+        CHECK(base.at(0, 0) == 255);
+        CHECK(base.at(63, 63) == 255);
+    }
+
+    // Vanilla packed 4-bit: 0xF nibbles -> 255, 0x0 -> 0. Pack a column ramp so
+    // we can verify the low/high-nibble ordering and the *17 scaling.
+    {
+        MapChunk a;
+        a.layers.resize(2);
+        a.layers[0].flags = 0;                         // base
+        a.layers[1].flags = MCLY_USE_ALPHA;            // 4-bit uncompressed
+        a.layers[1].ofsAlpha = 0;
+        // 2048 bytes; set every byte to 0xF0 -> even texel nibble 0x0,
+        // odd texel nibble 0xF.  texel(0)=0, texel(1)=255, ...
+        a.alpha.assign(2048, 0xF0);
+        AlphaMap m = decodeAlphaMap(a, 1, /*bigAlpha*/false);
+        CHECK(m.at(0, 0) == 0);            // texel 0 -> low nibble 0x0
+        CHECK(m.at(0, 1) == 255);          // texel 1 -> high nibble 0xF
+        CHECK(m.at(63, 63) == 255);        // texel 4095 is odd -> high nibble
+
+        // All-0xFF blob -> fully opaque everywhere.
+        a.alpha.assign(2048, 0xFF);
+        AlphaMap full255 = decodeAlphaMap(a, 1, false);
+        CHECK(full255.at(10, 10) == 255);
+        CHECK(full255.at(63, 0) == 255);
+    }
+
+    // Big-alpha 8-bit: one byte per texel, straight through. Use a second layer
+    // at a non-zero MCAL offset to exercise ofsAlpha.
+    {
+        MapChunk a;
+        a.layers.resize(2);
+        a.layers[0].flags = 0;
+        a.layers[1].flags = MCLY_USE_ALPHA;
+        a.layers[1].ofsAlpha = 4096;                   // map starts after a gap
+        a.alpha.assign(4096, 0x11);                    // padding before the map
+        for (int k = 0; k < 64 * 64; ++k)
+            a.alpha.push_back(static_cast<uint8_t>(k & 0xFF));
+        AlphaMap m = decodeAlphaMap(a, 1, /*bigAlpha*/true);
+        CHECK(m.at(0, 0) == 0);
+        CHECK(m.at(0, 1) == 1);
+        CHECK(m.at(1, 0) == (64 & 0xFF));              // texel 64
+        CHECK(m.at(63, 63) == (4095 & 0xFF));          // 4095 & 0xFF == 255
+    }
+
+    // Compressed (RLE): a copy run of 4 explicit bytes, then a fill for the rest.
+    {
+        MapChunk a;
+        a.layers.resize(2);
+        a.layers[0].flags = 0;
+        a.layers[1].flags = MCLY_USE_ALPHA | MCLY_COMPRESSED;
+        a.layers[1].ofsAlpha = 0;
+        std::vector<uint8_t>& blob = a.alpha;
+        blob.push_back(0x04);                          // copy 4
+        blob.push_back(10); blob.push_back(20);
+        blob.push_back(30); blob.push_back(40);
+        int remaining = 64 * 64 - 4;                   // fill the rest with 200
+        while (remaining > 0) {
+            int run = remaining > 127 ? 127 : remaining;
+            blob.push_back(static_cast<uint8_t>(0x80 | run));  // fill `run`
+            blob.push_back(200);
+            remaining -= run;
+        }
+        AlphaMap m = decodeAlphaMap(a, 1, /*bigAlpha*/false);
+        CHECK(m.at(0, 0) == 10);
+        CHECK(m.at(0, 1) == 20);
+        CHECK(m.at(0, 2) == 30);
+        CHECK(m.at(0, 3) == 40);
+        CHECK(m.at(0, 4) == 200);                      // first filled texel
+        CHECK(m.at(63, 63) == 200);                    // last texel filled
+
+        // Truncated compressed stream decodes the prefix and leaves the rest
+        // transparent instead of reading past the blob.
+        a.alpha = { 0x02, 99, 88 };                    // copy 2 then EOF
+        AlphaMap t = decodeAlphaMap(a, 1, false);
+        CHECK(t.at(0, 0) == 99);
+        CHECK(t.at(0, 1) == 88);
+        CHECK(t.at(0, 2) == 0);
+        CHECK(t.at(63, 63) == 0);
+    }
+
+    // A layer without the use-alpha flag, or an out-of-range index, is
+    // transparent rather than reading garbage.
+    {
+        MapChunk a;
+        a.layers.resize(2);
+        a.layers[1].flags = 0;                         // no MCLY_USE_ALPHA
+        a.alpha.assign(2048, 0xFF);
+        CHECK(decodeAlphaMap(a, 1, false).at(0, 0) == 0);
+        CHECK(decodeAlphaMap(a, 5, false).at(0, 0) == 0);   // no layer 5
+    }
 }

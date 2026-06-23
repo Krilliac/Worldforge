@@ -8,7 +8,7 @@ pair with a mangos-zero server: load real client assets, render the world in a
 running server while connected retail clients see the edits.**
 
 Every parser, transform, and protocol primitive here is **compiled and
-unit-tested in-tree** (114→153 checks). Where a part needs a GPU/display or your
+unit-tested in-tree** (114→176 checks). Where a part needs a GPU/display or your
 mangos checkout to run, it is implemented as far as it can be verified and the
 boundary is stated plainly (see `ARCHITECTURE.md`).
 
@@ -35,7 +35,7 @@ automatically via CMake FetchContent.
 | `byte_reader.hpp` / `chunk.hpp` | bounds-checked LE reader; IFF chunk iterator     |
 | `mpq.*`           | StormLib MPQ archive chain with patch-override priority         |
 | `wow_files.*`     | WDT / ADT placement / DBC parsing                              |
-| `terrain.*`       | MCNK heightmap/normals/layers → hole-aware world-space mesh     |
+| `terrain.*`       | MCNK heightmap/normals/layers → hole-aware mesh; MCAL alpha unpack |
 | `image.*`         | RGBA image + dependency-free PNG writer                        |
 | `blp.*`           | BLP2 texture decode (palette / DXT1/3/5 / raw) → RGBA          |
 | `m2.*`            | M2 model: static mesh + vanilla skeletal animation parse       |

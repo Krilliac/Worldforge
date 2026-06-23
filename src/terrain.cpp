@@ -82,6 +82,63 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
     return mc;
 }
 
+AlphaMap decodeAlphaMap(const MapChunk& mc, size_t layerIndex, bool bigAlpha) {
+    AlphaMap map;
+    constexpr int N = AlphaMap::DIM * AlphaMap::DIM;   // 4096 texels
+
+    // Layer 0 is the opaque base; nothing blends beneath it.
+    if (layerIndex == 0) {
+        map.texels.fill(255);
+        return map;
+    }
+    if (layerIndex >= mc.layers.size())
+        return map;   // no such layer -> transparent
+
+    const TexLayer& layer = mc.layers[layerIndex];
+    if (!(layer.flags & MCLY_USE_ALPHA))
+        return map;   // layer declares no alpha map -> transparent
+
+    const std::vector<uint8_t>& blob = mc.alpha;
+    const size_t ofs = layer.ofsAlpha;
+
+    if (layer.flags & MCLY_COMPRESSED) {
+        // RLE: each command byte is [fill:1][count:7]. Fill repeats the next
+        // byte `count` times; copy emits the next `count` bytes verbatim.
+        size_t in = ofs, out = 0;
+        while (out < N && in < blob.size()) {
+            uint8_t cmd = blob[in++];
+            int count   = cmd & 0x7F;
+            if (cmd & 0x80) {                        // fill
+                uint8_t val = (in < blob.size()) ? blob[in++] : 0;
+                while (count-- > 0 && out < N) map.texels[out++] = val;
+            } else {                                 // copy
+                while (count-- > 0 && out < N && in < blob.size())
+                    map.texels[out++] = blob[in++];
+            }
+        }
+        return map;
+    }
+
+    if (bigAlpha) {
+        // One byte per texel, straight copy.
+        for (int k = 0; k < N; ++k) {
+            size_t bi = ofs + static_cast<size_t>(k);
+            map.texels[k] = (bi < blob.size()) ? blob[bi] : 0;
+        }
+        return map;
+    }
+
+    // Vanilla packed 4-bit: two texels per byte, low nibble first. Scale a
+    // 0..15 nibble to 0..255 via *17 (15*17 == 255), so full coverage is exact.
+    for (int k = 0; k < N; ++k) {
+        size_t bi = ofs + static_cast<size_t>(k) / 2;
+        uint8_t byte = (bi < blob.size()) ? blob[bi] : 0;
+        uint8_t nib  = (k & 1) ? (byte >> 4) : (byte & 0x0F);
+        map.texels[k] = static_cast<uint8_t>(nib * 17);
+    }
+    return map;
+}
+
 std::vector<MapChunk> parseChunks(const std::vector<uint8_t>& adtBuf) {
     std::vector<MapChunk> out;
     out.reserve(256);

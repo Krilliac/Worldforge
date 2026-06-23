@@ -44,7 +44,8 @@ implements `rhi::Device`:
 
 - **Terrain** — one VBO per ADT tile (the 145-vertex MCNK meshes merged), indexed
   triangle lists from `buildTileMesh`. Texture layers via the MCLY/MCAL alpha
-  splat (alpha unpack is the next asset-side task). World transform is baked into
+  splat; `decodeAlphaMap` unpacks each layer's 64×64 coverage map (vanilla
+  packed 4-bit, 8-bit big-alpha, and RLE-compressed forms). World transform is baked into
   vertex positions (already in WoW Z-up world space), so the vertex shader only
   applies view·proj.
 - **M2 doodads** — instanced. Static mesh from `parseM2` (view 0 lookup +
@@ -153,6 +154,7 @@ These are the hooks (in your tree) the bridge attaches to:
 | MPQ / WDT / ADT / DBC parse            | implemented, unit-tested        |
 | Coordinate transforms (world↔placement)| implemented, round-trip tested  |
 | Terrain MCNK → mesh (hole-aware)       | implemented, unit-tested        |
+| MCAL alpha-map unpack (4-bit/8-bit/RLE)| implemented, unit-tested        |
 | BLP2 decode (palette/DXT1/3/5/raw)     | implemented, unit-tested        |
 | PNG writer                             | implemented, PIL-validated      |
 | M2 static mesh parse                   | implemented, unit-tested        |
