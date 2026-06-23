@@ -31,6 +31,11 @@ float raySphere(const Ray& r, const Vec3& center, float radius);
 // yawed about +Z by `yaw`. Nearest positive hit distance, or < 0 for a miss.
 float rayObb(const Ray& r, const Vec3& pos, float yaw, const Vec3& localMin, const Vec3& localMax);
 
+// Ray vs a mesh placed by `xform` (model-local -> world). Transforms each
+// triangle into world space and ray-tests it -- no matrix inverse needed -- so
+// a WMO instance can be picked per-triangle. Nearest hit distance, or < 0.
+float pickMeshXform(const Ray& r, const Mesh& mesh, const Mat4& xform);
+
 // What a click resolved to.
 struct PickResult {
     enum class Kind { None, Entity, Terrain };

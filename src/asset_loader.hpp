@@ -82,6 +82,11 @@ public:
     // sphere. The selectable bounds the bridge streams in EntityState.
     Aabb modelBounds(const std::string& path);
 
+    // Load a whole WMO: the root file plus its `_NNN.wmo` group geometry
+    // (cached). nullptr if the root is missing/malformed. Group files that fail
+    // to read are skipped, so a partial WMO still loads.
+    std::shared_ptr<const WmoModel> wmo(const std::string& path);
+
     // Extract a sound/music file's raw bytes from the chain (e.g. the sound
     // MPQ). False if the archived path is absent. Not cached -- audio buffers
     // are large and usually streamed once.
@@ -112,6 +117,7 @@ private:
     std::unordered_map<std::string, std::shared_ptr<const Image>>   texCache_;
     std::unordered_map<std::string, std::shared_ptr<const M2Model>> modelCache_;
     std::unordered_map<std::string, Aabb>                          boundsCache_;
+    std::unordered_map<std::string, std::shared_ptr<const WmoModel>> wmoCache_;
     std::shared_ptr<const Image> fallback_;
 };
 

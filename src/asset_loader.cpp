@@ -1,5 +1,7 @@
 #include "asset_loader.hpp"
 
+#include <cstdio>
+
 #include "blp.hpp"
 #include "coords.hpp"
 #include "m2_render.hpp"
@@ -110,6 +112,45 @@ Aabb AssetLoader::modelBounds(const std::string& path) {
     if (auto m = model(path)) b = wf::modelBounds(*m);
     boundsCache_[path] = b;
     return b;
+}
+
+namespace {
+// Root "Path\\Building.wmo" -> group file "Path\\Building_NNN.wmo".
+std::string wmoGroupPath(const std::string& root, uint32_t index) {
+    std::string base = root;
+    const std::string ext = ".wmo";
+    if (base.size() >= ext.size() &&
+        base.compare(base.size() - ext.size(), ext.size(), ext) == 0)
+        base.resize(base.size() - ext.size());
+    char suffix[16];
+    std::snprintf(suffix, sizeof(suffix), "_%03u.wmo", index);
+    return base + suffix;
+}
+} // namespace
+
+std::shared_ptr<const WmoModel> AssetLoader::wmo(const std::string& path) {
+    auto it = wmoCache_.find(path);
+    if (it != wmoCache_.end()) return it->second;
+
+    std::shared_ptr<const WmoModel> result;   // nullptr == missing/malformed root
+    std::vector<uint8_t> buf;
+    if (mpq_.readFile(path, buf)) {
+        try {
+            auto m = std::make_shared<WmoModel>();
+            m->root = parseWmoRoot(buf);
+            for (uint32_t g = 0; g < m->root.nGroups; ++g) {
+                std::vector<uint8_t> gbuf;
+                if (!mpq_.readFile(wmoGroupPath(path, g), gbuf)) continue;  // skip missing
+                try { m->groups.push_back(parseWmoGroup(gbuf)); }
+                catch (...) { /* skip a malformed group, keep the rest */ }
+            }
+            result = m;
+        } catch (...) {
+            result = nullptr;
+        }
+    }
+    wmoCache_[path] = result;
+    return result;
 }
 
 bool AssetLoader::sound(const std::string& path, std::vector<uint8_t>& out) const {

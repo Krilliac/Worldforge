@@ -84,4 +84,12 @@ struct WmoGroup {
 
 WmoGroup parseWmoGroup(const std::vector<uint8_t>& buf);
 
+// A whole WMO: the root plus its parsed group geometry. Built by the asset
+// loader (root file + the `_NNN.wmo` group files) and used for tight,
+// per-triangle picking instead of the single root bounding box.
+struct WmoModel {
+    WmoRoot               root;
+    std::vector<WmoGroup> groups;
+};
+
 } // namespace wf

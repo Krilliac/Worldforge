@@ -11,6 +11,7 @@
 #include "math.hpp"
 #include "m2.hpp"
 #include "wmo.hpp"
+#include "terrain.hpp"   // Mesh
 
 namespace wf {
 
@@ -35,5 +36,11 @@ Aabb aabbOfPoints(const std::vector<Vec3>& pts);
 // Model-local bounds of an M2 (from its bind-pose vertices) and a WMO (root bbox).
 Aabb modelBounds(const M2Model& m);
 Aabb wmoBounds(const WmoRoot& root);
+// Tighter WMO bounds from the actual group geometry (all group vertices).
+Aabb wmoBounds(const WmoModel& wmo);
+
+// A single triangle mesh of all the WMO's group geometry, in WMO-local space --
+// for per-triangle (tight) picking via pickMeshXform.
+Mesh wmoPickMesh(const WmoModel& wmo);
 
 } // namespace wf

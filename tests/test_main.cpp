@@ -32,6 +32,7 @@ void test_audio();
 void test_world_view();
 void test_picking();
 void test_bounds();
+void test_wmo_pick();
 
 int main() {
     test_math();
@@ -66,6 +67,7 @@ int main() {
     test_world_view();
     test_picking();
     test_bounds();
+    test_wmo_pick();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;

@@ -61,6 +61,23 @@ float rayObb(const Ray& r, const Vec3& pos, float yaw, const Vec3& localMin, con
     return tmin >= 0.0f ? tmin : tmax;                            // 0 if origin inside
 }
 
+float pickMeshXform(const Ray& r, const Mesh& mesh, const Mat4& xform) {
+    auto xf = [&](const Vec3& p) {
+        Vec4 w = xform * Vec4{ p.x, p.y, p.z, 1.0f };
+        return Vec3{ w.x, w.y, w.z };
+    };
+    float best = -1.0f;
+    const auto& v = mesh.vertices;
+    const auto& idx = mesh.indices;
+    for (size_t i = 0; i + 2 < idx.size(); i += 3) {
+        float t;
+        if (rayTriangle(r, xf(v[idx[i]].position), xf(v[idx[i+1]].position),
+                        xf(v[idx[i+2]].position), t) && (best < 0.0f || t < best))
+            best = t;
+    }
+    return best;
+}
+
 PickResult pickEntity(const Ray& r, const WorldView& view, float pad, float fallback) {
     PickResult best;
     float bestT = 1e30f;

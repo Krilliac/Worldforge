@@ -116,6 +116,7 @@ add_executable(wforge-tests
   tests/test_world_view.cpp
   tests/test_picking.cpp
   tests/test_bounds.cpp
+  tests/test_wmo_pick.cpp
 )
 target_link_libraries(wforge-tests PRIVATE wforge)
 target_include_directories(wforge-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
