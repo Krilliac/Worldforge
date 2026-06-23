@@ -8,7 +8,7 @@ pair with a mangos-zero server: load real client assets, render the world in a
 running server while connected retail clients see the edits.**
 
 Every parser, transform, and protocol primitive here is **compiled and
-unit-tested in-tree** (114→558 core + 76 editor checks). Where a part needs a GPU/display or your
+unit-tested in-tree** (114→577 core + 76 editor checks). Where a part needs a GPU/display or your
 mangos checkout to run, it is implemented as far as it can be verified and the
 boundary is stated plainly (see `ARCHITECTURE.md`).
 
@@ -27,7 +27,7 @@ cmake --build build -j$(nproc)
 ./build/wforge-model-viewer      # animated M2 in a model-viewer panel -> PNG
 ./build/wforge-terrain-demo      # textured terrain (MCAL grass+rock splat) -> PNG
 ./build/wforge-stub-server [port]   # run the standalone bridge server (no mangos)
-./build/wforge-dump <DataDir> <Map> [tileX tileY]   # inspect a real MPQ tree
+./build/wforge-dump <DataDir> <Map> [x y] [--render tile.png]   # inspect/render a real MPQ tile
 ```
 
 No GPU? The editor has a **CPU/NullRHI fallback**: the software rasteriser
@@ -52,7 +52,7 @@ automatically via CMake FetchContent.
 | `coords.hpp`      | WoW coordinate constants + world↔placement transforms          |
 | `byte_reader.hpp` / `chunk.hpp` | bounds-checked LE reader; IFF chunk iterator     |
 | `mpq.*`           | StormLib MPQ archive chain with patch-override priority         |
-| `wow_files.*`     | WDT / ADT placement / DBC parsing                              |
+| `wow_files.*`     | WDT / ADT (MTEX/placement) / DBC parsing                        |
 | `dbc_defs.*`      | typed DBC views (Map / AreaTable / LiquidType / Light)         |
 | `gridmap.*`       | mangos `.map` parse (server height/area/liquid/holes grid)     |
 | `navmesh.*`       | mangos `.mmtile` Detour navmesh parse → wireframe overlay      |
@@ -71,6 +71,7 @@ automatically via CMake FetchContent.
 | `m2_render.*`     | M2 skinning: bone pose → posed textured mesh (animation)       |
 | `scene.*`         | compose terrain + textured model instances + overlay → render  |
 | `terrain_render.*`| MCNK/MCAL multi-layer alpha-splat textured terrain             |
+| `asset_loader.*`  | MPQ → BLP/WDT/ADT → textured tile (the real-asset pipeline)     |
 | `rhi.hpp`         | GPU render-hardware interface (backend-agnostic)              |
 | `rhi_software.*`  | RHI realised on the rasteriser (tested headless)               |
 | `rhi_gl.*`        | RHI realised on OpenGL 3.3 (gated `WFORGE_RHI_GL`, desktop)    |

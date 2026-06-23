@@ -49,6 +49,7 @@ add_library(wforge STATIC
   src/m2_render.cpp
   src/scene.cpp
   src/terrain_render.cpp
+  src/asset_loader.cpp
 )
 target_include_directories(wforge PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -101,6 +102,7 @@ add_executable(wforge-tests
   tests/test_rhi.cpp
   tests/test_world_sim.cpp
   tests/test_render.cpp
+  tests/test_asset.cpp
 )
 target_link_libraries(wforge-tests PRIVATE wforge)
 target_include_directories(wforge-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)

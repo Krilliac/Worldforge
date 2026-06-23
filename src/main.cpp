@@ -21,9 +21,15 @@
 #include "mpq.hpp"
 #include "wow_files.hpp"
 #include "coords.hpp"
+#include "asset_loader.hpp"
+#include "raster.hpp"
+#include "image.hpp"
+#include "math.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -103,6 +109,37 @@ void dumpTile(const wf::MpqManager& mpq, const std::string& map, int x, int y) {
     }
 }
 
+// Build a single tile's textured terrain and render it to a PNG, framing the
+// whole tile. Real proof of the MPQ -> parse -> textured render pipeline.
+bool renderTile(const wf::MpqManager& mpq, const std::string& map, int x, int y,
+                const std::string& outPng) {
+    wf::AssetLoader loader(mpq);
+    wf::TileRender tile = loader.buildTile(map, x, y);
+    if (tile.empty()) { std::printf("## render: tile %d,%d empty / not found\n", x, y); return false; }
+
+    // Fit a camera to the tile's vertex bounds.
+    wf::Vec3 lo{ +1e30f, +1e30f, +1e30f }, hi{ -1e30f, -1e30f, -1e30f };
+    for (const auto& m : tile.chunkMeshes)
+        for (const auto& v : m.vertices) {
+            lo.x = std::min(lo.x, v.position.x); lo.y = std::min(lo.y, v.position.y); lo.z = std::min(lo.z, v.position.z);
+            hi.x = std::max(hi.x, v.position.x); hi.y = std::max(hi.y, v.position.y); hi.z = std::max(hi.z, v.position.z);
+        }
+    wf::Vec3 c{ (lo.x+hi.x)*0.5f, (lo.y+hi.y)*0.5f, (lo.z+hi.z)*0.5f };
+    float r = wf::length(hi - c) + 1.0f;
+
+    const int W = 1024, H = 768;
+    wf::Framebuffer fb(W, H);
+    fb.clear(wf::Rgba{ 24, 28, 40, 255 });
+    wf::Mat4 view = wf::Mat4::lookAt(c + wf::Vec3{ r*0.9f, r*0.9f, r*0.8f }, c, { 0, 0, 1 });
+    wf::Mat4 proj = wf::Mat4::perspective(55.0, double(W)/H, 1.0, r * 6.0 + 100.0);
+    tile.renderTerrain(fb, proj * view, wf::Vec3{ 0.5f, 0.4f, 0.8f });
+
+    if (!wf::writePng(fb.color, outPng)) { std::fprintf(stderr, "render: write failed\n"); return false; }
+    std::printf("## render: wrote %s  (%zu chunks, %zu textures)\n",
+                outPng.c_str(), tile.chunkMeshes.size(), tile.textures.size());
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -118,11 +155,14 @@ int main(int argc, char** argv) {
     int  onlyX = -1, onlyY = -1;
     bool single = false;
     std::string locale = "enUS";
+    std::string renderPng;
 
     for (int i = 3; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "--locale" && i + 1 < argc) {
             locale = argv[++i];
+        } else if (a == "--render" && i + 1 < argc) {
+            renderPng = argv[++i];
         } else if (!single && i + 1 < argc &&
                    a.find_first_not_of("0123456789") == std::string::npos) {
             onlyX  = std::stoi(a);
@@ -171,6 +211,7 @@ int main(int argc, char** argv) {
             std::printf("# Note: WDT marks tile %d,%d as absent; trying anyway.\n",
                         onlyX, onlyY);
         dumpTile(mpq, map, onlyX, onlyY);
+        if (!renderPng.empty()) renderTile(mpq, map, onlyX, onlyY, renderPng);
     } else {
         for (int y = 0; y < 64; ++y)
             for (int x = 0; x < 64; ++x)

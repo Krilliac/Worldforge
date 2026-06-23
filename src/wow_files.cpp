@@ -67,7 +67,15 @@ Adt parseAdt(const std::vector<uint8_t>& buf) {
     Adt adt;
 
     forEachChunk(buf.data(), buf.size(), [&](const Chunk& c) {
-        if (c.magic == "MMDX") {
+        if (c.magic == "MTEX") {
+            const char* p = reinterpret_cast<const char*>(c.data);
+            size_t i = 0;
+            while (i < c.size) {
+                size_t len = ::strnlen(p + i, c.size - i);
+                if (len > 0) adt.textures.emplace_back(p + i, len);
+                i += len + 1;
+            }
+        } else if (c.magic == "MMDX") {
             adt.m2NameBlob.assign(reinterpret_cast<const char*>(c.data),
                                   reinterpret_cast<const char*>(c.data) + c.size);
         } else if (c.magic == "MMID") {

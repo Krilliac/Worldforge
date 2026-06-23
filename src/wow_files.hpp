@@ -61,6 +61,8 @@ struct WmoDef {
 };
 
 struct Adt {
+    std::vector<std::string> textures;   // MTEX -- BLP filenames; MCLY.textureId indexes this
+
     // Raw NUL-separated name blobs + offset tables, kept so model names can be
     // resolved exactly the way the client does (index -> offset -> string).
     std::vector<char>     m2NameBlob;    // MMDX
