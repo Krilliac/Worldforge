@@ -1,0 +1,162 @@
+#include "test.hpp"
+#include "wmo.hpp"
+
+#include <cstring>
+#include <vector>
+
+using namespace wf;
+
+namespace {
+void put32(std::vector<uint8_t>& b, uint32_t v){ for(int i=0;i<4;i++) b.push_back((v>>(8*i))&0xFF); }
+void put16(std::vector<uint8_t>& b, uint16_t v){ b.push_back(v&0xFF); b.push_back((v>>8)&0xFF); }
+void putf (std::vector<uint8_t>& b, float f){ uint32_t v; std::memcpy(&v,&f,4); put32(b,v); }
+void magic(std::vector<uint8_t>& b, const char* m){ b.push_back(m[3]); b.push_back(m[2]); b.push_back(m[1]); b.push_back(m[0]); }
+void chunk(std::vector<uint8_t>& b, const char* m, const std::vector<uint8_t>& p){
+    magic(b,m); put32(b,(uint32_t)p.size()); b.insert(b.end(),p.begin(),p.end());
+}
+void cstr(std::vector<uint8_t>& b, const char* s){ for(const char* p=s;*p;++p) b.push_back(*p); b.push_back(0); }
+} // namespace
+
+void test_wmo() {
+    std::printf("[wmo]\n");
+
+    // ---------------- root ----------------
+    std::vector<uint8_t> root;
+
+    std::vector<uint8_t> mohd;
+    put32(mohd, 2);   // nTextures
+    put32(mohd, 1);   // nGroups
+    put32(mohd, 0);   // nPortals
+    put32(mohd, 0);   // nLights
+    put32(mohd, 1);   // nDoodadNames
+    put32(mohd, 1);   // nDoodadDefs
+    put32(mohd, 1);   // nDoodadSets
+    put32(mohd, 0);   // ambColor
+    put32(mohd, 99);  // wmoID
+    putf(mohd,-10);putf(mohd,-20);putf(mohd,-30);   // bbox min
+    putf(mohd, 10);putf(mohd, 20);putf(mohd, 30);   // bbox max
+    put16(mohd, 0);   // flags
+    put16(mohd, 0);   // numLod
+    chunk(root, "MOHD", mohd);
+
+    // MOTX: two texture names, 4-byte aligned.
+    std::vector<uint8_t> motx;
+    cstr(motx, "A.blp");              // offset 0
+    while (motx.size() % 4) motx.push_back(0);
+    uint32_t tex2Off = (uint32_t)motx.size();
+    cstr(motx, "B.blp");
+    while (motx.size() % 4) motx.push_back(0);
+    chunk(root, "MOTX", motx);
+
+    // MOMT: two materials, second references B.blp.
+    std::vector<uint8_t> momt;
+    auto mat = [&](uint32_t diffOff){
+        put32(momt,0); put32(momt,0); put32(momt,0); put32(momt,diffOff);
+        for(int i=0;i<12;i++) put32(momt,0);
+    };
+    mat(0); mat(tex2Off);
+    chunk(root, "MOMT", momt);
+
+    // MOGN: group name "main".
+    std::vector<uint8_t> mogn;
+    mogn.push_back(0); mogn.push_back(0);   // wiki: begins with two empty strings
+    uint32_t gnameOff = (uint32_t)mogn.size();
+    cstr(mogn, "main");
+    chunk(root, "MOGN", mogn);
+
+    // MOGI: one group.
+    std::vector<uint8_t> mogi;
+    put32(mogi, 0x8);                          // flags (EXTERIOR)
+    putf(mogi,-1);putf(mogi,-2);putf(mogi,-3);
+    putf(mogi, 1);putf(mogi, 2);putf(mogi, 3);
+    put32(mogi, gnameOff);                     // name offset
+    chunk(root, "MOGI", mogi);
+
+    // MODS: one doodad set.
+    std::vector<uint8_t> mods;
+    { const char* nm = "Set_$DefaultGlobal";
+      for (int i=0;i<20;i++) mods.push_back(i < (int)std::strlen(nm) ? nm[i] : 0); }
+    put32(mods, 0);   // firstInstance
+    put32(mods, 1);   // numDoodads
+    put32(mods, 0);   // unused
+    chunk(root, "MODS", mods);
+
+    // MODN: doodad model name.
+    std::vector<uint8_t> modnBlob;
+    cstr(modnBlob, "World\\Chair.mdx");
+    chunk(root, "MODN", modnBlob);
+
+    // MODD: one doodad instance, identity quaternion.
+    std::vector<uint8_t> modd;
+    put32(modd, 0);                  // nameOffset (low 24 bits) + flags
+    putf(modd, 5); putf(modd, 6); putf(modd, 7);            // position
+    putf(modd, 0); putf(modd, 0); putf(modd, 0); putf(modd, 1); // quat (x,y,z,w)
+    putf(modd, 2.0f);                // scale
+    put32(modd, 0xFFFFFFFF);         // color
+    chunk(root, "MODD", modd);
+
+    WmoRoot wr = parseWmoRoot(root);
+    CHECK(wr.nGroups == 1 && wr.nTextures == 2);
+    CHECK_APPROX(wr.bboxMax.z, 30.0f);
+    CHECK(wr.textures.size() == 2);
+    CHECK(wr.textures[0] == "A.blp" && wr.textures[1] == "B.blp");
+    CHECK(wr.materials.size() == 2);
+    CHECK(wr.materials[1].diffuseTexture == "B.blp");
+    CHECK(wr.groups.size() == 1);
+    CHECK(wr.groups[0].name == "main");
+    CHECK(wr.groups[0].flags == 0x8);
+    CHECK(wr.doodadSets.size() == 1);
+    CHECK(wr.doodadSets[0].name == "Set_$DefaultGlobal");
+    CHECK(wr.doodads.size() == 1);
+    CHECK(wr.doodads[0].modelName == "World\\Chair.mdx");
+    CHECK_APPROX(wr.doodads[0].position.x, 5.0f);
+    CHECK_APPROX(wr.doodads[0].orientation.w, 1.0f);
+    CHECK_APPROX(wr.doodads[0].scale, 2.0f);
+
+    // ---------------- group ----------------
+    std::vector<uint8_t> group;
+
+    // Build subchunks first.
+    std::vector<uint8_t> movt;     // 3 vertices
+    putf(movt,0);putf(movt,0);putf(movt,0);
+    putf(movt,1);putf(movt,0);putf(movt,0);
+    putf(movt,0);putf(movt,1);putf(movt,0);
+    std::vector<uint8_t> monr;     // 3 normals up
+    for(int i=0;i<3;i++){ putf(monr,0);putf(monr,0);putf(monr,1); }
+    std::vector<uint8_t> motv;     // 3 uvs
+    putf(motv,0);putf(motv,0); putf(motv,1);putf(motv,0); putf(motv,0);putf(motv,1);
+    std::vector<uint8_t> movi;     // one triangle
+    put16(movi,0); put16(movi,1); put16(movi,2);
+    std::vector<uint8_t> mopy;     // one triangle material
+    mopy.push_back(0); mopy.push_back(1);   // flags, materialId=1
+    std::vector<uint8_t> moba;     // one batch
+    for(int i=0;i<12;i++) moba.push_back(0);   // bbox
+    put32(moba, 0);    // startIndex
+    put16(moba, 3);    // indexCount
+    put16(moba, 0);    // minIndex
+    put16(moba, 2);    // maxIndex
+    moba.push_back(0); // flags
+    moba.push_back(1); // materialId
+
+    // MOGP = 68-byte header + subchunks.
+    std::vector<uint8_t> mogp(0x44, 0);
+    { uint32_t fl = 0x8; for(int i=0;i<4;i++) mogp[0x08+i]=(fl>>(8*i))&0xFF; }   // flags
+    auto append = [&](const char* m, const std::vector<uint8_t>& p){ chunk(mogp, m, p); };
+    append("MOVT", movt);
+    append("MONR", monr);
+    append("MOTV", motv);
+    append("MOVI", movi);
+    append("MOPY", mopy);
+    append("MOBA", moba);
+    chunk(group, "MOGP", mogp);
+
+    WmoGroup wg = parseWmoGroup(group);
+    CHECK(wg.flags == 0x8);
+    CHECK(wg.vertices.size() == 3);
+    CHECK_APPROX(wg.vertices[1].x, 1.0f);
+    CHECK(wg.normals.size() == 3 && wg.uvs.size() == 3);
+    CHECK(wg.indices.size() == 3);
+    CHECK(wg.triMaterial.size() == 1 && wg.triMaterial[0] == 1);
+    CHECK(wg.batches.size() == 1);
+    CHECK(wg.batches[0].indexCount == 3 && wg.batches[0].materialId == 1);
+}

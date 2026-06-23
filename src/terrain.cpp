@@ -1,0 +1,171 @@
+#include "terrain.hpp"
+#include "byte_reader.hpp"
+#include "chunk.hpp"
+#include "coords.hpp"
+
+#include <stdexcept>
+
+namespace wf {
+
+// MCNK header field offsets (within the 128-byte header). Verified vs ADT/v18.
+namespace {
+constexpr size_t kHdrSize       = 128;
+constexpr size_t kOffFlags      = 0x00;
+constexpr size_t kOffIndexX     = 0x04;
+constexpr size_t kOffIndexY     = 0x08;
+constexpr size_t kOffNLayers    = 0x0C;
+constexpr size_t kOffAreaId     = 0x34;
+constexpr size_t kOffHoles      = 0x3C;
+constexpr size_t kOffPosition   = 0x68;
+
+// Unpack one int8 MCNR triple (stored order X, Z, Y; 127 == 1.0) to a Vec3 in
+// world axes (x=north, y=west, z=up).
+Vec3 unpackNormal(int8_t nx, int8_t nz, int8_t ny) {
+    return normalize(Vec3{ nx / 127.0f, ny / 127.0f, nz / 127.0f });
+}
+} // namespace
+
+bool cellIsHole(uint16_t holes, int cellRow, int cellCol) {
+    // The 16-bit map is a 4x4 grid; each bit covers a 2x2 block of the 8x8 cells.
+    int holeBit = (cellRow / 2) * 4 + (cellCol / 2);
+    return (holes & (1u << holeBit)) != 0;
+}
+
+static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
+    if (size < kHdrSize)
+        throw std::runtime_error("MCNK smaller than its 128-byte header");
+
+    MapChunk mc;
+    ByteReader h(data, kHdrSize);
+    h.seek(kOffFlags);   mc.flags  = h.u32();
+    h.seek(kOffIndexX);  mc.indexX = h.u32();
+    h.seek(kOffIndexY);  mc.indexY = h.u32();
+    h.seek(kOffAreaId);  mc.areaId = h.u32();
+    h.seek(kOffHoles);   mc.holes  = h.u16();
+    h.seek(kOffPosition);
+    mc.position = { h.f32(), h.f32(), h.f32() };
+
+    // Sub-chunks (MCVT/MCNR/MCLY/MCAL/...) follow the header as standard
+    // magic+size chunks. Iterating them avoids the documented ambiguity over
+    // whether header offsets are relative to chunk-start or chunk-data.
+    const uint8_t* sub = data + kHdrSize;
+    size_t subLen = size - kHdrSize;
+    forEachChunk(sub, subLen, [&](const Chunk& c) {
+        if (c.magic == "MCVT") {
+            ByteReader r(c.data, c.size);
+            for (int i = 0; i < 145 && r.remaining() >= 4; ++i)
+                mc.heights[i] = r.f32();
+        } else if (c.magic == "MCNR") {
+            // 145 entries * 3 int8. (Trailing 13 padding bytes may follow.)
+            ByteReader r(c.data, c.size);
+            for (int i = 0; i < 145 && r.remaining() >= 3; ++i) {
+                int8_t a = static_cast<int8_t>(r.u8());
+                int8_t b = static_cast<int8_t>(r.u8());
+                int8_t cc = static_cast<int8_t>(r.u8());
+                mc.normals[i] = unpackNormal(a, b, cc);
+            }
+        } else if (c.magic == "MCLY") {
+            ByteReader r(c.data, c.size);
+            while (r.remaining() >= 16) {
+                TexLayer l;
+                l.textureId = r.u32();
+                l.flags     = r.u32();
+                l.ofsAlpha  = r.u32();
+                l.effectId  = r.u32();
+                mc.layers.push_back(l);
+            }
+        } else if (c.magic == "MCAL") {
+            mc.alpha.assign(c.data, c.data + c.size);
+        }
+        return true;
+    });
+    return mc;
+}
+
+std::vector<MapChunk> parseChunks(const std::vector<uint8_t>& adtBuf) {
+    std::vector<MapChunk> out;
+    out.reserve(256);
+    forEachChunk(adtBuf.data(), adtBuf.size(), [&](const Chunk& c) {
+        if (c.magic == "MCNK") out.push_back(parseOneChunk(c.data, c.size));
+        return true;
+    });
+    return out;
+}
+
+Mesh buildChunkMesh(const MapChunk& mc, int blockX, int blockY) {
+    Mesh mesh;
+    mesh.vertices.resize(145);
+
+    // The MCNK header carries IndexX/IndexY; the row/col -> north/west axis
+    // assignment is the one piece to confirm against a real tile (same risk
+    // class as WDT x/y order). We treat indexX as the west-east column and
+    // indexY as the north-south row, and use the header height base directly.
+    const int   col  = static_cast<int>(mc.indexX);   // west-east
+    const int   row  = static_cast<int>(mc.indexY);   // north-south
+    const Vec3  corner = chunkCornerWorld(blockX, blockY, row, col, mc.position.z);
+    const float U = static_cast<float>(UNIT_SIZE);
+
+    auto outerBufIdx = [](int i, int j) { return i * 9 + j; };       // 0..80
+    auto innerBufIdx = [](int i, int j) { return 81 + i * 8 + j; };  // 81..144
+    auto outerMcvt   = [](int i, int j) { return i * 17 + j; };
+    auto innerMcvt   = [](int i, int j) { return i * 17 + 9 + j; };
+
+    // Outer 9x9: i = north-south (0 = north edge), j = west-east (0 = west edge).
+    for (int i = 0; i < 9; ++i) {
+        for (int j = 0; j < 9; ++j) {
+            int b = outerBufIdx(i, j);
+            int m = outerMcvt(i, j);
+            mesh.vertices[b].position = {
+                corner.x - i * U,                 // X north: south -> lower
+                corner.y - j * U,                 // Y west:  east  -> lower
+                mc.position.z + mc.heights[m]
+            };
+            mesh.vertices[b].normal = mc.normals[m];
+        }
+    }
+    // Inner 8x8: centred half a cell into each quad.
+    for (int i = 0; i < 8; ++i) {
+        for (int j = 0; j < 8; ++j) {
+            int b = innerBufIdx(i, j);
+            int m = innerMcvt(i, j);
+            mesh.vertices[b].position = {
+                corner.x - (i + 0.5f) * U,
+                corner.y - (j + 0.5f) * U,
+                mc.position.z + mc.heights[m]
+            };
+            mesh.vertices[b].normal = mc.normals[m];
+        }
+    }
+
+    // Four triangles per inner cell, fanned around the centre vertex.
+    mesh.indices.reserve(8 * 8 * 4 * 3);
+    for (int i = 0; i < 8; ++i) {
+        for (int j = 0; j < 8; ++j) {
+            if (cellIsHole(mc.holes, i, j)) continue;
+            uint32_t C  = static_cast<uint32_t>(innerBufIdx(i, j));
+            uint32_t TL = static_cast<uint32_t>(outerBufIdx(i,     j));
+            uint32_t TR = static_cast<uint32_t>(outerBufIdx(i,     j + 1));
+            uint32_t BL = static_cast<uint32_t>(outerBufIdx(i + 1, j));
+            uint32_t BR = static_cast<uint32_t>(outerBufIdx(i + 1, j + 1));
+            // Consistent winding around the centre.
+            mesh.indices.insert(mesh.indices.end(), { C, TL, TR });
+            mesh.indices.insert(mesh.indices.end(), { C, TR, BR });
+            mesh.indices.insert(mesh.indices.end(), { C, BR, BL });
+            mesh.indices.insert(mesh.indices.end(), { C, BL, TL });
+        }
+    }
+    return mesh;
+}
+
+Mesh buildTileMesh(const std::vector<MapChunk>& chunks, int blockX, int blockY) {
+    Mesh tile;
+    for (const MapChunk& mc : chunks) {
+        Mesh m = buildChunkMesh(mc, blockX, blockY);
+        uint32_t base = static_cast<uint32_t>(tile.vertices.size());
+        tile.vertices.insert(tile.vertices.end(), m.vertices.begin(), m.vertices.end());
+        for (uint32_t idx : m.indices) tile.indices.push_back(base + idx);
+    }
+    return tile;
+}
+
+} // namespace wf

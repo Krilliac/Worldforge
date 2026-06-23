@@ -1,0 +1,11 @@
+# Build output
+/build/
+build/
+
+# Generated render output (reference is render_sample.png, committed)
+/worldforge_terrain.png
+
+# Editor / OS cruft
+.DS_Store
+*.swp
+compile_commands.json
