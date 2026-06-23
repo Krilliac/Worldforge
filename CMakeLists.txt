@@ -110,6 +110,18 @@ target_link_libraries(wforge-debug-demo PRIVATE wforge)
 # ---------------------------------------------------------------------------
 option(WFORGE_EDITOR     "Build the ImGui editor panels + headless tests" ON)
 option(WFORGE_EDITOR_APP "Build the runnable windowed editor (needs GLFW + OpenGL)" OFF)
+option(WFORGE_RHI_GL     "Build the OpenGL 3.3 RHI backend (needs glad + a GL context)" OFF)
+
+# OpenGL RHI backend -- the GPU realisation of rhi::Device. OFF by default: it
+# needs a GL 3.3 loader (glad) and a current context, so it builds on a desktop,
+# not in headless CI (the SoftwareDevice is the tested realisation here).
+if(WFORGE_RHI_GL)
+  find_package(OpenGL REQUIRED)
+  add_library(wforge-rhi-gl STATIC src/rhi_gl.cpp)
+  target_include_directories(wforge-rhi-gl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  # Provide a glad target (e.g. add_subdirectory(external/glad)) before enabling.
+  target_link_libraries(wforge-rhi-gl PUBLIC wforge glad OpenGL::GL)
+endif()
 
 set(IMGUI_DIR    ${CMAKE_CURRENT_SOURCE_DIR}/external/imgui)
 set(IMGUIZMO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/imguizmo/src)

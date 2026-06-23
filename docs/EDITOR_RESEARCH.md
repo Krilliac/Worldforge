@@ -321,9 +321,11 @@ to the binary `EDITOR_*` channel for high-frequency drag operations.
 
 Status: ✅ done · ◻ remaining (GPU/display- or mangos-gated, the stated ceiling).
 
-1. ◻ **GPU RHI backend** — implement `rhi::Device` on OpenGL 3.3 (1.12-era target).
-   The software rasteriser stays as the reference oracle. *(ARCHITECTURE.md §2;
-   cannot be runtime-verified headless.)*
+1. ◑ **RHI backend** — ✅ `rhi_software` realises `rhi::Device` on the rasteriser
+   and is unit-tested (upload → draw → readback). ✅ `rhi_gl` implements the same
+   interface on OpenGL 3.3 (FBO + shader + readback), gated `WFORGE_RHI_GL` — it
+   needs a GL context/loader so it builds on a desktop, not headless CI. The
+   software device is the runtime-verified oracle. *(ARCHITECTURE.md §2.)*
 2. ◑ **ImGui editor shell** — ✅ Dear ImGui vendored (submodule); `wforge-editor`
    panels (`AtmospherePanel`, `DebugVisPanel`) build headlessly and are smoke-
    tested (`wforge-editor-tests`), gated by `WFORGE_EDITOR`. ◻ The runnable

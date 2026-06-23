@@ -8,7 +8,7 @@ pair with a mangos-zero server: load real client assets, render the world in a
 running server while connected retail clients see the edits.**
 
 Every parser, transform, and protocol primitive here is **compiled and
-unit-tested in-tree** (114→489 core + 15 editor checks). Where a part needs a GPU/display or your
+unit-tested in-tree** (114→521 core + 27 editor checks). Where a part needs a GPU/display or your
 mangos checkout to run, it is implemented as far as it can be verified and the
 boundary is stated plainly (see `ARCHITECTURE.md`).
 
@@ -59,6 +59,9 @@ automatically via CMake FetchContent.
 | `fxbridge.*`      | scope-aware Atmosphere/World FX editor RPCs → realise to clientfx SMSG |
 | `raster.*`        | software rasteriser (z-buffer, perspective-correct)            |
 | `rhi.hpp`         | GPU render-hardware interface (backend-agnostic)              |
+| `rhi_software.*`  | RHI realised on the rasteriser (tested headless)               |
+| `rhi_gl.*`        | RHI realised on OpenGL 3.3 (gated `WFORGE_RHI_GL`, desktop)    |
+| `vmap.*`          | VMAP `.vmo` collision parse → wireframe; `mpq.*` patch writer  |
 | `editing.*`       | brush falloff + terrain-height / alpha-coverage edit tools      |
 | `gizmo.*`         | ray/transform picking, mesh hit-test, snapping (move/rotate/scale) |
 | `editor_bridge.*` | editor↔server RPC: `EDITOR_*` op structs + `.debug vis` stream |
@@ -66,7 +69,7 @@ automatically via CMake FetchContent.
 | `debugdraw.*`     | category-tagged debug primitives (waypoints/collision/triggers/wireframe) |
 | `modelmesh.*`     | M2 / WMO geometry → renderer Mesh (doodad wireframe)           |
 | `byte_writer.hpp` | little-endian write counterpart to `byte_reader.hpp`           |
-| `editor/`         | Dear ImGui panels — Atmosphere (FX) + DebugVis (layer toggles) |
+| `editor/`         | Dear ImGui panels — Atmosphere (FX) + DebugVis + ImGuizmo gizmo |
 
 ## Status at a glance
 

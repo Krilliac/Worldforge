@@ -75,8 +75,8 @@ the client loads — a client-side change, distinct from the live-server edits.
 | **GridMap `.map` parser** (server height/area/liquid/holes) | ✅ done (`gridmap.*`) |
 | **Typed DBC views** (Map/AreaTable/LiquidType/Light) | ✅ done (`dbc_defs.*`) |
 | **Detour `.mmtile` parser** (navmesh overlay) | ✅ done (`navmesh.*` → `addNavMesh`) |
-| **VMAP `.vmtree`/`.vmtile` parser** (exact server collision) | ◻ later (source meshes cover most cases) |
-| DBC → patch-MPQ writer (custom content) | ◻ later |
+| **VMAP `.vmo` collision parser** (exact server collision) | ✅ done (`vmap.*` → `addCollision`) |
+| DBC writer + patch-MPQ writer (custom content) | ✅ done (`DbcBuilder` + `writeMpqArchive`) |
 
 `gridmap`, `dbc_defs`, and `navmesh` (the byte-exact `.map` / DBC / `.mmtile`
 parsers) are implemented and unit-tested. `navmesh::addNavMesh` draws the server
