@@ -79,7 +79,9 @@ WoW client RE reference, mangos-zero hook points, and the build roadmap.
 builders, plus using `SMSG_OVERRIDE_LIGHT` as a server-handled custom opcode
 over the trusted editor↔server link (it is not a vanilla *client* render path).
 `integration/mangos-zero/` is a drop-in server-side bridge module sketch that
-applies the editor RPCs to the live world.
+applies the editor RPCs to the live world. `docs/SERVER_DATA.md` covers the
+mangos extractor outputs (`.map`/`.vmap`/`.mmap`/DBC) — what WorldForge reads
+in-engine vs streams live vs edits on the source asset.
 
 ## Provenance
 
