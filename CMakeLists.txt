@@ -43,6 +43,7 @@ add_library(wforge STATIC
   src/dbc_defs.cpp
   src/gridmap.cpp
   src/navmesh.cpp
+  src/rhi_software.cpp
 )
 target_include_directories(wforge PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -76,6 +77,7 @@ add_executable(wforge-tests
   tests/test_fxbridge.cpp
   tests/test_integration.cpp
   tests/test_serverdata.cpp
+  tests/test_rhi.cpp
 )
 target_link_libraries(wforge-tests PRIVATE wforge)
 target_include_directories(wforge-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
