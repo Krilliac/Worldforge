@@ -7,6 +7,7 @@
 #include <cstdint>
 
 void test_panels();
+void test_gizmo_controller();
 
 static void setupHeadlessImGui() {
     IMGUI_CHECKVERSION();
@@ -28,6 +29,7 @@ static void setupHeadlessImGui() {
 int main() {
     setupHeadlessImGui();
     test_panels();
+    test_gizmo_controller();
     ImGui::DestroyContext();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);

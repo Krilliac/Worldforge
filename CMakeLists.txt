@@ -110,25 +110,30 @@ target_link_libraries(wforge-debug-demo PRIVATE wforge)
 option(WFORGE_EDITOR     "Build the ImGui editor panels + headless tests" ON)
 option(WFORGE_EDITOR_APP "Build the runnable windowed editor (needs GLFW + OpenGL)" OFF)
 
-set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/imgui)
+set(IMGUI_DIR    ${CMAKE_CURRENT_SOURCE_DIR}/external/imgui)
+set(IMGUIZMO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/imguizmo/src)
 
 if(WFORGE_EDITOR)
   if(NOT EXISTS ${IMGUI_DIR}/imgui.cpp)
     message(FATAL_ERROR "Dear ImGui submodule missing. Run: git submodule update --init --recursive")
   endif()
 
+  # ImGui core + ImGuizmo (in-viewport transform handles). ImGuizmo only emits
+  # ImGui draw commands, so it builds headlessly too.
   add_library(imgui STATIC
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
     ${IMGUI_DIR}/imgui_tables.cpp
     ${IMGUI_DIR}/imgui_widgets.cpp
     ${IMGUI_DIR}/imgui_demo.cpp
+    ${IMGUIZMO_DIR}/ImGuizmo.cpp
   )
-  target_include_directories(imgui PUBLIC ${IMGUI_DIR})
+  target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUIZMO_DIR})
 
   add_library(wforge-editor STATIC
     src/editor/AtmospherePanel.cpp
     src/editor/DebugVisPanel.cpp
+    src/editor/GizmoController.cpp
   )
   target_include_directories(wforge-editor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(wforge-editor PUBLIC wforge imgui)
@@ -139,6 +144,7 @@ if(WFORGE_EDITOR)
   add_executable(wforge-editor-tests
     tests/editor/test_editor_main.cpp
     tests/editor/test_panels.cpp
+    tests/editor/test_gizmo_controller.cpp
   )
   target_link_libraries(wforge-editor-tests PRIVATE wforge-editor)
   target_include_directories(wforge-editor-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
