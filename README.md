@@ -8,20 +8,27 @@ pair with a mangos-zero server: load real client assets, render the world in a
 running server while connected retail clients see the edits.**
 
 Every parser, transform, and protocol primitive here is **compiled and
-unit-tested in-tree** (114→427 checks). Where a part needs a GPU/display or your
+unit-tested in-tree** (114→451 core + 15 editor checks). Where a part needs a GPU/display or your
 mangos checkout to run, it is implemented as far as it can be verified and the
 boundary is stated plainly (see `ARCHITECTURE.md`).
 
 ## Build
 
 ```bash
+git clone --recurse-submodules <repo>          # Dear ImGui is a submodule
 cmake -S . -B build
 cmake --build build -j$(nproc)
-./build/wforge-tests          # run the unit tests
+./build/wforge-tests          # core unit tests
+./build/wforge-editor-tests   # editor panel tests (headless ImGui)
 ./build/wforge-raster-demo    # render procedural terrain -> PNG
 ./build/wforge-debug-demo     # render terrain + debug overlay -> PNG
 ./build/wforge-dump <DataDir> <Map> [tileX tileY]   # inspect a real MPQ tree
 ```
+
+If you already cloned without submodules: `git submodule update --init --recursive`.
+The ImGui editor panels build headlessly (`WFORGE_EDITOR`, ON). The runnable
+windowed editor needs a GL/GLFW toolchain + display and is opt-in:
+`-DWFORGE_EDITOR_APP=ON` (add GLFW: `git submodule add https://github.com/glfw/glfw external/glfw`).
 
 Requires CMake ≥ 3.12 and a C++17 compiler (tested GCC 13; MSVC `/W4
 /permissive-` and GCC `-Wall -Wextra` both clean). StormLib is fetched
@@ -54,7 +61,9 @@ automatically via CMake FetchContent.
 | `editor_bridge.*` | editor↔server RPC: `EDITOR_*` op structs + `.debug vis` stream |
 | `db_export.*`     | placements → mangos `creature`/`gameobject`/`creature_movement` SQL |
 | `debugdraw.*`     | category-tagged debug primitives (waypoints/collision/triggers/wireframe) |
+| `modelmesh.*`     | M2 / WMO geometry → renderer Mesh (doodad wireframe)           |
 | `byte_writer.hpp` | little-endian write counterpart to `byte_reader.hpp`           |
+| `editor/`         | Dear ImGui panels — Atmosphere (FX) + DebugVis (layer toggles) |
 
 ## Status at a glance
 

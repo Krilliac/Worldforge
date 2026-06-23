@@ -324,9 +324,11 @@ Status: ✅ done · ◻ remaining (GPU/display- or mangos-gated, the stated ceil
 1. ◻ **GPU RHI backend** — implement `rhi::Device` on OpenGL 3.3 (1.12-era target).
    The software rasteriser stays as the reference oracle. *(ARCHITECTURE.md §2;
    cannot be runtime-verified headless.)*
-2. ◻ **ImGui editor shell** — vendor Dear ImGui + ImGuizmo; port Spark's
-   `EditorApplication`/dockspace/theme/panels subset (Part B.1). New CMake target
-   `wforge-editor`, gated like Spark's `ENABLE_EDITOR`. *(needs a window/GL context.)*
+2. ◑ **ImGui editor shell** — ✅ Dear ImGui vendored (submodule); `wforge-editor`
+   panels (`AtmospherePanel`, `DebugVisPanel`) build headlessly and are smoke-
+   tested (`wforge-editor-tests`), gated by `WFORGE_EDITOR`. ◻ The runnable
+   windowed shell (GLFW + GL3 backend, dockspace/theme, viewport) is
+   `WFORGE_EDITOR_APP` (OFF) — needs a window/GL context. ImGuizmo still to add.
 3. ✅ **MCAL write path** — `encodeAlphaMap` / `packAlphaLayers` (inverse of
    `decodeAlphaMap`); round-trip tested. *(Renderer still owes the 63→64 edge fix
    at draw time.)*
