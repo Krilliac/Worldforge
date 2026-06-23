@@ -171,6 +171,29 @@ DebugVolume decodeDebugVolume(const std::vector<uint8_t>& p) {
     return v;
 }
 
+// ---- live entity stream encode / decode ----
+std::vector<uint8_t> encode(const EntityState& e) {
+    ByteWriter w;
+    w.u64(e.guid); w.u8(e.kind); w.u32(e.entry); w.u32(e.mapId);
+    putVec3(w, e.pos); w.f32(e.orientation); w.u8(e.moving ? 1 : 0); w.f32(e.speed);
+    putStr(w, e.name);
+    return frame(EDITOR_ENTITY_STATE, w.data());
+}
+std::vector<uint8_t> encode(const EntityRemove& e) {
+    ByteWriter w; w.u64(e.guid);
+    return frame(EDITOR_ENTITY_REMOVE, w.data());
+}
+EntityState decodeEntityState(const std::vector<uint8_t>& p) {
+    ByteReader r(p); EntityState e;
+    e.guid = r.u64(); e.kind = r.u8(); e.entry = r.u32(); e.mapId = r.u32();
+    e.pos = getVec3(r); e.orientation = r.f32(); e.moving = r.u8() != 0; e.speed = r.f32();
+    e.name = getStr(r);
+    return e;
+}
+EntityRemove decodeEntityRemove(const std::vector<uint8_t>& p) {
+    ByteReader r(p); EntityRemove e; e.guid = r.u64(); return e;
+}
+
 // ---- apply into a DebugDraw ----
 void apply(DebugDraw& dd, const DebugMarker& m) {
     DebugCategory cat = categoryFor(m.type);

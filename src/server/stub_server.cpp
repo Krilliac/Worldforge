@@ -1,5 +1,7 @@
 #include "server/stub_server.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <cstring>
 
 #include "editor_bridge.hpp"
@@ -61,6 +63,7 @@ bool StubBridgeServer::start(uint16_t port) {
     listenFd_ = fd;
     running_ = true;
     acceptThread_ = std::thread([this]{ acceptLoop(); });
+    if (simRateHz_ > 0.0) simThread_ = std::thread([this]{ simLoop(); });
     return true;
 }
 
@@ -76,6 +79,70 @@ void StubBridgeServer::stop() {
         listenFd_ = -1;
     }
     if (acceptThread_.joinable()) acceptThread_.join();
+    if (simThread_.joinable())    simThread_.join();
+}
+
+uint64_t StubBridgeServer::simTimeMs() {
+    std::lock_guard<std::mutex> g(worldMtx_); return world_.simTimeMs();
+}
+
+// --- client registry + serialised sends ---
+void StubBridgeServer::addClient(int fd) {
+    std::lock_guard<std::mutex> g(clientsMtx_); clients_.push_back(fd);
+}
+void StubBridgeServer::removeClient(int fd) {
+    std::lock_guard<std::mutex> g(clientsMtx_);
+    clients_.erase(std::remove(clients_.begin(), clients_.end(), fd), clients_.end());
+}
+bool StubBridgeServer::sendFramed(int fd, const std::vector<uint8_t>& bytes) {
+    std::lock_guard<std::mutex> g(sendMtx_);   // no interleaving with the broadcast
+    return sendAll(fd, bytes);
+}
+void StubBridgeServer::broadcast(const std::vector<uint8_t>& bytes) {
+    std::vector<int> targets;
+    { std::lock_guard<std::mutex> g(clientsMtx_); targets = clients_; }
+    std::lock_guard<std::mutex> g(sendMtx_);
+    for (int fd : targets) sendAll(fd, bytes);
+}
+
+// --- simulation thread: tick the world, stream live state to every client ---
+void StubBridgeServer::simLoop() {
+    using clock = std::chrono::steady_clock;
+    const double dt = 1.0 / simRateHz_;
+    const auto   period = std::chrono::duration_cast<clock::duration>(
+                              std::chrono::duration<double>(dt));
+    std::vector<uint64_t> prevGuids;
+
+    auto last = clock::now();
+    while (running_) {
+        std::this_thread::sleep_until(last + period);
+        last = clock::now();
+
+        std::vector<SimObject> snap;
+        {
+            std::lock_guard<std::mutex> g(worldMtx_);
+            world_.tick(static_cast<float>(dt));
+            snap = world_.snapshot();
+        }
+
+        // Stream every object's live state.
+        std::vector<uint64_t> nowGuids;
+        nowGuids.reserve(snap.size());
+        for (const SimObject& o : snap) {
+            nowGuids.push_back(o.guid);
+            EntityState e;
+            e.guid = o.guid; e.kind = static_cast<uint8_t>(o.kind);
+            e.entry = o.entry; e.mapId = o.mapId;
+            e.pos = o.pos; e.orientation = o.orientation;
+            e.moving = o.moving; e.speed = o.speed; e.name = o.name;
+            broadcast(encode(e));
+        }
+        // Retire objects that left the world since last tick.
+        for (uint64_t g : prevGuids)
+            if (std::find(nowGuids.begin(), nowGuids.end(), g) == nowGuids.end())
+                broadcast(encode(EntityRemove{ g }));
+        prevGuids.swap(nowGuids);
+    }
 }
 
 void StubBridgeServer::acceptLoop() {
@@ -88,6 +155,7 @@ void StubBridgeServer::acceptLoop() {
 }
 
 void StubBridgeServer::clientLoop(int fd) {
+    addClient(fd);
     std::vector<uint8_t> acc;
     uint8_t buf[4096];
     while (running_) {
@@ -160,11 +228,12 @@ void StubBridgeServer::clientLoop(int fd) {
                 }
             }
 
-            if (!reply.empty()) sendAll(fd, reply);
-            sendAll(fd, encode(Ack{ opId, status }));      // ack every op
+            if (!reply.empty()) sendFramed(fd, reply);
+            sendFramed(fd, encode(Ack{ opId, status }));   // ack every op
             acc.erase(acc.begin(), acc.begin() + consumed);
         }
     }
+    removeClient(fd);
 }
 
 // ---- thread-safe snapshots ----

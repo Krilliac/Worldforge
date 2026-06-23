@@ -133,6 +133,23 @@ void test_bridge() {
     olt.overrideLightId = 1; olt.scope = FxScope::Target; olt.targetGuid = 0xF130000000000042ull;
     OverrideLight obt = decodeOverrideLight((readFrame(encode(olt), fr, used), fr.payload));
     CHECK(obt.scope == FxScope::Target && obt.targetGuid == 0xF130000000000042ull);
+
+    // --- live entity stream: state + remove round-trip ----------------------
+    EntityState es;
+    es.guid = 0xF130000000000099ull; es.kind = 1; es.entry = 1234; es.mapId = 0;
+    es.pos = {-9440.5f, 70.25f, 56.0f}; es.orientation = 2.5f;
+    es.moving = true; es.speed = 7.0f; es.name = "Thrall";
+    CHECK(readFrame(encode(es), fr, used) && fr.opcode == EDITOR_ENTITY_STATE);
+    EntityState eb = decodeEntityState(fr.payload);
+    CHECK(eb.guid == es.guid && eb.kind == 1 && eb.entry == 1234);
+    CHECK_APPROX(eb.pos.x, -9440.5f);
+    CHECK_APPROX(eb.orientation, 2.5f);
+    CHECK(eb.moving && eb.name == "Thrall");
+    CHECK_APPROX(eb.speed, 7.0f);
+
+    EntityRemove er; er.guid = es.guid;
+    CHECK(readFrame(encode(er), fr, used) && fr.opcode == EDITOR_ENTITY_REMOVE);
+    CHECK(decodeEntityRemove(fr.payload).guid == es.guid);
 }
 
 void test_db_export() {

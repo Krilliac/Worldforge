@@ -55,6 +55,13 @@ enum EditorOpcode : uint32_t {
     EDITOR_DEBUG_LINE     = 0x4012,  // a ray/segment with an optional hit point
     EDITOR_DEBUG_PATH     = 0x4013,  // a navmesh path (good or bad)
     EDITOR_DEBUG_VOLUME   = 0x4014,  // a cell/trigger box or sphere
+
+    // Live runtime-data stream (server -> editor). The server broadcasts the
+    // authoritative state of every visible object each sim tick; the engine
+    // mirrors it (WorldView) so the inspector + viewport show NPCs and players
+    // actually moving. ENTITY_REMOVE retires an object that left the world.
+    EDITOR_ENTITY_STATE   = 0x4030,  // one object's live state this tick
+    EDITOR_ENTITY_REMOVE  = 0x4031,  // an object despawned / left visibility
 };
 
 // The server's DV_* marker types (stable wire values; map to DebugCategory).
@@ -72,6 +79,22 @@ enum class DebugVisType : uint8_t {
 
 // Map a server DV_* type onto the renderer's toggleable layer.
 DebugCategory categoryFor(DebugVisType t);
+
+// Live state of one world object (server -> editor, streamed per sim tick).
+// `kind` matches WorldSim's EntityKind wire values (0 creature, 1 player,
+// 2 gameobject). `moving` is the server's "is patrolling" flag this tick.
+struct EntityState {
+    uint64_t    guid  = 0;
+    uint8_t     kind  = 0;
+    uint32_t    entry = 0;
+    uint32_t    mapId = 0;
+    Vec3        pos;
+    float       orientation = 0.0f;
+    bool        moving = false;
+    float       speed  = 0.0f;
+    std::string name;
+};
+struct EntityRemove { uint64_t guid = 0; };
 
 // ---- debug-stream messages (mirror the server's captured data) ----
 struct DebugMarker { DebugVisType type = DebugVisType::Generic; Vec3 pos; Rgba color; float value = 0.0f; std::string label; };
@@ -145,6 +168,12 @@ DebugMarker decodeDebugMarker(const std::vector<uint8_t>& payload);
 DebugLine   decodeDebugLine(const std::vector<uint8_t>& payload);
 DebugPath   decodeDebugPath(const std::vector<uint8_t>& payload);
 DebugVolume decodeDebugVolume(const std::vector<uint8_t>& payload);
+
+// ---- live entity stream encode / decode ----
+std::vector<uint8_t> encode(const EntityState&);
+std::vector<uint8_t> encode(const EntityRemove&);
+EntityState  decodeEntityState(const std::vector<uint8_t>& payload);
+EntityRemove decodeEntityRemove(const std::vector<uint8_t>& payload);
 
 // ---- apply a decoded debug message into a renderable DebugDraw ----
 void apply(DebugDraw& dd, const DebugMarker&);
