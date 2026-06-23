@@ -34,6 +34,18 @@ enum EditorOpcode : uint32_t {
     EDITOR_ACK            = 0x4005,  // server -> editor op result
     EDITOR_OVERRIDE_LIGHT = 0x4006,  // drive server-handled override-light (custom)
 
+    // Atmosphere / World "client-FX" override ops (editor -> server). Each is a
+    // scope-aware request; the server realises it into the matching clientfx
+    // SMSG and broadcasts to the scope. See fxbridge.hpp and the live-override
+    // plan. Kept in their own 0x402x block.
+    EDITOR_FX_WEATHER     = 0x4020,
+    EDITOR_FX_SOUND       = 0x4021,  // music or ambient sound
+    EDITOR_FX_CINEMATIC   = 0x4022,
+    EDITOR_FX_WORLDSTATE  = 0x4023,
+    EDITOR_FX_SCREENMSG   = 0x4024,  // area-trigger / notification / server msg
+    EDITOR_FX_TIMESPEED   = 0x4025,
+    EDITOR_FX_ZONEATTACK  = 0x4026,
+
     // Debug-visualisation stream (server -> editor). Mirrors the mangoszero
     // `.debug vis ...` outputs (server PR #386) so the WorldForge viewport can
     // render the same cells / LoS / paths / collision data natively as a second
@@ -77,6 +89,13 @@ struct Ack          { uint32_t opId = 0; uint8_t status = 0; }; // status: 0 ok,
 // Recipient scope for client-FX override ops (matches the server's
 // live-override-commands plan: who the resulting effect targets).
 enum class FxScope : uint8_t { Self = 0, Target = 1, Zone = 2, Server = 3 };
+
+// Who a scope-aware FX op targets. guid is used for Self/Target; zoneId for Zone.
+struct FxTarget {
+    FxScope  scope  = FxScope::Zone;
+    uint64_t guid   = 0;
+    uint32_t zoneId = 0;
+};
 
 // Editor -> server override-light request. A custom RPC: the server applies the
 // light (id + fade) to the chosen scope and translates it to whatever a 1.12.1
