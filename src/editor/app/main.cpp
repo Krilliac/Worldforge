@@ -19,9 +19,11 @@
 #include "editor/AtmospherePanel.hpp"
 #include "editor/DebugVisPanel.hpp"
 #include "editor/ViewportPanel.hpp"
+#include "editor/EntityInspectorPanel.hpp"
 #include "editor/Camera.hpp"
 #include "editor/BridgeClient.hpp"
 #include "editor_bridge.hpp"
+#include "world_view.hpp"
 #include "debugdraw.hpp"
 #include "math.hpp"
 
@@ -64,19 +66,26 @@ int main() {
         mesh.indices.insert(mesh.indices.end(), {a,b,c,b,d,c});
     }
     DebugDraw debug;
-    std::vector<Vec3> path;
-    for (int k=0;k<=8;++k){ float x=40+k*28.f, y=150+50*std::sin(k*0.7f); path.push_back({x,y,heightAt(x,y)+2}); }
-    debug.path(path, Rgba{255,220,60,255}, DebugCategory::Waypoint, true);
+    std::vector<Vec3> staticPath;
+    for (int k=0;k<=8;++k){ float x=40+k*28.f, y=150+50*std::sin(k*0.7f); staticPath.push_back({x,y,heightAt(x,y)+2}); }
 
-    editor::AtmospherePanel atmosphere;
-    editor::DebugVisPanel    debugVis;
-    editor::ViewportPanel    viewport(900, 560);
-    editor::GizmoController  giz;
+    editor::AtmospherePanel      atmosphere;
+    editor::DebugVisPanel        debugVis;
+    editor::EntityInspectorPanel inspector;
+    editor::ViewportPanel        viewport(900, 560);
+    editor::GizmoController       giz;
     Mat4 selected = Mat4::translate(Vec3{150, 150, heightAt(150,150) + 4});
+
+    // The engine-side mirror of the live server world (NPCs/players) + the
+    // accumulated server debug-vis stream. Rebuilt into `debug` each frame so the
+    // moving entity markers stay current.
+    WorldView view;
+    std::vector<DebugMarker> srvMarkers; std::vector<DebugPath> srvPaths;
+    std::vector<DebugLine>   srvLines;   std::vector<DebugVolume> srvVols;
 
     // Connect to the running mangos-zero bridge (optional; the editor still runs
     // offline if it's down). When connected, panel ops go out and the server's
-    // .debug vis stream comes back into the overlay.
+    // live entity stream + .debug vis stream come back.
     editor::BridgeClient bridge;
     bridge.connect("127.0.0.1", 7878);
 
@@ -105,6 +114,38 @@ int main() {
         if (glfwGetKey(win, GLFW_KEY_E) == GLFW_PRESS) viewport.camera.fly(0, 0,  spd);
         if (glfwGetKey(win, GLFW_KEY_Q) == GLFW_PRESS) viewport.camera.fly(0, 0, -spd);
 
+        // Drain the bridge: live entities/server-status feed the WorldView; the
+        // debug-vis stream accumulates (cleared on DEBUG_CLEAR).
+        for (const auto& f : bridge.poll()) {
+            switch (f.opcode) {
+                case EDITOR_ENTITY_STATE:
+                case EDITOR_ENTITY_REMOVE:
+                case EDITOR_SERVER_STATE:
+                    view.onFrame(f, (uint32_t)(now * 1000.0)); break;
+                case EDITOR_DEBUG_MARKER: srvMarkers.push_back(decodeDebugMarker(f.payload)); break;
+                case EDITOR_DEBUG_PATH:   srvPaths.push_back(decodeDebugPath(f.payload));     break;
+                case EDITOR_DEBUG_LINE:   srvLines.push_back(decodeDebugLine(f.payload));     break;
+                case EDITOR_DEBUG_VOLUME: srvVols.push_back(decodeDebugVolume(f.payload));    break;
+                case EDITOR_DEBUG_CLEAR:
+                    srvMarkers.clear(); srvPaths.clear(); srvLines.clear(); srvVols.clear(); break;
+                default: break;
+            }
+        }
+
+        // Rebuild the overlay each frame: static authoring path + accumulated
+        // server debug + the live moving entities.
+        debug.clear();
+        debug.path(staticPath, Rgba{255,220,60,255}, DebugCategory::Waypoint, true);
+        for (const auto& m : srvMarkers) apply(debug, m);
+        for (const auto& p : srvPaths)   apply(debug, p);
+        for (const auto& l : srvLines)   apply(debug, l);
+        for (const auto& v : srvVols)    apply(debug, v);
+        view.buildDebug(debug);
+
+        // Keep the gizmo on the selected entity (click-select sets it below).
+        if (view.hasSelection())
+            selected = Mat4::translate(view.find(view.selected())->state.pos);
+
         // Render the scene on the CPU and upload it to the GL texture.
         viewport.render(mesh, debug);
         glBindTexture(GL_TEXTURE_2D, sceneTex);
@@ -120,21 +161,14 @@ int main() {
 
         std::vector<std::vector<uint8_t>> outgoing;
         atmosphere.draw(outgoing);
-        viewport.draw((ImTextureID)(intptr_t)sceneTex, giz, &selected);
+        // Click-to-select: passing the view + terrain lets a left-click in the
+        // viewport pick an entity (-> WorldView selection) or terrain point.
+        viewport.draw((ImTextureID)(intptr_t)sceneTex, giz, &selected, &view, &mesh);
         debugVis.draw(debug);
+        inspector.draw(view);            // live entity list + selected detail
 
-        // Ship the panels' ops; fold the server's debug stream into the overlay.
+        // Ship the panels' ops to the server.
         for (auto& pkt : outgoing) bridge.send(pkt);
-        for (const auto& f : bridge.poll()) {
-            switch (f.opcode) {
-                case EDITOR_DEBUG_LINE:   apply(debug, decodeDebugLine(f.payload));   break;
-                case EDITOR_DEBUG_PATH:   apply(debug, decodeDebugPath(f.payload));   break;
-                case EDITOR_DEBUG_VOLUME: apply(debug, decodeDebugVolume(f.payload)); break;
-                case EDITOR_DEBUG_MARKER: apply(debug, decodeDebugMarker(f.payload)); break;
-                case EDITOR_DEBUG_CLEAR:  debug.clear(); break;
-                default: break;
-            }
-        }
 
         ImGui::Render();
         int w, h; glfwGetFramebufferSize(win, &w, &h);
