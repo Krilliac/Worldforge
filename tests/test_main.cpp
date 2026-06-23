@@ -13,6 +13,7 @@ void test_editing();
 void test_gizmo();
 void test_bridge();
 void test_db_export();
+void test_debugdraw();
 
 int main() {
     test_math();
@@ -28,6 +29,7 @@ int main() {
     test_gizmo();
     test_bridge();
     test_db_export();
+    test_debugdraw();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;

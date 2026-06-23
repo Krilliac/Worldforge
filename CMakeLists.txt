@@ -36,6 +36,7 @@ add_library(wforge STATIC
   src/gizmo.cpp
   src/editor_bridge.cpp
   src/db_export.cpp
+  src/debugdraw.cpp
 )
 target_include_directories(wforge PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -63,6 +64,7 @@ add_executable(wforge-tests
   tests/test_raster.cpp
   tests/test_editing.cpp
   tests/test_bridge.cpp
+  tests/test_debugdraw.cpp
 )
 target_link_libraries(wforge-tests PRIVATE wforge)
 target_include_directories(wforge-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
