@@ -28,6 +28,7 @@ int main() {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;   // docking branch
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(win, true);
     ImGui_ImplOpenGL3_Init("#version 330");
@@ -41,6 +42,9 @@ int main() {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+
+        // Full-window dock space so the panels split/dock Unity/Unreal-style.
+        ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
         // Editor packets produced this frame would be sent over the bridge to
         // the running mangos-zero (see integration/mangos-zero/).
