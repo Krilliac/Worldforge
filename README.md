@@ -53,7 +53,8 @@ Implemented + tested: MPQ/WDT/ADT/DBC, coordinate transforms, terrain meshing,
 BLP, M2 (static + animation), WMO, SRP6 logon, header cipher, framing, software
 rendering. Design + compile-only: GPU backend, live-server editor bridge — see
 `ARCHITECTURE.md` for the integration contract and the verified-vs-architectural
-table.
+table, and `docs/EDITOR_RESEARCH.md` for the editor UI/architecture design,
+WoW client RE reference, mangos-zero hook points, and the build roadmap.
 
 ## Provenance
 

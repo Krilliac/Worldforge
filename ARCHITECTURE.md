@@ -73,6 +73,12 @@ running mangos-zero, while connected 1.12.1 clients see edits live.** This is
 what separates WorldForge from an offline map editor (Noggit) or a static
 viewer.
 
+> For the consolidated design — the editor UI spec, the reusable Spark Engine
+> editor architecture, the WoW 1.12.1 client RE reference, the concrete
+> mangos-zero hook points (`Map::Update` drain, `ObjectAccessor`, `MoveSplineInit`,
+> spawn-table schema), and the implementation roadmap — see
+> [`docs/EDITOR_RESEARCH.md`](docs/EDITOR_RESEARCH.md).
+
 ### 3.1 Data flow
 
 ```
