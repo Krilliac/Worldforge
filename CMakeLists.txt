@@ -55,6 +55,7 @@ add_library(wforge STATIC
   src/audio.cpp
   src/sound_entries.cpp
   src/sound_player.cpp
+  src/world_view.cpp
 )
 target_include_directories(wforge PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -110,6 +111,7 @@ add_executable(wforge-tests
   tests/test_asset.cpp
   tests/test_client_data.cpp
   tests/test_audio.cpp
+  tests/test_world_view.cpp
 )
 target_link_libraries(wforge-tests PRIVATE wforge)
 target_include_directories(wforge-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
