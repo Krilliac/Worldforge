@@ -21,6 +21,7 @@
 #include "editor/ViewportPanel.hpp"
 #include "editor/EntityInspectorPanel.hpp"
 #include "editor/MoveEmitter.hpp"
+#include "editor/PlacementEditor.hpp"
 #include "editor/Camera.hpp"
 #include "editor/BridgeClient.hpp"
 #include "editor_bridge.hpp"
@@ -85,7 +86,9 @@ int main() {
         tileScene.terrain.chunkMeshes.push_back(std::move(chunk));
     }
     WorldPick sceneSel;   // the currently-selected static object (if any)
-    editor::MoveEmitter mover;   // gizmo drag on a selected entity -> MoveObject
+    editor::MoveEmitter     mover;       // gizmo drag on a selected entity -> MoveObject
+    editor::PlacementEditor placeEditor;  // gizmo drag on a static object -> PlacementEdit
+    std::vector<editor::PlacementEdit> placementEdits;   // pending ADT write-backs
 
     editor::AtmospherePanel      atmosphere;
     editor::DebugVisPanel        debugVis;
@@ -196,6 +199,10 @@ int main() {
             float ori = view.hasSelection() ? view.find(view.selected())->state.orientation : 0.0f;
             if (auto op = mover.update(gizmoActive, view.selected(), gpos, ori))
                 bridge.send(encode(*op));
+            // A static object (doodad/WMO) drag is an asset edit, captured for an
+            // offline ADT write-back (no live server op for placements).
+            if (auto edit = placeEditor.update(gizmoActive, sceneSel, gpos))
+                placementEdits.push_back(*edit);
         }
 
         // Ship the panels' ops to the server.
