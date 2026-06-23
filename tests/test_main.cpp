@@ -11,6 +11,8 @@ void test_proto();
 void test_raster();
 void test_editing();
 void test_gizmo();
+void test_bridge();
+void test_db_export();
 
 int main() {
     test_math();
@@ -24,6 +26,8 @@ int main() {
     test_raster();
     test_editing();
     test_gizmo();
+    test_bridge();
+    test_db_export();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;

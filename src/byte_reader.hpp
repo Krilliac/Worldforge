@@ -61,6 +61,15 @@ public:
     }
     int32_t i32() { return static_cast<int32_t>(u32()); }
 
+    uint64_t u64() {
+        require(8);
+        uint64_t v = 0;
+        for (int i = 0; i < 8; ++i)
+            v |= static_cast<uint64_t>(data_[pos_ + i]) << (8 * i);
+        pos_ += 8;
+        return v;
+    }
+
     float f32() {
         uint32_t bits = u32();
         float f;
