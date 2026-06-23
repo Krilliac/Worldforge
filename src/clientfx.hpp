@@ -30,6 +30,9 @@ namespace wf {
 // Vanilla weather states (SMSG_WEATHER `type`).
 enum class WeatherType : uint32_t { Fine = 0, Rain = 1, Snow = 2, Sandstorm = 3 };
 
+// SMSG_AI_REACTION `reaction` values.
+enum class AiReaction : uint32_t { Alert = 0, Friendly = 1, Hostile = 2, Destroy = 3 };
+
 // --- audio ---------------------------------------------------------------
 std::vector<uint8_t> buildPlaySound(uint32_t soundId);                       // SMSG_PLAY_SOUND
 std::vector<uint8_t> buildPlayMusic(uint32_t soundId);                       // SMSG_PLAY_MUSIC
@@ -56,6 +59,13 @@ std::vector<uint8_t> buildWeather(WeatherType type, float grade,
 std::vector<uint8_t> buildZoneUnderAttack(uint32_t zoneId);                 // SMSG_ZONE_UNDER_ATTACK
 std::vector<uint8_t> buildLoginSetTimeSpeed(uint32_t packedDate,
         float gameSpeed = 0.01666667f);                                     // SMSG_LOGIN_SETTIMESPEED
+
+// --- creatures / objects (spectacle + debug) ----------------------------
+std::vector<uint8_t> buildEmote(uint64_t guid, uint32_t emoteId);           // SMSG_EMOTE (u32 emote THEN guid)
+std::vector<uint8_t> buildAiReaction(uint64_t guid, AiReaction reaction);   // SMSG_AI_REACTION (aggro blip)
+std::vector<uint8_t> buildExplorationExperience(uint32_t areaId, uint32_t xp); // SMSG_EXPLORATION_EXPERIENCE
+std::vector<uint8_t> buildGameObjectDespawnAnim(uint64_t guid);             // SMSG_GAMEOBJECT_DESPAWN_ANIM
+std::vector<uint8_t> buildStandState(uint8_t state);                        // SMSG_STANDSTATE_UPDATE
 
 // SMSG_OVERRIDE_LIGHT (0x411). Custom / trusted-link only (see header note):
 // the TBC/WotLK body is three uint32 -- the light to fade FROM (the zone's

@@ -51,6 +51,13 @@ enum Opcode : uint32_t {
     SMSG_PLAY_SOUND             = 0x2D2,
     SMSG_WEATHER                = 0x2F4,
 
+    // More underused/debug spectacle opcodes (verified vs cmangos vanilla).
+    SMSG_EMOTE                   = 0x103,  // u32 emoteId; u64 guid
+    SMSG_AI_REACTION             = 0x13C,  // u64 guid; u32 reaction
+    SMSG_EXPLORATION_EXPERIENCE  = 0x1F8,  // u32 areaId; u32 xp
+    SMSG_GAMEOBJECT_DESPAWN_ANIM = 0x215,  // u64 guid
+    SMSG_STANDSTATE_UPDATE       = 0x29D,  // u8 state
+
     // Custom / trusted-link opcode. 0x411 is NOT a 1.12.1 retail-client render
     // path (it is TBC+), but it IS present in mangos-zero's opcode table, so the
     // WorldForge<->server bridge can use it as a server-handled custom message:

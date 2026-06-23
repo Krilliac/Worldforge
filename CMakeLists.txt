@@ -71,6 +71,7 @@ add_executable(wforge-tests
   tests/test_modelmesh.cpp
   tests/test_clientfx.cpp
   tests/test_fxbridge.cpp
+  tests/test_integration.cpp
 )
 target_link_libraries(wforge-tests PRIVATE wforge)
 target_include_directories(wforge-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)

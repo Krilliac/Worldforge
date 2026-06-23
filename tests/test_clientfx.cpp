@@ -149,6 +149,38 @@ void test_clientfx() {
         CHECK_APPROX(r.f32(), 0.01666667f);
     }
 
+    // --- creature/object spectacle: emote, ai-reaction, despawn-anim, etc. --
+    {
+        Parsed p = parse(buildEmote(0xABC, 11));        // 11 = EMOTE_ONESHOT_WAVE
+        CHECK(p.opcode == SMSG_EMOTE);
+        ByteReader r(p.body);
+        CHECK(r.u32() == 11);                           // emote id FIRST
+        CHECK(r.u64() == 0xABC);                        // then guid
+    }
+    {
+        Parsed p = parse(buildAiReaction(0xF130000000000005ull, AiReaction::Hostile));
+        CHECK(p.opcode == SMSG_AI_REACTION);
+        ByteReader r(p.body);
+        CHECK(r.u64() == 0xF130000000000005ull);        // guid FIRST
+        CHECK(r.u32() == 2);                            // Hostile
+    }
+    {
+        Parsed p = parse(buildExplorationExperience(1519, 230));
+        CHECK(p.opcode == SMSG_EXPLORATION_EXPERIENCE);
+        ByteReader r(p.body);
+        CHECK(r.u32() == 1519 && r.u32() == 230);
+    }
+    {
+        Parsed p = parse(buildGameObjectDespawnAnim(0x77));
+        CHECK(p.opcode == SMSG_GAMEOBJECT_DESPAWN_ANIM);
+        CHECK(ByteReader(p.body).u64() == 0x77);
+    }
+    {
+        Parsed p = parse(buildStandState(1));           // 1 = STAND_STATE_SIT
+        CHECK(p.opcode == SMSG_STANDSTATE_UPDATE);
+        CHECK(p.body.size() == 1 && p.body[0] == 1);
+    }
+
     // --- override light (custom / trusted-link 0x411): from, to, fade -------
     {
         Parsed p = parse(buildOverrideLight(/*current*/ 1, /*override*/ 396, /*fade*/ 5000));

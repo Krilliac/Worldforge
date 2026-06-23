@@ -103,6 +103,28 @@ std::vector<uint8_t> buildLoginSetTimeSpeed(uint32_t packedDate, float gameSpeed
     return framed(SMSG_LOGIN_SETTIMESPEED, w);
 }
 
+// --- creatures / objects -------------------------------------------------
+std::vector<uint8_t> buildEmote(uint64_t guid, uint32_t emoteId) {
+    ByteWriter w; w.u32(emoteId); w.u64(guid);    // emote id first, then guid
+    return framed(SMSG_EMOTE, w);
+}
+std::vector<uint8_t> buildAiReaction(uint64_t guid, AiReaction reaction) {
+    ByteWriter w; w.u64(guid); w.u32(static_cast<uint32_t>(reaction));
+    return framed(SMSG_AI_REACTION, w);
+}
+std::vector<uint8_t> buildExplorationExperience(uint32_t areaId, uint32_t xp) {
+    ByteWriter w; w.u32(areaId); w.u32(xp);
+    return framed(SMSG_EXPLORATION_EXPERIENCE, w);
+}
+std::vector<uint8_t> buildGameObjectDespawnAnim(uint64_t guid) {
+    ByteWriter w; w.u64(guid);
+    return framed(SMSG_GAMEOBJECT_DESPAWN_ANIM, w);
+}
+std::vector<uint8_t> buildStandState(uint8_t state) {
+    ByteWriter w; w.u8(state);
+    return framed(SMSG_STANDSTATE_UPDATE, w);
+}
+
 std::vector<uint8_t> buildOverrideLight(uint32_t currentZoneLightId,
         uint32_t overrideLightId, uint32_t fadeInMs) {
     ByteWriter w;

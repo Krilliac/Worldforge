@@ -17,6 +17,7 @@ void test_debugdraw();
 void test_modelmesh();
 void test_clientfx();
 void test_fxbridge();
+void test_integration();
 
 int main() {
     test_math();
@@ -36,6 +37,7 @@ int main() {
     test_modelmesh();
     test_clientfx();
     test_fxbridge();
+    test_integration();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;
