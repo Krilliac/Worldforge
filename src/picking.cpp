@@ -28,23 +28,6 @@ float raySphere(const Ray& r, const Vec3& center, float radius) {
     return t >= 0.0f ? t : -1.0f;
 }
 
-float rayTriangle(const Ray& r, const Vec3& a, const Vec3& b, const Vec3& c) {
-    const float kEps = 1e-7f;
-    Vec3 e1 = b - a, e2 = c - a;
-    Vec3 p  = cross(r.dir, e2);
-    float det = dot(e1, p);
-    if (std::fabs(det) < kEps) return -1.0f;                 // ray parallel to tri
-    float inv = 1.0f / det;
-    Vec3 tvec = r.origin - a;
-    float u = dot(tvec, p) * inv;
-    if (u < 0.0f || u > 1.0f) return -1.0f;
-    Vec3 q = cross(tvec, e1);
-    float v = dot(r.dir, q) * inv;
-    if (v < 0.0f || u + v > 1.0f) return -1.0f;
-    float t = dot(e2, q) * inv;
-    return t > kEps ? t : -1.0f;
-}
-
 PickResult pickEntity(const Ray& r, const WorldView& view, float radius) {
     PickResult best;
     float bestT = 1e30f;
@@ -63,17 +46,11 @@ PickResult pickEntity(const Ray& r, const WorldView& view, float radius) {
 
 PickResult pickTerrain(const Ray& r, const Mesh& terrain) {
     PickResult best;
-    float bestT = 1e30f;
-    const auto& v = terrain.vertices;
-    const auto& idx = terrain.indices;
-    for (size_t i = 0; i + 2 < idx.size(); i += 3) {
-        float t = rayTriangle(r, v[idx[i]].position, v[idx[i+1]].position, v[idx[i+2]].position);
-        if (t >= 0.0f && t < bestT) {
-            bestT = t;
-            best.kind = PickResult::Kind::Terrain;
-            best.distance = t;
-            best.point = r.origin + r.dir * t;
-        }
+    Vec3 hit;
+    if (pickMesh(r, terrain, hit)) {        // nearest triangle hit (gizmo.hpp)
+        best.kind = PickResult::Kind::Terrain;
+        best.point = hit;
+        best.distance = length(hit - r.origin);
     }
     return best;
 }

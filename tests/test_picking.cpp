@@ -44,10 +44,12 @@ void test_picking() {
     CHECK(raySphere(c, Vec3{10,20,0}, 2.0f) < 0.0f);        // off to the side
     CHECK(raySphere(c, Vec3{-10,0,0}, 2.0f) < 0.0f);        // behind the camera
 
-    // --- ray vs triangle ----------------------------------------------------
-    float tt = rayTriangle(c, Vec3{20,-5,-5}, Vec3{20,5,-5}, Vec3{20,0,8});
+    // --- ray vs triangle (shared gizmo.hpp helper) --------------------------
+    float tt = -1.0f;
+    CHECK(rayTriangle(c, Vec3{20,-5,-5}, Vec3{20,5,-5}, Vec3{20,0,8}, tt));
     CHECK_APPROX(tt, 20.0f);                                // plane x=20 ahead
-    CHECK(rayTriangle(c, Vec3{20,10,10}, Vec3{20,20,10}, Vec3{20,15,18}) < 0.0f); // off-axis miss
+    float tmiss = -1.0f;
+    CHECK(!rayTriangle(c, Vec3{20,10,10}, Vec3{20,20,10}, Vec3{20,15,18}, tmiss)); // off-axis
 
     // --- pickEntity: nearest of several entities ----------------------------
     WorldView view;
@@ -79,8 +81,8 @@ void test_picking() {
     PickResult terr = pick(down, empty, ground, 3.0f);
     CHECK(terr.hit() && terr.kind == PickResult::Kind::Terrain);
 
-    // A ray into empty sky hits nothing.
-    Ray sky = screenRay(eye, normalize(Vec3{0,0,1}), right, Vec3{-1,0,0}, fov, aspect,
-                        W/2, H/2, W, H);
+    // A ray fired straight up from above the ground hits nothing.
+    Ray sky = screenRay(Vec3{0,0,10}, normalize(Vec3{0,0,1}), right, Vec3{-1,0,0},
+                        fov, aspect, W/2, H/2, W, H);
     CHECK(!pick(sky, empty, ground).hit());
 }

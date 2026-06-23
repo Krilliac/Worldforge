@@ -12,14 +12,10 @@
 
 #include "math.hpp"
 #include "terrain.hpp"     // Mesh
+#include "gizmo.hpp"       // Ray, rayTriangle, pickMesh (shared picking math)
 #include "world_view.hpp"
 
 namespace wf {
-
-struct Ray {
-    Vec3 origin;
-    Vec3 dir;     // normalised
-};
 
 // Build the world-space ray through viewport pixel (sx, sy) for a camera with
 // the given basis (forward/right/up, all unit) and vertical FOV. (sx,sy) are in
@@ -28,9 +24,8 @@ Ray screenRay(const Vec3& eye, const Vec3& forward, const Vec3& right, const Vec
               double fovYDeg, double aspect, float sx, float sy, float width, float height);
 
 // Ray vs sphere: nearest positive hit distance along the ray, or < 0 for a miss.
+// (Ray-triangle / ray-mesh come from gizmo.hpp: rayTriangle / pickMesh.)
 float raySphere(const Ray& r, const Vec3& center, float radius);
-// Ray vs triangle (Moller-Trumbore): hit distance, or < 0 for a miss/parallel.
-float rayTriangle(const Ray& r, const Vec3& a, const Vec3& b, const Vec3& c);
 
 // What a click resolved to.
 struct PickResult {

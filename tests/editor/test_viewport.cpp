@@ -5,6 +5,8 @@
 #include "editor/ViewportPanel.hpp"
 #include "editor/SoftwareImGui.hpp"
 #include "editor/GizmoController.hpp"
+#include "world_view.hpp"
+#include "picking.hpp"
 #include "terrain.hpp"
 #include "debugdraw.hpp"
 #include "image.hpp"
@@ -74,4 +76,24 @@ void test_viewport() {
     for (const Rgba& p : ui.pixels)
         if (p.g > p.r + 15 && p.g > p.b + 15) { greenish = true; break; }
     CHECK(greenish);
+
+    // --- click-picking: a centre click selects the entity straight ahead ----
+    ViewportPanel pick(200, 200);
+    pick.camera.eye = {0,0,0}; pick.camera.yaw = 0; pick.camera.pitch = 0;  // look +X
+
+    WorldView wv;
+    EntityState e; e.guid = 0xABCD; e.kind = 0; e.pos = {25,0,0}; e.moving = true;
+    wv.apply(e);
+    Mesh ground;   // a vertical wall at x=60 so terrain is behind the entity
+    ground.vertices = { {{60,-50,-50},{ -1,0,0}}, {{60,50,-50},{-1,0,0}},
+                        {{60,50,50},{-1,0,0}},     {{60,-50,50},{-1,0,0}} };
+    ground.indices = { 0,1,2, 0,2,3 };
+
+    // Centre pixel -> ray along +X -> hits the entity (nearer than the wall).
+    PickResult pr = pick.pickAt(100, 100, wv, ground);
+    CHECK(pr.hit() && pr.kind == PickResult::Kind::Entity && pr.guid == 0xABCD);
+
+    // A pixel near the top edge aims above the entity -> the wall (terrain).
+    PickResult pr2 = pick.pickAt(100, 2, wv, ground);
+    CHECK(pr2.kind == PickResult::Kind::Terrain);
 }

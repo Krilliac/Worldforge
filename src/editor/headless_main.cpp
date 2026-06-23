@@ -118,7 +118,8 @@ int main() {
 
     ImGui::SetNextWindowPos(ImVec2(308, 24), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(848, 580), ImGuiCond_Always);
-    viewport.draw(kSceneTex, giz, &selected);
+    // Passing the live view + terrain enables click-to-select in the viewport.
+    viewport.draw(kSceneTex, giz, &selected, &view, &mesh);
 
     const float rightH = (H - 24) * 0.5f;
     ImGui::SetNextWindowPos(ImVec2(W - 280, 24), ImGuiCond_Always);

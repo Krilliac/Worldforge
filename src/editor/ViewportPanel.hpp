@@ -13,6 +13,8 @@
 #include "terrain.hpp"     // Mesh
 #include "raster.hpp"      // Framebuffer
 #include "debugdraw.hpp"
+#include "picking.hpp"     // Ray / PickResult / pick
+#include "world_view.hpp"
 #include "editor/Camera.hpp"
 #include "editor/GizmoController.hpp"
 
@@ -30,7 +32,19 @@ public:
 
     // ImGui panel: show the scene (sampled from `sceneTex`) and run the gizmo
     // over `selected` (may be null). Returns true while the gizmo is dragged.
-    bool draw(ImTextureID sceneTex, GizmoController& giz, Mat4* selected);
+    // When `view` + `terrain` are given, a left-click on the image (that isn't a
+    // gizmo drag) picks the entity/terrain under the cursor: an entity click
+    // updates the WorldView selection; the result is also exposed via lastPick().
+    bool draw(ImTextureID sceneTex, GizmoController& giz, Mat4* selected,
+              WorldView* view = nullptr, const Mesh* terrain = nullptr);
+
+    // Hit-test viewport pixel (localX, localY) -- origin at the image's top-left
+    // -- against the live entities + terrain. Pure (no ImGui), so it's tested
+    // directly without synthesising mouse input.
+    PickResult pickAt(float localX, float localY,
+                      const WorldView& view, const Mesh& terrain) const;
+
+    const PickResult& lastPick() const { return lastPick_; }
 
     const Image& scene() const { return scene_; }
     int width()  const { return width_; }
@@ -40,6 +54,7 @@ private:
     int width_, height_;
     Image       scene_;
     Framebuffer fb_;
+    PickResult  lastPick_;
 };
 
 } // namespace wf::editor
