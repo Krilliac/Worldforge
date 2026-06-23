@@ -103,6 +103,15 @@ std::vector<uint8_t> buildLoginSetTimeSpeed(uint32_t packedDate, float gameSpeed
     return framed(SMSG_LOGIN_SETTIMESPEED, w);
 }
 
+std::vector<uint8_t> buildOverrideLight(uint32_t currentZoneLightId,
+        uint32_t overrideLightId, uint32_t fadeInMs) {
+    ByteWriter w;
+    w.u32(currentZoneLightId);   // fade FROM (zone default / current light id)
+    w.u32(overrideLightId);      // fade TO
+    w.u32(fadeInMs);
+    return framed(SMSG_OVERRIDE_LIGHT, w);
+}
+
 uint32_t packTimeBitFields(int year, int month, int mday, int wday, int hour, int minute) {
     // mangos uses tm_year (years since 1900): (tm_year - 100) == (fullYear - 2000).
     return (static_cast<uint32_t>(year - 2000) << 24)

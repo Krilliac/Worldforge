@@ -32,6 +32,7 @@ enum EditorOpcode : uint32_t {
     EDITOR_DESPAWN        = 0x4003,  // remove a live object
     EDITOR_SET_WAYPOINTS  = 0x4004,  // install a patrol path
     EDITOR_ACK            = 0x4005,  // server -> editor op result
+    EDITOR_OVERRIDE_LIGHT = 0x4006,  // drive server-handled override-light (custom)
 
     // Debug-visualisation stream (server -> editor). Mirrors the mangoszero
     // `.debug vis ...` outputs (server PR #386) so the WorldForge viewport can
@@ -73,6 +74,23 @@ struct Despawn      { uint64_t guid = 0; uint32_t opId = 0; };
 struct SetWaypoints { uint64_t guid = 0; std::vector<Vec3> path; uint32_t opId = 0; };
 struct Ack          { uint32_t opId = 0; uint8_t status = 0; }; // status: 0 ok, !=0 error
 
+// Recipient scope for client-FX override ops (matches the server's
+// live-override-commands plan: who the resulting effect targets).
+enum class FxScope : uint8_t { Self = 0, Target = 1, Zone = 2, Server = 3 };
+
+// Editor -> server override-light request. A custom RPC: the server applies the
+// light (id + fade) to the chosen scope and translates it to whatever a 1.12.1
+// client can see. Decoupled from the raw 0x411 wire layout so the editor can
+// carry scope/target the SMSG body has no room for.
+struct OverrideLight {
+    uint32_t overrideLightId = 0;
+    uint32_t fadeInMs        = 0;
+    FxScope  scope           = FxScope::Zone;
+    uint64_t targetGuid      = 0;   // Self/Target scope (0 otherwise)
+    uint32_t zoneId          = 0;   // Zone scope
+    uint32_t opId            = 0;
+};
+
 // A decoded frame: the opcode plus the raw payload bytes (decode the matching
 // struct with the decode* helpers below).
 struct EditorFrame { uint32_t opcode = 0; std::vector<uint8_t> payload; };
@@ -89,6 +107,7 @@ std::vector<uint8_t> encode(const SpawnCreature&);
 std::vector<uint8_t> encode(const Despawn&);
 std::vector<uint8_t> encode(const SetWaypoints&);
 std::vector<uint8_t> encode(const Ack&);
+std::vector<uint8_t> encode(const OverrideLight&);
 
 // ---- decode (from a frame's payload) ----
 MoveObject    decodeMoveObject(const std::vector<uint8_t>& payload);
@@ -96,6 +115,7 @@ SpawnCreature decodeSpawnCreature(const std::vector<uint8_t>& payload);
 Despawn       decodeDespawn(const std::vector<uint8_t>& payload);
 SetWaypoints  decodeSetWaypoints(const std::vector<uint8_t>& payload);
 Ack           decodeAck(const std::vector<uint8_t>& payload);
+OverrideLight decodeOverrideLight(const std::vector<uint8_t>& payload);
 
 // ---- debug stream encode / decode ----
 std::vector<uint8_t> encode(const DebugMarker&);

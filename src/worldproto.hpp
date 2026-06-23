@@ -50,6 +50,14 @@ enum Opcode : uint32_t {
     SMSG_UPDATE_WORLD_STATE     = 0x2C3,
     SMSG_PLAY_SOUND             = 0x2D2,
     SMSG_WEATHER                = 0x2F4,
+
+    // Custom / trusted-link opcode. 0x411 is NOT a 1.12.1 retail-client render
+    // path (it is TBC+), but it IS present in mangos-zero's opcode table, so the
+    // WorldForge<->server bridge can use it as a server-handled custom message:
+    // WorldForge frames it, the server's handler applies the lighting change
+    // (and translates it to whatever a vanilla client can actually see). See
+    // docs/SERVER_OPCODES.md and clientfx buildOverrideLight.
+    SMSG_OVERRIDE_LIGHT         = 0x411,
 };
 
 // Rolling add/xor header cipher. Send and receive directions keep independent

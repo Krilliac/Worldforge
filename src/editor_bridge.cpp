@@ -80,6 +80,12 @@ std::vector<uint8_t> encode(const Ack& a) {
     ByteWriter w; w.u32(a.opId); w.u8(a.status);
     return frame(EDITOR_ACK, w.data());
 }
+std::vector<uint8_t> encode(const OverrideLight& o) {
+    ByteWriter w;
+    w.u32(o.overrideLightId); w.u32(o.fadeInMs);
+    w.u8(static_cast<uint8_t>(o.scope)); w.u64(o.targetGuid); w.u32(o.zoneId); w.u32(o.opId);
+    return frame(EDITOR_OVERRIDE_LIGHT, w.data());
+}
 
 // ---- decode ----
 MoveObject decodeMoveObject(const std::vector<uint8_t>& p) {
@@ -106,6 +112,13 @@ SetWaypoints decodeSetWaypoints(const std::vector<uint8_t>& p) {
 }
 Ack decodeAck(const std::vector<uint8_t>& p) {
     ByteReader r(p); Ack a; a.opId = r.u32(); a.status = r.u8(); return a;
+}
+OverrideLight decodeOverrideLight(const std::vector<uint8_t>& p) {
+    ByteReader r(p); OverrideLight o;
+    o.overrideLightId = r.u32(); o.fadeInMs = r.u32();
+    o.scope = static_cast<FxScope>(r.u8()); o.targetGuid = r.u64();
+    o.zoneId = r.u32(); o.opId = r.u32();
+    return o;
 }
 
 // ---- debug stream encode ----

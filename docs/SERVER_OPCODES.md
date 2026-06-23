@@ -50,23 +50,41 @@ the client handles them but the core almost never sends them.
   `((year-2000)<<24)|(mon<<20)|((mday-1)<<14)|(wday<<11)|(hour<<6)|min`, speed
   fixed at `1/60`. See `packTimeBitFields`.
 
-## SMSG_OVERRIDE_LIGHT does not exist in vanilla
+## SMSG_OVERRIDE_LIGHT — not a vanilla *client* opcode, but a usable custom one
 
-The `live-override-commands-plan` names `SMSG_OVERRIDE_LIGHT` as its primary new
-primitive. **It is not a valid 1.12.1 opcode.** mangos-zero's `Opcodes.h` is a
-multi-expansion table; the `[-ZERO] Last existed in 1.12.1 opcode` marker sits
-around `0x342`, and `SMSG_OVERRIDE_LIGHT = 0x411` is above it (a TBC+/placeholder
-entry). cmangos's vanilla-only enum ends at `SMSG_DEFENSE_MESSAGE = 0x33B` and
-contains no override-light at all. **A 1.12.1 (5875) client has no handler for
-0x411 — sending it does nothing (or desyncs).**
+`SMSG_OVERRIDE_LIGHT = 0x411` is **TBC+**: it is above mangos-zero's
+`[-ZERO] Last existed in 1.12.1 opcode` marker (~`0x342`), and cmangos's
+vanilla-only enum ends at `SMSG_DEFENSE_MESSAGE = 0x33B` with no override-light
+at all. So a **1.12.1 retail client has no handler** — you cannot send `0x411`
+*to a vanilla client* and have it render.
 
-Implication for the `.light` command: on vanilla there is no per-player
-"override light" packet. Atmospheric lighting changes must instead go through
-content the 1.12 client *does* react to — e.g. weather (`SMSG_WEATHER`), zone
-light via DBC/`Light.dbc` area definitions (static, not per-player), or time of
-day. The other override commands (`.weather/.music/.sound/.cinematic/.worldstate/
-.zoneattack/.screenmsg/.timespeed`) all map onto opcodes that **do** exist above
-and are covered by `clientfx`.
+**But the opcode number is in mangos-zero's table, and the WorldForge↔server
+link is a trusted channel we own both ends of.** So `0x411` is perfectly usable
+as a **server-handled custom message**: WorldForge frames it, the server's
+handler receives it and acts. The server is then the *translator* — it applies
+the light and produces whatever a vanilla client can actually see (or uses it for
+the editor's own viewport preview). This is the user's design: a custom opcode we
+manipulate because it already exists server-side.
+
+WorldForge provides two ways to drive it (pick whichever the server listens on):
+
+1. **`clientfx::buildOverrideLight(currentZoneLightId, overrideLightId, fadeInMs)`**
+   — frames the literal `0x411` packet (TBC body: three `uint32` — fade-from,
+   fade-to, fade-ms). Use if the server keys on the raw opcode number.
+2. **`editor_bridge` `EDITOR_OVERRIDE_LIGHT` (0x4006)** — a scope-aware editor
+   RPC: `{ overrideLightId, fadeInMs, scope(self/target/zone/server), targetGuid,
+   zoneId, opId }`. Carries targeting the raw SMSG body has no room for, and
+   rides the existing editor channel.
+
+What the server does with it on vanilla (translation options): drive `SMSG_WEATHER`
+for a mood shift, swap the zone's `Light.dbc` association, change time-of-day, or
+just feed WorldForge's viewport light. The point is the *id + fade + scope*
+travels cleanly from the editor to the server; the server owns the vanilla-safe
+realisation.
+
+The other override commands (`.weather/.music/.sound/.cinematic/.worldstate/
+.zoneattack/.screenmsg/.timespeed`) map onto opcodes that exist for vanilla and
+are covered directly by `clientfx`.
 
 ## How it plugs in
 

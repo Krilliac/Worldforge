@@ -13,8 +13,12 @@
 // `.light/.weather/.music/...` override commands AND lets the WorldForge engine
 // build/send these packets directly over its worldproto link.
 //
-// EXCLUDED: SMSG_OVERRIDE_LIGHT (0x411) -- that opcode is TBC+; a 1.12.1 client
-// has no handler for it, so it cannot drive override-light on vanilla.
+// SMSG_OVERRIDE_LIGHT (0x411) is a special case: it is TBC+, so it is NOT a
+// render path for a 1.12.1 RETAIL client -- but it IS in mangos-zero's opcode
+// table, so the trusted WorldForge<->server link can use it as a server-handled
+// CUSTOM message (the server applies the light and translates it to something a
+// vanilla client can see). buildOverrideLight produces that packet; see also
+// the editor-bridge EDITOR_OVERRIDE_LIGHT op for a scope-aware alternative.
 // ---------------------------------------------------------------------------
 #include <cstdint>
 #include <string>
@@ -52,6 +56,13 @@ std::vector<uint8_t> buildWeather(WeatherType type, float grade,
 std::vector<uint8_t> buildZoneUnderAttack(uint32_t zoneId);                 // SMSG_ZONE_UNDER_ATTACK
 std::vector<uint8_t> buildLoginSetTimeSpeed(uint32_t packedDate,
         float gameSpeed = 0.01666667f);                                     // SMSG_LOGIN_SETTIMESPEED
+
+// SMSG_OVERRIDE_LIGHT (0x411). Custom / trusted-link only (see header note):
+// the TBC/WotLK body is three uint32 -- the light to fade FROM (the zone's
+// current/default light id), the override light to fade TO, and the fade time
+// in ms. NOT for a vanilla retail client; for the WorldForge<->server bridge.
+std::vector<uint8_t> buildOverrideLight(uint32_t currentZoneLightId,
+        uint32_t overrideLightId, uint32_t fadeInMs);
 
 // Bit-pack a calendar time the way the client expects (mangos secsToTimeBitFields,
 // where the year field is tm_year-100 == fullYear-2000):

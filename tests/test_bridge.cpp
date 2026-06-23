@@ -119,6 +119,20 @@ void test_bridge() {
     CHECK(dd.categoryBuffers(DebugCategory::HitPoint).points.size() == 1);
     apply(dd, vb);   // a cell box -> 12 edges
     CHECK(dd.categoryBuffers(DebugCategory::Cell).lines.size() == 24);
+
+    // --- override-light RPC: scope + target round-trip ----------------------
+    OverrideLight ol;
+    ol.overrideLightId = 396; ol.fadeInMs = 3000;
+    ol.scope = FxScope::Zone; ol.zoneId = 1519; ol.targetGuid = 0; ol.opId = 11;
+    CHECK(readFrame(encode(ol), fr, used) && fr.opcode == EDITOR_OVERRIDE_LIGHT);
+    OverrideLight ob = decodeOverrideLight(fr.payload);
+    CHECK(ob.overrideLightId == 396 && ob.fadeInMs == 3000);
+    CHECK(ob.scope == FxScope::Zone && ob.zoneId == 1519 && ob.opId == 11);
+
+    OverrideLight olt;
+    olt.overrideLightId = 1; olt.scope = FxScope::Target; olt.targetGuid = 0xF130000000000042ull;
+    OverrideLight obt = decodeOverrideLight((readFrame(encode(olt), fr, used), fr.payload));
+    CHECK(obt.scope == FxScope::Target && obt.targetGuid == 0xF130000000000042ull);
 }
 
 void test_db_export() {

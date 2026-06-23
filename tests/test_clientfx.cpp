@@ -148,4 +148,15 @@ void test_clientfx() {
         CHECK(r.u32() == packed);
         CHECK_APPROX(r.f32(), 0.01666667f);
     }
+
+    // --- override light (custom / trusted-link 0x411): from, to, fade -------
+    {
+        Parsed p = parse(buildOverrideLight(/*current*/ 1, /*override*/ 396, /*fade*/ 5000));
+        CHECK(p.opcode == SMSG_OVERRIDE_LIGHT);
+        ByteReader r(p.body);
+        CHECK(r.u32() == 1);        // fade FROM the zone's current light
+        CHECK(r.u32() == 396);      // override light id
+        CHECK(r.u32() == 5000);     // fade ms
+        CHECK(r.remaining() == 0);
+    }
 }

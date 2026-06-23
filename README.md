@@ -8,7 +8,7 @@ pair with a mangos-zero server: load real client assets, render the world in a
 running server while connected retail clients see the edits.**
 
 Every parser, transform, and protocol primitive here is **compiled and
-unit-tested in-tree** (114→382 checks). Where a part needs a GPU/display or your
+unit-tested in-tree** (114→391 checks). Where a part needs a GPU/display or your
 mangos checkout to run, it is implemented as far as it can be verified and the
 boundary is stated plainly (see `ARCHITECTURE.md`).
 
@@ -66,7 +66,8 @@ WoW client RE reference, mangos-zero hook points, and the build roadmap.
 `docs/DEBUG_VISUALIZATION.md` covers rendering server-side debug data
 (waypoints/pathing/collision/triggers, aligned with mangoszero `.debug vis`).
 `docs/SERVER_OPCODES.md` documents the verified vanilla server-FX opcode
-builders (and why `SMSG_OVERRIDE_LIGHT` is not usable on 1.12.1).
+builders, plus using `SMSG_OVERRIDE_LIGHT` as a server-handled custom opcode
+over the trusted editor↔server link (it is not a vanilla *client* render path).
 
 ## Provenance
 
