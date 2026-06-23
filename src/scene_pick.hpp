@@ -9,6 +9,7 @@
 #include <cstdint>
 
 #include "asset_loader.hpp"   // TileScene
+#include "world_view.hpp"     // WorldView
 #include "gizmo.hpp"          // Ray
 
 namespace wf {
@@ -25,5 +26,26 @@ struct ScenePick {
 
 // Nearest hit across terrain + doodads + WMOs (None if the ray misses the tile).
 ScenePick pickScene(const Ray& r, const TileScene& scene);
+
+// One click against the whole world: the dynamic entity stream (WorldView) AND
+// the static loaded tile (TileScene), nearest wins. Routes into a single result
+// the editor turns into either an entity selection or a scene-object selection.
+struct WorldPick {
+    enum class Kind { None, Entity, Terrain, Doodad, Wmo };
+    Kind     kind     = Kind::None;
+    uint64_t guid     = 0;     // Entity: the picked object's GUID
+    size_t   index    = 0;     // scene index (terrain chunk / doodad / wmo)
+    uint32_t uniqueId = 0;     // Wmo placement id
+    Vec3     point;            // world-space hit
+    float    distance = 0.0f;
+
+    bool hit()      const { return kind != Kind::None; }
+    bool isEntity() const { return kind == Kind::Entity; }
+    bool isScene()  const { return kind == Kind::Terrain || kind == Kind::Doodad ||
+                                   kind == Kind::Wmo; }
+};
+
+WorldPick pickWorld(const Ray& r, const WorldView& view, const TileScene& scene,
+                    float pad = 0.5f, float fallback = 2.0f);
 
 } // namespace wf

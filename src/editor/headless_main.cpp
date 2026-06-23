@@ -91,6 +91,19 @@ int main() {
     view.select(player);
     view.buildDebug(dd);                            // moving NPC/player markers
 
+    // Wrap the terrain as a one-chunk TileScene so the viewport's unified click
+    // path (entities + static tile) is exercised here too.
+    TileScene tileScene;
+    {
+        TexMesh chunk;
+        chunk.vertices.reserve(mesh.vertices.size());
+        for (const Vertex& v : mesh.vertices)
+            chunk.vertices.push_back(TexVertex{ v.position, v.normal, Vec2{0,0} });
+        chunk.indices = mesh.indices;
+        tileScene.terrain.chunkMeshes.push_back(std::move(chunk));
+    }
+    WorldPick sceneSel;
+
     // --- ImGui (CPU) -------------------------------------------------------
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -128,8 +141,8 @@ int main() {
 
     ImGui::SetNextWindowPos(ImVec2(308, 24), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(848, 580), ImGuiCond_Always);
-    // Passing the live view + terrain enables click-to-select in the viewport.
-    viewport.draw(kSceneTex, giz, &selected, &view, &mesh);
+    // Unified click-to-select: entities + the loaded tile (terrain here).
+    viewport.draw(kSceneTex, giz, &selected, &view, &mesh, &tileScene, &sceneSel);
 
     const float rightH = (H - 24) * 0.5f;
     ImGui::SetNextWindowPos(ImVec2(W - 280, 24), ImGuiCond_Always);
@@ -139,7 +152,7 @@ int main() {
     // The runtime-data inspector: the live entity list + selected detail.
     ImGui::SetNextWindowPos(ImVec2(W - 280, 24 + rightH), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(280, rightH), ImGuiCond_Always);
-    inspector.draw(view);
+    inspector.draw(view, &sceneSel);
     ImGui::Render();
 
     // Composite: dark desktop background, then ImGui (which samples the atlas

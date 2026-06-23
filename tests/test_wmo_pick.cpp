@@ -159,4 +159,25 @@ void test_wmo_pick() {
 
     // A ray into empty space misses everything.
     CHECK(!pickScene(Ray{ Vec3{0,0,10}, Vec3{0,0,1} }, scene).hit());
+
+    // --- pickWorld: entity stream vs static scene, nearest wins -------------
+    {
+        WorldView wv;
+        EntityState e; e.guid = 42; e.pos = {31,1,5}; e.boundingRadius = 1.0f;
+        wv.apply(e);                              // floats above the WMO at z=2
+        WorldPick wp = pickWorld(down(31.0f, 1.0f), wv, scene);
+        CHECK(wp.isEntity() && wp.guid == 42);    // entity (z=5) nearer than WMO (z=2)
+
+        // With no entities, the same click falls through to the WMO triangle.
+        WorldView empty;
+        WorldPick ws2 = pickWorld(down(31.0f, 1.0f), empty, scene);
+        CHECK(ws2.isScene() && ws2.kind == WorldPick::Kind::Wmo && ws2.uniqueId == 7777u);
+
+        // Open ground with no entities -> terrain.
+        WorldPick wg2 = pickWorld(down(-20.0f, -20.0f), empty, scene);
+        CHECK(wg2.isScene() && wg2.kind == WorldPick::Kind::Terrain);
+
+        // A miss everywhere.
+        CHECK(!pickWorld(Ray{ Vec3{0,0,10}, Vec3{0,0,1} }, empty, scene).hit());
+    }
 }

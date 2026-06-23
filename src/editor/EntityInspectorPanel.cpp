@@ -27,8 +27,28 @@ bool EntityInspectorPanel::passesFilter(const EntityState& s) const {
     return true;
 }
 
-uint64_t EntityInspectorPanel::draw(WorldView& view) {
+const char* EntityInspectorPanel::sceneKindName(WorldPick::Kind kind) {
+    switch (kind) {
+        case WorldPick::Kind::Terrain: return "Terrain";
+        case WorldPick::Kind::Doodad:  return "Doodad (M2)";
+        case WorldPick::Kind::Wmo:     return "WMO";
+        default:                       return "None";
+    }
+}
+
+uint64_t EntityInspectorPanel::draw(WorldView& view, const WorldPick* sceneSel) {
     ImGui::Begin("Entities");
+
+    // --- a selected static scene object (terrain / doodad / WMO) -------------
+    if (sceneSel && sceneSel->isScene()) {
+        ImGui::TextUnformatted("Scene object selected:");
+        ImGui::Text("Kind: %s   Index: %zu", sceneKindName(sceneSel->kind), sceneSel->index);
+        if (sceneSel->kind == WorldPick::Kind::Wmo)
+            ImGui::Text("WMO uniqueId: %u", sceneSel->uniqueId);
+        ImGui::Text("Hit: (%.2f, %.2f, %.2f)  dist %.1f",
+                    sceneSel->point.x, sceneSel->point.y, sceneSel->point.z, sceneSel->distance);
+        ImGui::Separator();
+    }
 
     // --- live summary (server-authoritative counts the engine mirrors) ------
     WorldView::Counts c = view.counts();

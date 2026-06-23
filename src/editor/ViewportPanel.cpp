@@ -12,16 +12,25 @@ void ViewportPanel::render(const Mesh& terrain, const DebugDraw& dd) {
     scene_ = fb_.color;
 }
 
+Ray ViewportPanel::rayAt(float localX, float localY) const {
+    const float aspect = float(width_) / float(height_);
+    return screenRay(camera.eye, camera.forward(), camera.right(), camera.up(),
+                     camera.fovY, aspect, localX, localY, float(width_), float(height_));
+}
+
 PickResult ViewportPanel::pickAt(float localX, float localY,
                                  const WorldView& view, const Mesh& terrain) const {
-    const float aspect = float(width_) / float(height_);
-    Ray r = screenRay(camera.eye, camera.forward(), camera.right(), camera.up(),
-                      camera.fovY, aspect, localX, localY, float(width_), float(height_));
-    return pick(r, view, terrain);
+    return pick(rayAt(localX, localY), view, terrain);
+}
+
+WorldPick ViewportPanel::pickWorldAt(float localX, float localY,
+                                     const WorldView& view, const TileScene& scene) const {
+    return pickWorld(rayAt(localX, localY), view, scene);
 }
 
 bool ViewportPanel::draw(ImTextureID sceneTex, GizmoController& giz, Mat4* selected,
-                         WorldView* view, const Mesh* terrain) {
+                         WorldView* view, const Mesh* terrain,
+                         const TileScene* scene, WorldPick* sceneSel) {
     bool using_ = false;
     ImGui::Begin("Viewport");
 
@@ -36,14 +45,25 @@ bool ViewportPanel::draw(ImTextureID sceneTex, GizmoController& giz, Mat4* selec
     }
 
     // A plain left-click on the image (not a gizmo drag) selects what's under
-    // the cursor. Entities update the shared WorldView selection so the
-    // inspector + gizmo follow; terrain hits are reported via lastPick().
-    if (view && terrain && hovered && !using_ &&
-        ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    // the cursor.
+    if (view && hovered && !using_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         const ImVec2 m = ImGui::GetMousePos();
-        lastPick_ = pickAt(m.x - imgPos.x, m.y - imgPos.y, *view, *terrain);
-        if (lastPick_.kind == PickResult::Kind::Entity)
-            view->select(lastPick_.guid);
+        const float lx = m.x - imgPos.x, ly = m.y - imgPos.y;
+        if (scene) {
+            // Unified pick: dynamic entities + the whole loaded tile, nearest wins.
+            lastWorldPick_ = pickWorldAt(lx, ly, *view, *scene);
+            if (lastWorldPick_.isEntity()) {
+                view->select(lastWorldPick_.guid);
+                if (sceneSel) *sceneSel = WorldPick{};        // clear scene selection
+            } else if (lastWorldPick_.isScene()) {
+                view->select(0);                              // clear entity selection
+                if (sceneSel) *sceneSel = lastWorldPick_;
+            }
+        } else if (terrain) {
+            lastPick_ = pickAt(lx, ly, *view, *terrain);
+            if (lastPick_.kind == PickResult::Kind::Entity)
+                view->select(lastPick_.guid);
+        }
     }
 
     ImGui::End();

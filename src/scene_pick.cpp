@@ -38,4 +38,28 @@ ScenePick pickScene(const Ray& r, const TileScene& scene) {
     return best;
 }
 
+WorldPick pickWorld(const Ray& r, const WorldView& view, const TileScene& scene,
+                    float pad, float fallback) {
+    PickResult e = pickEntity(r, view, pad, fallback);   // dynamic creatures/players
+    ScenePick  s = pickScene(r, scene);                  // static terrain/doodads/WMOs
+
+    WorldPick out;
+    // Nearest wins; an entity ties to itself (entities sit in front of ground).
+    const bool entityNearer = e.hit() && (!s.hit() || e.distance <= s.distance);
+    if (entityNearer) {
+        out.kind = WorldPick::Kind::Entity;
+        out.guid = e.guid; out.point = e.point; out.distance = e.distance;
+    } else if (s.hit()) {
+        switch (s.kind) {
+            case ScenePick::Kind::Terrain: out.kind = WorldPick::Kind::Terrain; break;
+            case ScenePick::Kind::Doodad:  out.kind = WorldPick::Kind::Doodad;  break;
+            case ScenePick::Kind::Wmo:     out.kind = WorldPick::Kind::Wmo;     break;
+            default: break;
+        }
+        out.index = s.index; out.uniqueId = s.uniqueId;
+        out.point = s.point; out.distance = s.distance;
+    }
+    return out;
+}
+
 } // namespace wf

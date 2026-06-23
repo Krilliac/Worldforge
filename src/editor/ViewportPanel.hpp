@@ -14,6 +14,7 @@
 #include "raster.hpp"      // Framebuffer
 #include "debugdraw.hpp"
 #include "picking.hpp"     // Ray / PickResult / pick
+#include "scene_pick.hpp"  // TileScene / WorldPick / pickWorld
 #include "world_view.hpp"
 #include "editor/Camera.hpp"
 #include "editor/GizmoController.hpp"
@@ -32,19 +33,27 @@ public:
 
     // ImGui panel: show the scene (sampled from `sceneTex`) and run the gizmo
     // over `selected` (may be null). Returns true while the gizmo is dragged.
-    // When `view` + `terrain` are given, a left-click on the image (that isn't a
-    // gizmo drag) picks the entity/terrain under the cursor: an entity click
-    // updates the WorldView selection; the result is also exposed via lastPick().
+    //
+    // A left-click on the image (not a gizmo drag) picks under the cursor:
+    //   * with `scene`     -> the unified pick (live entities + loaded tile):
+    //                         an entity sets the WorldView selection, a static
+    //                         object (terrain/doodad/WMO) is written to *sceneSel
+    //                         (and the entity selection cleared);
+    //   * else with `terrain` -> entity + terrain-mesh pick (lastPick()).
     bool draw(ImTextureID sceneTex, GizmoController& giz, Mat4* selected,
-              WorldView* view = nullptr, const Mesh* terrain = nullptr);
+              WorldView* view = nullptr, const Mesh* terrain = nullptr,
+              const TileScene* scene = nullptr, WorldPick* sceneSel = nullptr);
 
-    // Hit-test viewport pixel (localX, localY) -- origin at the image's top-left
-    // -- against the live entities + terrain. Pure (no ImGui), so it's tested
-    // directly without synthesising mouse input.
+    // Hit-test viewport pixel (localX, localY) -- origin at the image's top-left.
+    // Pure (no ImGui), tested directly without synthesising mouse input.
     PickResult pickAt(float localX, float localY,
                       const WorldView& view, const Mesh& terrain) const;
+    // Unified pick (entities + the whole loaded tile) at a viewport pixel.
+    WorldPick pickWorldAt(float localX, float localY,
+                          const WorldView& view, const TileScene& scene) const;
 
     const PickResult& lastPick() const { return lastPick_; }
+    const WorldPick&  lastWorldPick() const { return lastWorldPick_; }
 
     const Image& scene() const { return scene_; }
     int width()  const { return width_; }
@@ -55,6 +64,10 @@ private:
     Image       scene_;
     Framebuffer fb_;
     PickResult  lastPick_;
+    WorldPick   lastWorldPick_;
+
+    // Build the world-space ray for a viewport pixel (shared by both pick paths).
+    Ray rayAt(float localX, float localY) const;
 };
 
 } // namespace wf::editor

@@ -96,4 +96,21 @@ void test_viewport() {
     // A pixel near the top edge aims above the entity -> the wall (terrain).
     PickResult pr2 = pick.pickAt(100, 2, wv, ground);
     CHECK(pr2.kind == PickResult::Kind::Terrain);
+
+    // --- unified pickWorldAt: entities + the loaded tile, nearest wins -------
+    TileScene scene;
+    TexMesh wall;   // a wall at x=60 as a terrain chunk
+    wall.vertices = { { {60,-50,-50},{-1,0,0},{0,0} }, { {60,50,-50},{-1,0,0},{0,0} },
+                      { {60,50,50},{-1,0,0},{0,0} },   { {60,-50,50},{-1,0,0},{0,0} } };
+    wall.indices = { 0,1,2, 0,2,3 };
+    scene.terrain.chunkMeshes.push_back(wall);
+
+    // Centre click: the entity at x=25 is nearer than the wall at x=60.
+    WorldPick wp = pick.pickWorldAt(100, 100, wv, scene);
+    CHECK(wp.isEntity() && wp.guid == 0xABCD);
+
+    // With no entities, the same click resolves to the terrain wall.
+    WorldView none;
+    WorldPick wt = pick.pickWorldAt(100, 100, none, scene);
+    CHECK(wt.isScene() && wt.kind == WorldPick::Kind::Terrain);
 }

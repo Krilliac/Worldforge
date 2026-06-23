@@ -76,4 +76,18 @@ void test_entity_inspector() {
         CHECK(ImGui::GetDrawData()->Valid);
         CHECK(sel == 0);                       // selection auto-cleared on remove
     }
+
+    // --- a selected static scene object renders its detail section ----------
+    CHECK(std::string(EntityInspectorPanel::sceneKindName(WorldPick::Kind::Wmo)) == "WMO");
+    CHECK(std::string(EntityInspectorPanel::sceneKindName(WorldPick::Kind::Terrain)) == "Terrain");
+    {
+        WorldPick sceneSel;
+        sceneSel.kind = WorldPick::Kind::Wmo; sceneSel.uniqueId = 2001;
+        sceneSel.point = {12, 34, 56}; sceneSel.distance = 7.5f;
+        CHECK(sceneSel.isScene());
+        ImGui::NewFrame();
+        panel.draw(view, &sceneSel);
+        ImGui::Render();
+        CHECK(ImGui::GetDrawData()->Valid);    // scene-object section drew fine
+    }
 }

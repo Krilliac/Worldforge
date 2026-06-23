@@ -15,14 +15,20 @@
 #include <cstdint>
 
 #include "world_view.hpp"
+#include "scene_pick.hpp"   // WorldPick (a selected static scene object)
 
 namespace wf::editor {
 
 class EntityInspectorPanel {
 public:
     // Draw the inspector against the live mirror. Sets view.select() when a row
-    // is clicked; returns the currently-selected GUID (0 if none).
-    uint64_t draw(WorldView& view);
+    // is clicked; returns the currently-selected GUID (0 if none). When
+    // `sceneSel` points at a picked static object (terrain/doodad/WMO), a "Scene
+    // object" detail section is shown for it.
+    uint64_t draw(WorldView& view, const WorldPick* sceneSel = nullptr);
+
+    // Human-readable name for a picked scene-object kind.
+    static const char* sceneKindName(WorldPick::Kind kind);
 
     // ---- filter state (also drives passesFilter, exposed for tests) --------
     bool showCreatures   = true;

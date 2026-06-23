@@ -24,6 +24,9 @@
 #include "editor/BridgeClient.hpp"
 #include "editor_bridge.hpp"
 #include "world_view.hpp"
+#include "scene_pick.hpp"
+#include "asset_loader.hpp"   // TileScene
+#include "raster.hpp"         // TexMesh
 #include "debugdraw.hpp"
 #include "math.hpp"
 
@@ -68,6 +71,19 @@ int main() {
     DebugDraw debug;
     std::vector<Vec3> staticPath;
     for (int k=0;k<=8;++k){ float x=40+k*28.f, y=150+50*std::sin(k*0.7f); staticPath.push_back({x,y,heightAt(x,y)+2}); }
+
+    // Wrap the terrain as a one-chunk TileScene so the viewport's unified click
+    // path can pick terrain (and, once a real ADT is loaded, doodads/WMOs too).
+    TileScene tileScene;
+    {
+        TexMesh chunk;
+        chunk.vertices.reserve(mesh.vertices.size());
+        for (const Vertex& v : mesh.vertices)
+            chunk.vertices.push_back(TexVertex{ v.position, v.normal, Vec2{0,0} });
+        chunk.indices = mesh.indices;
+        tileScene.terrain.chunkMeshes.push_back(std::move(chunk));
+    }
+    WorldPick sceneSel;   // the currently-selected static object (if any)
 
     editor::AtmospherePanel      atmosphere;
     editor::DebugVisPanel        debugVis;
@@ -142,9 +158,12 @@ int main() {
         for (const auto& v : srvVols)    apply(debug, v);
         view.buildDebug(debug);
 
-        // Keep the gizmo on the selected entity (click-select sets it below).
+        // Park the gizmo on whatever is selected: a live entity, or the hit
+        // point of a picked static scene object.
         if (view.hasSelection())
             selected = Mat4::translate(view.find(view.selected())->state.pos);
+        else if (sceneSel.isScene())
+            selected = Mat4::translate(sceneSel.point);
 
         // Render the scene on the CPU and upload it to the GL texture.
         viewport.render(mesh, debug);
@@ -161,11 +180,13 @@ int main() {
 
         std::vector<std::vector<uint8_t>> outgoing;
         atmosphere.draw(outgoing);
-        // Click-to-select: passing the view + terrain lets a left-click in the
-        // viewport pick an entity (-> WorldView selection) or terrain point.
-        viewport.draw((ImTextureID)(intptr_t)sceneTex, giz, &selected, &view, &mesh);
+        // Unified click-to-select: a left-click picks the nearest of the live
+        // entities and the loaded tile -- an entity sets the WorldView
+        // selection, a static object (terrain/doodad/WMO) goes to sceneSel.
+        viewport.draw((ImTextureID)(intptr_t)sceneTex, giz, &selected,
+                      &view, &mesh, &tileScene, &sceneSel);
         debugVis.draw(debug);
-        inspector.draw(view);            // live entity list + selected detail
+        inspector.draw(view, &sceneSel); // live entities + selected static object
 
         // Ship the panels' ops to the server.
         for (auto& pkt : outgoing) bridge.send(pkt);
