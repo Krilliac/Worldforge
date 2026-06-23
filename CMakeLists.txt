@@ -46,6 +46,8 @@ add_library(wforge STATIC
   src/vmap.cpp
   src/rhi_software.cpp
   src/server/world_sim.cpp
+  src/m2_render.cpp
+  src/scene.cpp
 )
 target_include_directories(wforge PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -97,6 +99,7 @@ add_executable(wforge-tests
   tests/test_serverdata.cpp
   tests/test_rhi.cpp
   tests/test_world_sim.cpp
+  tests/test_render.cpp
 )
 target_link_libraries(wforge-tests PRIVATE wforge)
 target_include_directories(wforge-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
@@ -168,6 +171,7 @@ if(WFORGE_EDITOR)
     src/editor/SoftwareImGui.cpp
     src/editor/ViewportPanel.cpp
     src/editor/BridgeClient.cpp
+    src/editor/ModelViewerPanel.cpp
   )
   target_include_directories(wforge-editor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(wforge-editor PUBLIC wforge imgui)
@@ -188,6 +192,7 @@ if(WFORGE_EDITOR)
     tests/editor/test_viewport.cpp
     tests/editor/test_bridge_client.cpp
     tests/editor/test_e2e.cpp
+    tests/editor/test_model_viewer.cpp
   )
   target_link_libraries(wforge-editor-tests PRIVATE wforge-editor wforge-server)
   target_include_directories(wforge-editor-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
@@ -196,6 +201,17 @@ if(WFORGE_EDITOR)
   # Headless editor: composites the CPU scene + CPU ImGui to a PNG (no GPU).
   add_executable(wforge-editor-headless src/editor/headless_main.cpp)
   target_link_libraries(wforge-editor-headless PRIVATE wforge-editor)
+
+  # Headless model viewer (animated M2 + playback panel -> PNG).
+  add_executable(wforge-model-viewer src/editor/modelviewer_main.cpp)
+  target_link_libraries(wforge-model-viewer PRIVATE wforge-editor)
+endif()
+
+# Scene demo: terrain + textured instances + overlay -> PNG.
+add_executable(wforge-scene-demo src/scene_demo.cpp)
+target_link_libraries(wforge-scene-demo PRIVATE wforge)
+if(WFORGE_EDITOR)
+  target_include_directories(wforge-scene-demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 endif()
 
 # Runnable windowed editor: ImGui GLFW + OpenGL3 backends (bundled in the

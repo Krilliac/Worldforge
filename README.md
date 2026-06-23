@@ -8,7 +8,7 @@ pair with a mangos-zero server: load real client assets, render the world in a
 running server while connected retail clients see the edits.**
 
 Every parser, transform, and protocol primitive here is **compiled and
-unit-tested in-tree** (114→538 core + 72 editor checks). Where a part needs a GPU/display or your
+unit-tested in-tree** (114→546 core + 76 editor checks). Where a part needs a GPU/display or your
 mangos checkout to run, it is implemented as far as it can be verified and the
 boundary is stated plainly (see `ARCHITECTURE.md`).
 
@@ -23,6 +23,8 @@ cmake --build build -j$(nproc)
 ./build/wforge-raster-demo       # render procedural terrain -> PNG
 ./build/wforge-debug-demo        # render terrain + debug overlay -> PNG
 ./build/wforge-editor-headless   # render the whole editor on the CPU -> PNG
+./build/wforge-scene-demo        # terrain + textured animated model instances -> PNG
+./build/wforge-model-viewer      # animated M2 in a model-viewer panel -> PNG
 ./build/wforge-stub-server [port]   # run the standalone bridge server (no mangos)
 ./build/wforge-dump <DataDir> <Map> [tileX tileY]   # inspect a real MPQ tree
 ```
@@ -64,7 +66,9 @@ automatically via CMake FetchContent.
 | `worldproto.hpp`  | vanilla header cipher + opcode framing                        |
 | `clientfx.*`      | vanilla server-FX packet builders (sound/weather/cinematic/world-state) |
 | `fxbridge.*`      | scope-aware Atmosphere/World FX editor RPCs → realise to clientfx SMSG |
-| `raster.*`        | software rasteriser (z-buffer, perspective-correct)            |
+| `raster.*`        | software rasteriser: shaded mesh + textured (UV) mesh          |
+| `m2_render.*`     | M2 skinning: bone pose → posed textured mesh (animation)       |
+| `scene.*`         | compose terrain + textured model instances + overlay → render  |
 | `rhi.hpp`         | GPU render-hardware interface (backend-agnostic)              |
 | `rhi_software.*`  | RHI realised on the rasteriser (tested headless)               |
 | `rhi_gl.*`        | RHI realised on OpenGL 3.3 (gated `WFORGE_RHI_GL`, desktop)    |

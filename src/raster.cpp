@@ -126,6 +126,91 @@ void rasterMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp, Vec3 lightDi
     }
 }
 
+namespace {
+// Nearest-sample a texture with UV repeat.
+inline Rgba sampleWrap(const Image& tex, float u, float v) {
+    if (tex.width <= 0 || tex.height <= 0) return Rgba{255, 0, 255, 255};
+    u -= std::floor(u); v -= std::floor(v);
+    int tx = std::min(tex.width  - 1, (int)(u * tex.width));
+    int ty = std::min(tex.height - 1, (int)(v * tex.height));
+    return tex.at(tx, ty);
+}
+} // namespace
+
+void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
+                   const Image& tex, Vec3 lightDir) {
+    int W = fb.color.width, H = fb.color.height;
+    Vec3 L = normalize(lightDir);
+
+    struct VOut { Vec4 clip; bool valid; };
+    std::vector<VOut> vo(mesh.vertices.size());
+    for (size_t i = 0; i < mesh.vertices.size(); ++i) {
+        Vec4 c = mvp * Vec4(mesh.vertices[i].position, 1.0f);
+        vo[i] = { c, c.w > 1e-4f };
+    }
+    auto toScreen = [&](const Vec4& c, float& sx, float& sy, float& sz, float& invw) {
+        invw = 1.0f / c.w;
+        sx = (c.x * invw * 0.5f + 0.5f) * W;
+        sy = (1.0f - (c.y * invw * 0.5f + 0.5f)) * H;
+        sz = c.z * invw;
+    };
+
+    for (size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
+        uint32_t i0 = mesh.indices[t], i1 = mesh.indices[t+1], i2 = mesh.indices[t+2];
+        if (!vo[i0].valid || !vo[i1].valid || !vo[i2].valid) continue;
+
+        float x0,y0,z0,iw0, x1,y1,z1,iw1, x2,y2,z2,iw2;
+        toScreen(vo[i0].clip, x0,y0,z0,iw0);
+        toScreen(vo[i1].clip, x1,y1,z1,iw1);
+        toScreen(vo[i2].clip, x2,y2,z2,iw2);
+        float area = edge(x0,y0, x1,y1, x2,y2);
+        if (std::fabs(area) < 1e-6f) continue;
+
+        const TexVertex& V0 = mesh.vertices[i0];
+        const TexVertex& V1 = mesh.vertices[i1];
+        const TexVertex& V2 = mesh.vertices[i2];
+
+        int minX = std::max(0,   (int)std::floor(std::min({x0,x1,x2})));
+        int maxX = std::min(W-1, (int)std::ceil (std::max({x0,x1,x2})));
+        int minY = std::max(0,   (int)std::floor(std::min({y0,y1,y2})));
+        int maxY = std::min(H-1, (int)std::ceil (std::max({y0,y1,y2})));
+
+        for (int py = minY; py <= maxY; ++py) {
+            for (int px = minX; px <= maxX; ++px) {
+                float fx = px + 0.5f, fy = py + 0.5f;
+                float w0 = edge(x1,y1, x2,y2, fx,fy);
+                float w1 = edge(x2,y2, x0,y0, fx,fy);
+                float w2 = edge(x0,y0, x1,y1, fx,fy);
+                bool inside = (w0 >= 0 && w1 >= 0 && w2 >= 0) || (w0 <= 0 && w1 <= 0 && w2 <= 0);
+                if (!inside) continue;
+                float l0 = w0/area, l1 = w1/area, l2 = w2/area;
+
+                float z = l0*z0 + l1*z1 + l2*z2;
+                float& dref = fb.depth[(size_t)py*W + px];
+                if (z >= dref) continue;
+
+                float iw = l0*iw0 + l1*iw1 + l2*iw2;
+                float u = (l0*V0.uv.x*iw0 + l1*V1.uv.x*iw1 + l2*V2.uv.x*iw2) / iw;
+                float v = (l0*V0.uv.y*iw0 + l1*V1.uv.y*iw1 + l2*V2.uv.y*iw2) / iw;
+                Rgba texel = sampleWrap(tex, u, v);
+                if (texel.a < 8) continue;                 // alpha-test cutout
+
+                Vec3 n = (V0.normal*(l0*iw0) + V1.normal*(l1*iw1) + V2.normal*(l2*iw2)) * (1.0f/iw);
+                n = normalize(n);
+                float light = 0.4f + 0.6f * std::max(0.0f, dot(n, L));
+
+                Rgba c;
+                c.r = clamp8(texel.r * light);
+                c.g = clamp8(texel.g * light);
+                c.b = clamp8(texel.b * light);
+                c.a = 255;
+                dref = z;
+                fb.color.at(px, py) = c;
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Debug overlay: lines, point markers, translucent triangles.
 // ---------------------------------------------------------------------------

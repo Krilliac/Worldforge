@@ -38,6 +38,17 @@ void fillTriangleSolid(Framebuffer& fb, const ScreenVert& a, const ScreenVert& b
 // is shaded by slope + height so structure is visible without textures.
 void rasterMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp, Vec3 lightDir);
 
+// A textured mesh vertex: position + normal + a texture coordinate.
+struct TexVertex { Vec3 position; Vec3 normal; Vec2 uv; };
+struct TexMesh   { std::vector<TexVertex> vertices; std::vector<uint32_t> indices; };
+
+// Render a textured mesh: perspective-correct UV interpolation, nearest texel
+// sampling (UV wraps/repeats), modulated by directional + ambient lighting.
+// Texels with alpha < 8 are discarded (alpha-test) so cutout textures (foliage)
+// read correctly.
+void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
+                   const Image& texture, Vec3 lightDir);
+
 struct DebugDrawOptions {
     bool depthTest  = true;    // overlay respects the z-buffer (hidden by terrain)
     bool writeDepth = false;   // overlay doesn't occlude later overlay primitives

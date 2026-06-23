@@ -25,6 +25,7 @@ void test_rhi();
 void test_vmap();
 void test_storage();
 void test_world_sim();
+void test_render();
 
 int main() {
     test_math();
@@ -52,6 +53,7 @@ int main() {
     test_vmap();
     test_storage();
     test_world_sim();
+    test_render();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;
