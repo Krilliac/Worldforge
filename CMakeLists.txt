@@ -37,6 +37,7 @@ add_library(wforge STATIC
   src/editor_bridge.cpp
   src/db_export.cpp
   src/debugdraw.cpp
+  src/modelmesh.cpp
 )
 target_include_directories(wforge PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -65,6 +66,7 @@ add_executable(wforge-tests
   tests/test_editing.cpp
   tests/test_bridge.cpp
   tests/test_debugdraw.cpp
+  tests/test_modelmesh.cpp
 )
 target_link_libraries(wforge-tests PRIVATE wforge)
 target_include_directories(wforge-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
