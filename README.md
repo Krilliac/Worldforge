@@ -8,7 +8,7 @@ pair with a mangos-zero server: load real client assets, render the world in a
 running server while connected retail clients see the edits.**
 
 Every parser, transform, and protocol primitive here is **compiled and
-unit-tested in-tree** (114→273 checks). Where a part needs a GPU/display or your
+unit-tested in-tree** (114→314 checks). Where a part needs a GPU/display or your
 mangos checkout to run, it is implemented as far as it can be verified and the
 boundary is stated plainly (see `ARCHITECTURE.md`).
 
@@ -19,6 +19,7 @@ cmake -S . -B build
 cmake --build build -j$(nproc)
 ./build/wforge-tests          # run the unit tests
 ./build/wforge-raster-demo    # render procedural terrain -> PNG
+./build/wforge-debug-demo     # render terrain + debug overlay -> PNG
 ./build/wforge-dump <DataDir> <Map> [tileX tileY]   # inspect a real MPQ tree
 ```
 
@@ -48,8 +49,9 @@ automatically via CMake FetchContent.
 | `rhi.hpp`         | GPU render-hardware interface (backend-agnostic)              |
 | `editing.*`       | brush falloff + terrain-height / alpha-coverage edit tools      |
 | `gizmo.*`         | ray/transform picking, mesh hit-test, snapping (move/rotate/scale) |
-| `editor_bridge.*` | editor↔server RPC: `EDITOR_*` op structs + length/opcode framing |
+| `editor_bridge.*` | editor↔server RPC: `EDITOR_*` op structs + `.debug vis` stream |
 | `db_export.*`     | placements → mangos `creature`/`gameobject`/`creature_movement` SQL |
+| `debugdraw.*`     | category-tagged debug primitives (waypoints/collision/triggers/wireframe) |
 | `byte_writer.hpp` | little-endian write counterpart to `byte_reader.hpp`           |
 
 ## Status at a glance
@@ -60,6 +62,8 @@ rendering. Design + compile-only: GPU backend, live-server editor bridge — see
 `ARCHITECTURE.md` for the integration contract and the verified-vs-architectural
 table, and `docs/EDITOR_RESEARCH.md` for the editor UI/architecture design,
 WoW client RE reference, mangos-zero hook points, and the build roadmap.
+`docs/DEBUG_VISUALIZATION.md` covers rendering server-side debug data
+(waypoints/pathing/collision/triggers, aligned with mangoszero `.debug vis`).
 
 ## Provenance
 
