@@ -11,6 +11,7 @@
 #include "image.hpp"
 #include "math.hpp"
 #include "terrain.hpp"   // Mesh / Vertex
+#include "debugdraw.hpp" // DebugDraw overlay
 
 namespace wf {
 
@@ -36,5 +37,17 @@ void fillTriangleSolid(Framebuffer& fb, const ScreenVert& a, const ScreenVert& b
 // Render a world-space mesh through `mvp`, lit by a directional light. Terrain
 // is shaded by slope + height so structure is visible without textures.
 void rasterMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp, Vec3 lightDir);
+
+struct DebugDrawOptions {
+    bool depthTest  = true;    // overlay respects the z-buffer (hidden by terrain)
+    bool writeDepth = false;   // overlay doesn't occlude later overlay primitives
+    int  pointSize  = 3;       // marker square size in pixels (odd looks centred)
+};
+
+// Draw a DebugDraw overlay (lines, translucent triangles, point markers) through
+// `mvp`, for every enabled category. Lines/points are projected and clipped at
+// the near plane; triangles are alpha-blended over the colour target.
+void rasterDebug(Framebuffer& fb, const DebugDraw& dd, const Mat4& mvp,
+                 const DebugDrawOptions& opt = {});
 
 } // namespace wf

@@ -1,5 +1,6 @@
 #include "test.hpp"
 #include "raster.hpp"
+#include "debugdraw.hpp"
 
 using namespace wf;
 
@@ -49,5 +50,41 @@ void test_raster() {
             for (int x = 10; x < 22 && !anyLit; ++x)
                 if (fb.color.at(x,y).g > 0) anyLit = true;
         CHECK(anyLit);
+    }
+
+    // ---- debug overlay: a line and a point marker get drawn ----
+    {
+        Framebuffer fb(64, 64);
+        fb.clear(Rgba{0,0,0,255});
+        Mat4 view = Mat4::lookAt({0,0,10}, {0,0,0}, {0,1,0});
+        Mat4 proj = Mat4::perspective(60.0, 1.0, 0.1, 100.0);
+        Mat4 mvp = proj * view;
+
+        DebugDraw dd;
+        dd.line({-2,0,0}, {2,0,0}, Rgba{255,0,0,255}, DebugCategory::Waypoint);
+        dd.point({0,0,0}, Rgba{0,255,0,255}, DebugCategory::Marker);
+
+        DebugDrawOptions opt; opt.depthTest = false;  // nothing behind it
+        rasterDebug(fb, dd, mvp, opt);
+
+        // A horizontal red line should light a red pixel on the centre row.
+        bool red = false;
+        for (int x = 0; x < 64 && !red; ++x)
+            if (fb.color.at(x,32).r == 255) red = true;
+        CHECK(red);
+        // The green point marker sits at screen centre.
+        CHECK(fb.color.at(32,32).g == 255);
+
+        // Disabling the layer removes its primitives.
+        Framebuffer fb2(64, 64);
+        fb2.clear(Rgba{0,0,0,255});
+        dd.setCategoryEnabled(DebugCategory::Waypoint, false);
+        dd.setCategoryEnabled(DebugCategory::Marker, false);
+        rasterDebug(fb2, dd, mvp, opt);
+        bool anyLit = false;
+        for (int y = 0; y < 64 && !anyLit; ++y)
+            for (int x = 0; x < 64 && !anyLit; ++x)
+                if (fb2.color.at(x,y).r || fb2.color.at(x,y).g) anyLit = true;
+        CHECK(!anyLit);
     }
 }

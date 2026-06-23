@@ -126,4 +126,112 @@ void rasterMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp, Vec3 lightDi
     }
 }
 
+// ---------------------------------------------------------------------------
+// Debug overlay: lines, point markers, translucent triangles.
+// ---------------------------------------------------------------------------
+namespace {
+
+struct Proj { float x, y, z; bool valid; };  // screen px + NDC depth
+
+inline Proj project(const Mat4& mvp, const Vec3& p, int W, int H) {
+    Vec4 c = mvp * Vec4(p, 1.0f);
+    if (c.w <= 1e-4f) return {0, 0, 0, false};         // behind / on the near plane
+    float inv = 1.0f / c.w;
+    return {
+        (c.x * inv * 0.5f + 0.5f) * W,
+        (1.0f - (c.y * inv * 0.5f + 0.5f)) * H,
+        c.z * inv,
+        true
+    };
+}
+
+inline void blend(Rgba& dst, Rgba src) {
+    if (src.a == 255) { dst = src; return; }
+    float a = src.a / 255.0f;
+    dst.r = clamp8(src.r * a + dst.r * (1 - a));
+    dst.g = clamp8(src.g * a + dst.g * (1 - a));
+    dst.b = clamp8(src.b * a + dst.b * (1 - a));
+}
+
+// Plot one pixel with optional depth test (z biased so coincident overlay wins).
+inline void plot(Framebuffer& fb, int x, int y, float z, Rgba c,
+                 const DebugDrawOptions& opt) {
+    if (x < 0 || y < 0 || x >= fb.color.width || y >= fb.color.height) return;
+    float& dref = fb.depth[(size_t)y * fb.color.width + x];
+    if (opt.depthTest && z - 1e-4f > dref) return;     // hidden behind geometry
+    blend(fb.color.at(x, y), c);
+    if (opt.writeDepth) dref = z;
+}
+
+void drawLine(Framebuffer& fb, const Proj& a, const Proj& b, Rgba c,
+              const DebugDrawOptions& opt) {
+    float dx = b.x - a.x, dy = b.y - a.y;
+    int steps = static_cast<int>(std::ceil(std::max(std::fabs(dx), std::fabs(dy))));
+    if (steps <= 0) { plot(fb, (int)a.x, (int)a.y, a.z, c, opt); return; }
+    float ix = dx / steps, iy = dy / steps, iz = (b.z - a.z) / steps;
+    float x = a.x, y = a.y, z = a.z;
+    for (int i = 0; i <= steps; ++i) {
+        plot(fb, (int)std::lround(x), (int)std::lround(y), z, c, opt);
+        x += ix; y += iy; z += iz;
+    }
+}
+
+} // namespace
+
+void rasterDebug(Framebuffer& fb, const DebugDraw& dd, const Mat4& mvp,
+                 const DebugDrawOptions& opt) {
+    const int W = fb.color.width, H = fb.color.height;
+
+    for (uint32_t ci = 0; ci < static_cast<uint32_t>(DebugCategory::Count); ++ci) {
+        DebugCategory cat = static_cast<DebugCategory>(ci);
+        if (!dd.categoryEnabled(cat)) continue;
+        const DebugDraw::Buffers& buf = dd.categoryBuffers(cat);
+
+        // Translucent triangles first (so lines/markers read on top).
+        for (size_t i = 0; i + 2 < buf.tris.size(); i += 3) {
+            Proj p0 = project(mvp, buf.tris[i].pos,   W, H);
+            Proj p1 = project(mvp, buf.tris[i+1].pos, W, H);
+            Proj p2 = project(mvp, buf.tris[i+2].pos, W, H);
+            if (!p0.valid || !p1.valid || !p2.valid) continue;
+            int minX = std::max(0, (int)std::floor(std::min({p0.x,p1.x,p2.x})));
+            int maxX = std::min(W-1, (int)std::ceil (std::max({p0.x,p1.x,p2.x})));
+            int minY = std::max(0, (int)std::floor(std::min({p0.y,p1.y,p2.y})));
+            int maxY = std::min(H-1, (int)std::ceil (std::max({p0.y,p1.y,p2.y})));
+            float area = edge(p0.x,p0.y, p1.x,p1.y, p2.x,p2.y);
+            if (std::fabs(area) < 1e-6f) continue;
+            Rgba col = buf.tris[i].color;
+            for (int py = minY; py <= maxY; ++py)
+                for (int px = minX; px <= maxX; ++px) {
+                    float fx = px + 0.5f, fy = py + 0.5f;
+                    float w0 = edge(p1.x,p1.y, p2.x,p2.y, fx,fy);
+                    float w1 = edge(p2.x,p2.y, p0.x,p0.y, fx,fy);
+                    float w2 = edge(p0.x,p0.y, p1.x,p1.y, fx,fy);
+                    bool in = (w0>=0&&w1>=0&&w2>=0) || (w0<=0&&w1<=0&&w2<=0);
+                    if (!in) continue;
+                    float z = (w0*p0.z + w1*p1.z + w2*p2.z) / area;
+                    plot(fb, px, py, z, col, opt);
+                }
+        }
+
+        // Lines.
+        for (size_t i = 0; i + 1 < buf.lines.size(); i += 2) {
+            Proj a = project(mvp, buf.lines[i].pos,   W, H);
+            Proj b = project(mvp, buf.lines[i+1].pos, W, H);
+            if (!a.valid || !b.valid) continue;          // crosses the near plane
+            drawLine(fb, a, b, buf.lines[i].color, opt);
+        }
+
+        // Point markers: a filled square of pointSize.
+        const int r = std::max(0, opt.pointSize / 2);
+        for (const DebugVertex& pt : buf.points) {
+            Proj p = project(mvp, pt.pos, W, H);
+            if (!p.valid) continue;
+            int cx = (int)std::lround(p.x), cy = (int)std::lround(p.y);
+            for (int oy = -r; oy <= r; ++oy)
+                for (int ox = -r; ox <= r; ++ox)
+                    plot(fb, cx + ox, cy + oy, p.z, pt.color, opt);
+        }
+    }
+}
+
 } // namespace wf

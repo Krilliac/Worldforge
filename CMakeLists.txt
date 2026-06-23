@@ -85,3 +85,6 @@ endif()
 
 add_executable(wforge-raster-demo src/raster_demo.cpp)
 target_link_libraries(wforge-raster-demo PRIVATE wforge)
+
+add_executable(wforge-debug-demo src/debug_demo.cpp)
+target_link_libraries(wforge-debug-demo PRIVATE wforge)
