@@ -210,6 +210,11 @@ void test_asset() {
     CHECK(loader.model("doodad.m2").get() == mdl.get());   // cached
     CHECK(loader.model("missing.m2") == nullptr);          // graceful nullptr
 
+    // modelBounds: real AABB from the model's vertices; invalid for a miss.
+    Aabb mb = loader.modelBounds("doodad.m2");
+    CHECK(mb.valid() && mb.radius() > 0.0f);
+    CHECK(!loader.modelBounds("missing.m2").valid());
+
     // --- buildTileScene: terrain + placed doodads --------------------------
     TileScene scene = loader.buildTileScene("TestMap", 32, 32);
     CHECK(!scene.terrain.empty());

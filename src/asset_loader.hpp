@@ -21,6 +21,7 @@
 #include "raster.hpp"
 #include "image.hpp"
 #include "m2.hpp"
+#include "bounds.hpp"
 #include "debugdraw.hpp"
 #include "audio.hpp"
 
@@ -76,6 +77,11 @@ public:
     // Parse an M2 model by archived path (cached). nullptr if missing/malformed.
     std::shared_ptr<const M2Model> model(const std::string& path);
 
+    // Model-local AABB of an M2 by path (bind-pose vertices, cached). Invalid
+    // (default Aabb) if the model is missing/malformed -- callers fall back to a
+    // sphere. The selectable bounds the bridge streams in EntityState.
+    Aabb modelBounds(const std::string& path);
+
     // Extract a sound/music file's raw bytes from the chain (e.g. the sound
     // MPQ). False if the archived path is absent. Not cached -- audio buffers
     // are large and usually streamed once.
@@ -105,6 +111,7 @@ private:
     const MpqManager& mpq_;
     std::unordered_map<std::string, std::shared_ptr<const Image>>   texCache_;
     std::unordered_map<std::string, std::shared_ptr<const M2Model>> modelCache_;
+    std::unordered_map<std::string, Aabb>                          boundsCache_;
     std::shared_ptr<const Image> fallback_;
 };
 

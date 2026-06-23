@@ -102,6 +102,16 @@ std::shared_ptr<const M2Model> AssetLoader::model(const std::string& path) {
     return result;
 }
 
+Aabb AssetLoader::modelBounds(const std::string& path) {
+    auto it = boundsCache_.find(path);
+    if (it != boundsCache_.end()) return it->second;
+
+    Aabb b;
+    if (auto m = model(path)) b = wf::modelBounds(*m);
+    boundsCache_[path] = b;
+    return b;
+}
+
 bool AssetLoader::sound(const std::string& path, std::vector<uint8_t>& out) const {
     return mpq_.readFile(path, out);
 }

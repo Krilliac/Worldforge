@@ -31,6 +31,7 @@ void test_client_data();
 void test_audio();
 void test_world_view();
 void test_picking();
+void test_bounds();
 
 int main() {
     test_math();
@@ -64,6 +65,7 @@ int main() {
     test_audio();
     test_world_view();
     test_picking();
+    test_bounds();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;
