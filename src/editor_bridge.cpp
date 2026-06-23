@@ -193,6 +193,24 @@ EntityState decodeEntityState(const std::vector<uint8_t>& p) {
 EntityRemove decodeEntityRemove(const std::vector<uint8_t>& p) {
     ByteReader r(p); EntityRemove e; e.guid = r.u64(); return e;
 }
+std::vector<uint8_t> encode(const ServerStatus& s) {
+    ByteWriter w;
+    w.u64(s.simTimeMs); w.u32(s.entityCount);
+    w.u32(s.weatherType); w.f32(s.weatherGrade);
+    w.u32(s.lastSound); w.u32(s.lastCinematic); w.u32(s.lastOverrideLight);
+    w.u32(s.weatherCount); w.u32(s.soundCount); w.u32(s.cinematicCount);
+    w.u32(s.worldStateCount); w.u32(s.lightCount);
+    return frame(EDITOR_SERVER_STATE, w.data());
+}
+ServerStatus decodeServerStatus(const std::vector<uint8_t>& p) {
+    ByteReader r(p); ServerStatus s;
+    s.simTimeMs = r.u64(); s.entityCount = r.u32();
+    s.weatherType = r.u32(); s.weatherGrade = r.f32();
+    s.lastSound = r.u32(); s.lastCinematic = r.u32(); s.lastOverrideLight = r.u32();
+    s.weatherCount = r.u32(); s.soundCount = r.u32(); s.cinematicCount = r.u32();
+    s.worldStateCount = r.u32(); s.lightCount = r.u32();
+    return s;
+}
 
 // ---- apply into a DebugDraw ----
 void apply(DebugDraw& dd, const DebugMarker& m) {

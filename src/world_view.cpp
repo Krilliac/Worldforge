@@ -9,6 +9,7 @@ void WorldView::onFrame(const EditorFrame& f, uint32_t nowMs) {
     switch (f.opcode) {
         case EDITOR_ENTITY_STATE:  apply(decodeEntityState(f.payload), nowMs); break;
         case EDITOR_ENTITY_REMOVE: remove(decodeEntityRemove(f.payload).guid); break;
+        case EDITOR_SERVER_STATE:  serverStatus(decodeServerStatus(f.payload)); break;
         default: break;   // not an entity-stream frame
     }
 }

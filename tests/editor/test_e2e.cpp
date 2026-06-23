@@ -2,6 +2,7 @@
 #include "server/stub_server.hpp"
 #include "editor/BridgeClient.hpp"
 #include "editor_bridge.hpp"
+#include "world_view.hpp"
 #include "fxbridge.hpp"
 
 #include <chrono>
@@ -38,6 +39,7 @@ void test_e2e() {
     int  acks = 0, debugFrames = 0, stateFrames = 0;
     bool gotMarker = false, gotPath = false, gotRemove = false;
     Vec3 firstSeen{}, lastSeen{};
+    WorldView view;   // the engine-side mirror, fed from the same stream
     auto drain = [&]{
         for (const EditorFrame& f : client.poll()) {
             switch (f.opcode) {
@@ -46,6 +48,7 @@ void test_e2e() {
                 case EDITOR_DEBUG_PATH:   gotPath   = true; ++debugFrames; break;
                 case EDITOR_ENTITY_STATE: {
                     EntityState es = decodeEntityState(f.payload);
+                    view.apply(es);
                     if (guid && es.guid == guid) {
                         if (stateFrames == 0) firstSeen = es.pos;
                         lastSeen = es.pos; ++stateFrames;
@@ -54,6 +57,9 @@ void test_e2e() {
                 }
                 case EDITOR_ENTITY_REMOVE:
                     if (guid && decodeEntityRemove(f.payload).guid == guid) gotRemove = true;
+                    break;
+                case EDITOR_SERVER_STATE:
+                    view.onFrame(f);   // mirror server runtime status into the view
                     break;
                 default: ++debugFrames; break;
             }
@@ -112,6 +118,13 @@ void test_e2e() {
     wx.target.scope = FxScope::Zone; wx.target.zoneId = 12; wx.opId = 4;
     CHECK(client.send(encode(wx)));
     CHECK(until([&]{ return server.fxSnapshot().weatherCount == 1; }));
+
+    // 4b) the server streams its runtime status -> the engine's view mirrors the
+    //     FX state (the inspector's "Server" section), proving server-data flow.
+    CHECK(until([&]{
+        return view.hasServerStatus() && view.serverStatus().weatherCount >= 1;
+    }));
+    CHECK(view.serverStatus().entityCount >= 1);
 
     // 5) despawn -> the world is empty again, and the editor gets an ENTITY_REMOVE.
     Despawn dp; dp.guid = guid; dp.opId = 5;

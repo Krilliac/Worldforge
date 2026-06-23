@@ -80,4 +80,15 @@ void test_world_view() {
 
     // Colours distinguish kinds.
     CHECK(WorldView::kindColor(1).b > WorldView::kindColor(0).b);   // player bluer
+
+    // --- server status ingest via frame -------------------------------------
+    CHECK(!view.hasServerStatus());
+    ServerStatus ss; ss.simTimeMs = 5000; ss.entityCount = 9; ss.weatherType = 1;
+    ss.weatherGrade = 0.4f; ss.weatherCount = 2;
+    CHECK(readFrame(encode(ss), f, used));
+    view.onFrame(f);
+    CHECK(view.hasServerStatus());
+    CHECK(view.serverStatus().simTimeMs == 5000);
+    CHECK(view.serverStatus().entityCount == 9);
+    CHECK(view.serverStatus().weatherType == 1 && view.serverStatus().weatherCount == 2);
 }

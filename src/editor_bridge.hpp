@@ -62,6 +62,7 @@ enum EditorOpcode : uint32_t {
     // actually moving. ENTITY_REMOVE retires an object that left the world.
     EDITOR_ENTITY_STATE   = 0x4030,  // one object's live state this tick
     EDITOR_ENTITY_REMOVE  = 0x4031,  // an object despawned / left visibility
+    EDITOR_SERVER_STATE   = 0x4032,  // periodic server runtime status (FX + clock)
 };
 
 // The server's DV_* marker types (stable wire values; map to DebugCategory).
@@ -95,6 +96,21 @@ struct EntityState {
     std::string name;
 };
 struct EntityRemove { uint64_t guid = 0; };
+
+// Periodic server runtime status (server -> editor): the world clock, how many
+// objects are alive, and the last-applied client-FX state (the FxLog the server
+// would broadcast). Lets the inspector show "what the server is doing right now"
+// alongside the per-entity stream.
+struct ServerStatus {
+    uint64_t simTimeMs   = 0;
+    uint32_t entityCount = 0;
+    uint32_t weatherType = 0;   float weatherGrade = 0.0f;
+    uint32_t lastSound        = 0;
+    uint32_t lastCinematic    = 0;
+    uint32_t lastOverrideLight = 0;
+    uint32_t weatherCount = 0, soundCount = 0, cinematicCount = 0,
+             worldStateCount = 0, lightCount = 0;
+};
 
 // ---- debug-stream messages (mirror the server's captured data) ----
 struct DebugMarker { DebugVisType type = DebugVisType::Generic; Vec3 pos; Rgba color; float value = 0.0f; std::string label; };
@@ -172,8 +188,10 @@ DebugVolume decodeDebugVolume(const std::vector<uint8_t>& payload);
 // ---- live entity stream encode / decode ----
 std::vector<uint8_t> encode(const EntityState&);
 std::vector<uint8_t> encode(const EntityRemove&);
+std::vector<uint8_t> encode(const ServerStatus&);
 EntityState  decodeEntityState(const std::vector<uint8_t>& payload);
 EntityRemove decodeEntityRemove(const std::vector<uint8_t>& payload);
+ServerStatus decodeServerStatus(const std::vector<uint8_t>& payload);
 
 // ---- apply a decoded debug message into a renderable DebugDraw ----
 void apply(DebugDraw& dd, const DebugMarker&);

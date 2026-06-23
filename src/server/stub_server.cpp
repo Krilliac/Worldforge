@@ -112,6 +112,7 @@ void StubBridgeServer::simLoop() {
     const auto   period = std::chrono::duration_cast<clock::duration>(
                               std::chrono::duration<double>(dt));
     std::vector<uint64_t> prevGuids;
+    int statusEvery = 0;
 
     auto last = clock::now();
     while (running_) {
@@ -119,10 +120,20 @@ void StubBridgeServer::simLoop() {
         last = clock::now();
 
         std::vector<SimObject> snap;
+        ServerStatus status;
         {
             std::lock_guard<std::mutex> g(worldMtx_);
             world_.tick(static_cast<float>(dt));
             snap = world_.snapshot();
+            const FxLog& fx = world_.fx();
+            status.simTimeMs   = world_.simTimeMs();
+            status.entityCount = static_cast<uint32_t>(world_.aliveCount());
+            status.weatherType = fx.weatherType; status.weatherGrade = fx.weatherGrade;
+            status.lastSound = fx.lastSound; status.lastCinematic = fx.lastCinematic;
+            status.lastOverrideLight = fx.lastOverrideLight;
+            status.weatherCount = fx.weatherCount; status.soundCount = fx.soundCount;
+            status.cinematicCount = fx.cinematicCount; status.worldStateCount = fx.worldStateCount;
+            status.lightCount = fx.lightCount;
         }
 
         // Stream every object's live state.
@@ -142,6 +153,12 @@ void StubBridgeServer::simLoop() {
             if (std::find(nowGuids.begin(), nowGuids.end(), g) == nowGuids.end())
                 broadcast(encode(EntityRemove{ g }));
         prevGuids.swap(nowGuids);
+
+        // The server runtime status is slower-moving; send it ~2x/second.
+        if (--statusEvery <= 0) {
+            statusEvery = std::max(1, static_cast<int>(simRateHz_ / 2.0));
+            broadcast(encode(status));
+        }
     }
 }
 

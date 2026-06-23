@@ -150,6 +150,22 @@ void test_bridge() {
     EntityRemove er; er.guid = es.guid;
     CHECK(readFrame(encode(er), fr, used) && fr.opcode == EDITOR_ENTITY_REMOVE);
     CHECK(decodeEntityRemove(fr.payload).guid == es.guid);
+
+    // --- server runtime status round-trip -----------------------------------
+    ServerStatus sst;
+    sst.simTimeMs = 12345; sst.entityCount = 7;
+    sst.weatherType = 2; sst.weatherGrade = 0.6f;
+    sst.lastSound = 8960; sst.lastCinematic = 81; sst.lastOverrideLight = 396;
+    sst.weatherCount = 3; sst.soundCount = 5; sst.cinematicCount = 1;
+    sst.worldStateCount = 4; sst.lightCount = 2;
+    CHECK(readFrame(encode(sst), fr, used) && fr.opcode == EDITOR_SERVER_STATE);
+    ServerStatus sstb = decodeServerStatus(fr.payload);
+    CHECK(sstb.simTimeMs == 12345 && sstb.entityCount == 7);
+    CHECK(sstb.weatherType == 2);
+    CHECK_APPROX(sstb.weatherGrade, 0.6f);
+    CHECK(sstb.lastSound == 8960 && sstb.lastCinematic == 81 && sstb.lastOverrideLight == 396);
+    CHECK(sstb.weatherCount == 3 && sstb.soundCount == 5 && sstb.cinematicCount == 1);
+    CHECK(sstb.worldStateCount == 4 && sstb.lightCount == 2);
 }
 
 void test_db_export() {

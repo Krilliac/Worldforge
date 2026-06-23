@@ -49,6 +49,11 @@ public:
     // Drop entities not seen within `maxAgeMs` of `nowMs` (a stalled/lost link).
     size_t prune(uint32_t nowMs, uint32_t maxAgeMs);
 
+    // ---- server runtime status (FX + clock) -------------------------------
+    void                serverStatus(const ServerStatus& s) { status_ = s; hasStatus_ = true; }
+    const ServerStatus& serverStatus() const { return status_; }
+    bool                hasServerStatus() const { return hasStatus_; }
+
     // ---- selection (inspector <-> viewport) -------------------------------
     void     select(uint64_t guid) { selected_ = guid; }
     uint64_t selected() const { return selected_; }
@@ -64,7 +69,9 @@ public:
 
 private:
     std::unordered_map<uint64_t, LiveEntity> ents_;
-    uint64_t selected_ = 0;
+    uint64_t     selected_  = 0;
+    ServerStatus status_;
+    bool         hasStatus_ = false;
 };
 
 } // namespace wf

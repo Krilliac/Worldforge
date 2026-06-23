@@ -35,6 +35,20 @@ uint64_t EntityInspectorPanel::draw(WorldView& view) {
     ImGui::Text("Live: %zu   Creatures: %zu   Players: %zu   GO: %zu   Moving: %zu",
                 c.total, c.creatures, c.players, c.gameObjects, c.moving);
 
+    // --- server runtime status (the FxLog the server is broadcasting) -------
+    if (view.hasServerStatus() && ImGui::CollapsingHeader("Server")) {
+        const ServerStatus& s = view.serverStatus();
+        ImGui::Text("Clock: %.1fs   Entities: %u",
+                    static_cast<double>(s.simTimeMs) / 1000.0, s.entityCount);
+        ImGui::Text("Weather: type %u @ %.2f   (%u sent)",
+                    s.weatherType, s.weatherGrade, s.weatherCount);
+        ImGui::Text("Sound: last %u (%u)   Cinematic: last %u (%u)",
+                    s.lastSound, s.soundCount, s.lastCinematic, s.cinematicCount);
+        ImGui::Text("Light: last %u (%u)   WorldState ops: %u",
+                    s.lastOverrideLight, s.lightCount, s.worldStateCount);
+        ImGui::Separator();
+    }
+
     ImGui::Checkbox("Creatures", &showCreatures);  ImGui::SameLine();
     ImGui::Checkbox("Players",   &showPlayers);    ImGui::SameLine();
     ImGui::Checkbox("Objects",   &showGameObjects);ImGui::SameLine();
