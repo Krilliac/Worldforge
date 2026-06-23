@@ -28,11 +28,15 @@ float raySphere(const Ray& r, const Vec3& center, float radius) {
     return t >= 0.0f ? t : -1.0f;
 }
 
-PickResult pickEntity(const Ray& r, const WorldView& view, float radius) {
+float pickRadius(const EntityState& s, float pad, float fallback) {
+    return (s.boundingRadius > 0.0f ? s.boundingRadius : fallback) + pad;
+}
+
+PickResult pickEntity(const Ray& r, const WorldView& view, float pad, float fallback) {
     PickResult best;
     float bestT = 1e30f;
     for (const LiveEntity& le : view.entities()) {
-        float t = raySphere(r, le.state.pos, radius);
+        float t = raySphere(r, le.state.pos, pickRadius(le.state, pad, fallback));
         if (t >= 0.0f && t < bestT) {
             bestT = t;
             best.kind = PickResult::Kind::Entity;
@@ -55,8 +59,8 @@ PickResult pickTerrain(const Ray& r, const Mesh& terrain) {
     return best;
 }
 
-PickResult pick(const Ray& r, const WorldView& view, const Mesh& terrain, float entityRadius) {
-    PickResult e = pickEntity(r, view, entityRadius);
+PickResult pick(const Ray& r, const WorldView& view, const Mesh& terrain, float pad, float fallback) {
+    PickResult e = pickEntity(r, view, pad, fallback);
     PickResult t = pickTerrain(r, terrain);
     if (e.hit() && t.hit()) return (e.distance <= t.distance) ? e : t;
     return e.hit() ? e : t;

@@ -112,6 +112,8 @@ void test_e2e() {
     CHECK(until([&]{ return stateFrames >= 5; }));
     CHECK(stateFrames >= 5);
     CHECK((std::fabs(lastSeen.x - firstSeen.x) + std::fabs(lastSeen.y - firstSeen.y)) > 0.1f);
+    // The mirrored entity carries a model bounding radius (for click-picking).
+    CHECK(view.find(guid) && view.find(guid)->state.boundingRadius > 0.0f);
 
     // 4) an atmosphere op -> the server logs the weather broadcast.
     WeatherFx wx; wx.type = WeatherType::Rain; wx.grade = 0.8f;

@@ -145,7 +145,7 @@ void StubBridgeServer::simLoop() {
             e.guid = o.guid; e.kind = static_cast<uint8_t>(o.kind);
             e.entry = o.entry; e.mapId = o.mapId;
             e.pos = o.pos; e.orientation = o.orientation;
-            e.moving = o.moving; e.speed = o.speed; e.name = o.name;
+            e.moving = o.moving; e.speed = o.speed; e.boundingRadius = o.radius; e.name = o.name;
             broadcast(encode(e));
         }
         // Retire objects that left the world since last tick.

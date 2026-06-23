@@ -27,6 +27,7 @@ uint64_t WorldSim::spawnPlayer(uint32_t mapId, const Vec3& pos, float o, const s
     obj.pos = pos;
     obj.orientation = o;
     obj.speed = 7.0f;                 // player run speed
+    obj.radius = 1.0f;               // a humanoid's selectable radius
     uint64_t guid = obj.guid;
     objects_[guid] = std::move(obj);
     return guid;
@@ -56,6 +57,13 @@ bool WorldSim::setSpeed(uint64_t guid, float speed) {
     auto it = objects_.find(guid);
     if (it == objects_.end()) return false;
     it->second.speed = speed;
+    return true;
+}
+
+bool WorldSim::setBounds(uint64_t guid, float radius) {
+    auto it = objects_.find(guid);
+    if (it == objects_.end()) return false;
+    it->second.radius = radius;
     return true;
 }
 

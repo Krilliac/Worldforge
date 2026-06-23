@@ -76,6 +76,12 @@ void test_world_sim() {
     uint64_t p = w.spawnPlayer(0, {1,2,3}, 0.0f, "Tester");
     CHECK((p >> 48) == 0);                             // low guid -> player
     CHECK(w.find(p)->kind == EntityKind::Player && w.find(p)->name == "Tester");
+
+    // Bounds default per kind and are overridable (for model-sized picking).
+    CHECK(w.find(s)->radius > 0.0f);                   // creature has a default
+    CHECK(w.setBounds(s, 8.0f));
+    CHECK_APPROX(w.find(s)->radius, 8.0f);
+    CHECK(!w.setBounds(999999, 1.0f));                 // unknown guid
     std::vector<SimObject> snap = w.snapshot();
     CHECK(snap.size() == 3);
     for (size_t i = 1; i < snap.size(); ++i) CHECK(snap[i-1].guid < snap[i].guid);

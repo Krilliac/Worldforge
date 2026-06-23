@@ -9,8 +9,9 @@
 using namespace wf;
 
 namespace {
-EntityState mk(uint64_t guid, Vec3 pos) {
-    EntityState e; e.guid = guid; e.kind = 0; e.pos = pos; e.moving = true; return e;
+EntityState mk(uint64_t guid, Vec3 pos, float radius = 2.0f) {
+    EntityState e; e.guid = guid; e.kind = 0; e.pos = pos; e.moving = true;
+    e.boundingRadius = radius; return e;
 }
 // A flat quad on the z=0 plane spanning [-50,50] in x and y, two triangles.
 Mesh flatGround() {
@@ -56,10 +57,22 @@ void test_picking() {
     view.apply(mk(100, {30,0,0}));      // far, straight ahead
     view.apply(mk(200, {10,0,0}));      // near, straight ahead
     view.apply(mk(300, {15,40,0}));     // off to the side (a miss)
-    PickResult pe = pickEntity(c, view, 2.0f);
+    PickResult pe = pickEntity(c, view, /*pad*/0.0f);
     CHECK(pe.hit() && pe.kind == PickResult::Kind::Entity);
     CHECK(pe.guid == 200);                                  // nearest wins
-    CHECK_APPROX(pe.distance, 8.0f);
+    CHECK_APPROX(pe.distance, 8.0f);                        // 10 - radius 2
+
+    // --- per-entity bounds: a big object is clickable where a small one isn't -
+    // Both sit 4 yards off the ray's axis at x=30.
+    WorldView wbig;   wbig.apply(mk(1, {30,4,0}, 6.0f));    // big bounds -> hit
+    CHECK(pickEntity(c, wbig, 0.0f).hit());
+    WorldView wsmall; wsmall.apply(mk(2, {30,4,0}, 1.0f));  // small bounds -> miss
+    CHECK(!pickEntity(c, wsmall, 0.0f).hit());
+    // Unknown bounds (0) fall back to the provided default radius.
+    WorldView wunk; wunk.apply(mk(3, {30,0,0}, 0.0f));
+    PickResult fb = pickEntity(c, wunk, /*pad*/0.0f, /*fallback*/5.0f);
+    CHECK(fb.hit() && fb.guid == 3);
+    CHECK_APPROX(fb.distance, 25.0f);                       // 30 - fallback 5
 
     // --- a ray angled down hits the ground; pickTerrain returns the point ----
     Ray down = screenRay(eye + Vec3{0,0,20}, normalize(Vec3{1,0,-1}), right, up,
@@ -73,7 +86,7 @@ void test_picking() {
     WorldView v2;
     v2.apply(mk(900, {20,0,0}));                            // sits on the ground line
     Mesh ground = flatGround();
-    PickResult both = pick(c, v2, ground, 3.0f);
+    PickResult both = pick(c, v2, ground);
     CHECK(both.hit() && both.kind == PickResult::Kind::Entity && both.guid == 900);
 
     // With no entities, the same click falls through to terrain.

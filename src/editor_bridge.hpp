@@ -93,6 +93,7 @@ struct EntityState {
     float       orientation = 0.0f;
     bool        moving = false;
     float       speed  = 0.0f;
+    float       boundingRadius = 0.0f;   // selectable/model radius (0 = unknown)
     std::string name;
 };
 struct EntityRemove { uint64_t guid = 0; };

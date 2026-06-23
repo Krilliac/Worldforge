@@ -37,15 +37,19 @@ struct PickResult {
     bool hit() const { return kind != Kind::None; }
 };
 
-// Nearest entity the ray hits (treating each as a sphere of `radius`), or a
-// None result. guid + distance + point filled on a hit.
-PickResult pickEntity(const Ray& r, const WorldView& view, float radius = 3.0f);
+// The selectable radius for an entity: its reported bounds (or `fallback` when
+// unknown), plus `pad` of click forgiveness so small objects stay clickable.
+float pickRadius(const EntityState& s, float pad = 0.5f, float fallback = 2.0f);
+
+// Nearest entity the ray hits (each a sphere of pickRadius()), or a None result.
+// guid + distance + point filled on a hit.
+PickResult pickEntity(const Ray& r, const WorldView& view, float pad = 0.5f, float fallback = 2.0f);
 // Nearest terrain triangle the ray hits.
 PickResult pickTerrain(const Ray& r, const Mesh& terrain);
 
 // Nearest of entity / terrain (entities win ties, since their spheres sit in
 // front of the ground they stand on).
 PickResult pick(const Ray& r, const WorldView& view, const Mesh& terrain,
-                float entityRadius = 3.0f);
+                float pad = 0.5f, float fallback = 2.0f);
 
 } // namespace wf

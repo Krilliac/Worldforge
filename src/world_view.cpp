@@ -87,7 +87,10 @@ void WorldView::buildDebug(DebugDraw& dd) const {
         const EntityState& s = kv.second.state;
         Rgba col = kindColor(s.kind);
         const bool sel = (s.guid == selected_);
-        const float size = sel ? 3.5f : 2.0f;
+        // Scale the marker to the entity's bounds (so a big WMO reads bigger),
+        // with a floor so small/unknown objects stay visible; selection bumps it.
+        float base = s.boundingRadius > 0.0f ? s.boundingRadius : 2.0f;
+        const float size = (sel ? 1.4f : 1.0f) * std::max(1.5f, base);
 
         dd.cross(s.pos, size, col, DebugCategory::Marker);
         dd.point(s.pos, col, DebugCategory::Marker);
