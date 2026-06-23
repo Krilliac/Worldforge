@@ -72,12 +72,15 @@ the client loads — a client-side change, distinct from the live-server edits.
 | Client ADT terrain / liquid / placement | ✅ done (`terrain.*`, `wow_files.*`) |
 | M2/WMO → collision wireframe (from source) | ✅ done (`modelmesh` → `DebugDraw`) |
 | Live debug stream (path/LoS/collision/cells) | ✅ done (`editor_bridge` `EDITOR_DEBUG_*`) |
-| **GridMap `.map` parser** (server height/area/liquid/holes) | ◻ planned — see below |
-| **Typed DBC views** (Map/AreaTable/LiquidType/Light) | ◻ planned |
-| **Detour `.mmap`/`.mmtile` parser** (navmesh overlay) | ◻ planned — highest unique value |
+| **GridMap `.map` parser** (server height/area/liquid/holes) | ✅ done (`gridmap.*`) |
+| **Typed DBC views** (Map/AreaTable/LiquidType/Light) | ✅ done (`dbc_defs.*`) |
+| **Detour `.mmtile` parser** (navmesh overlay) | ✅ done (`navmesh.*` → `addNavMesh`) |
 | **VMAP `.vmtree`/`.vmtile` parser** (exact server collision) | ◻ later (source meshes cover most cases) |
 | DBC → patch-MPQ writer (custom content) | ◻ later |
 
-The GridMap parser and typed DBC views are the next concrete, fully
-unit-testable additions; the Detour navmesh parser follows (it is the one server
-output WorldForge genuinely cannot reconstruct from source).
+`gridmap`, `dbc_defs`, and `navmesh` (the byte-exact `.map` / DBC / `.mmtile`
+parsers) are implemented and unit-tested. `navmesh::addNavMesh` draws the server
+navmesh polygons into the `NavMesh` debug layer, so the viewport renders the
+*exact* navigation graph the running server pathfinds on. VMAP collision and the
+DBC→patch-MPQ writer remain the explicit follow-ups (source meshes already cover
+collision wireframe for most cases).
