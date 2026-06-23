@@ -212,4 +212,86 @@ void test_terrain() {
         CHECK(decodeAlphaMap(a, 1, false).at(0, 0) == 0);
         CHECK(decodeAlphaMap(a, 5, false).at(0, 0) == 0);   // no layer 5
     }
+
+    // --- MCAL encode (write path) + round-trip ------------------------------
+    {
+        // 8-bit big-alpha is loss-less: encode then decode reproduces exactly.
+        AlphaMap src;
+        for (int k = 0; k < 64 * 64; ++k) src.texels[k] = static_cast<uint8_t>(k & 0xFF);
+        std::vector<uint8_t> enc8 = encodeAlphaMap(src, /*bigAlpha*/true);
+        CHECK(enc8.size() == 4096);
+        MapChunk a;
+        a.layers.resize(2);
+        a.layers[1].flags = MCLY_USE_ALPHA;
+        a.layers[1].ofsAlpha = 0;
+        a.alpha = enc8;
+        AlphaMap back8 = decodeAlphaMap(a, 1, /*bigAlpha*/true);
+        bool exact8 = true;
+        for (int k = 0; k < 64 * 64; ++k) if (back8.texels[k] != src.texels[k]) exact8 = false;
+        CHECK(exact8);
+
+        // 4-bit packs two texels/byte: 2048 bytes, multiples of 17 round-trip.
+        AlphaMap q;
+        for (int k = 0; k < 64 * 64; ++k) q.texels[k] = static_cast<uint8_t>((k % 16) * 17);
+        std::vector<uint8_t> enc4 = encodeAlphaMap(q, /*bigAlpha*/false);
+        CHECK(enc4.size() == 2048);
+        a.alpha = enc4;
+        AlphaMap back4 = decodeAlphaMap(a, 1, /*bigAlpha*/false);
+        bool exact4 = true;
+        for (int k = 0; k < 64 * 64; ++k) if (back4.texels[k] != q.texels[k]) exact4 = false;
+        CHECK(exact4);
+        // 255 quantises to nibble 15 -> 255 (not 0): the rounding boundary.
+        AlphaMap full; full.texels.fill(255);
+        a.alpha = encodeAlphaMap(full, false);
+        CHECK(decodeAlphaMap(a, 1, false).at(0, 0) == 255);
+    }
+
+    // --- packAlphaLayers: rebuild MCAL + MCLY offsets for 3 layers ----------
+    {
+        MapChunk a;
+        a.layers.resize(3);
+        std::vector<AlphaMap> maps(3);
+        maps[1].texels.fill(255);   // layer 1 fully opaque
+        for (int k = 0; k < 64 * 64; ++k)               // layer 2: a gradient
+            maps[2].texels[k] = static_cast<uint8_t>(((k % 16) * 17));
+        packAlphaLayers(a, maps, /*bigAlpha*/false);
+        // Layer 0 = base, no alpha; layers 1,2 each 2048 B -> 4096 total.
+        CHECK(!(a.layers[0].flags & MCLY_USE_ALPHA));
+        CHECK(a.layers[1].flags & MCLY_USE_ALPHA);
+        CHECK(a.layers[1].ofsAlpha == 0);
+        CHECK(a.layers[2].ofsAlpha == 2048);
+        CHECK(a.alpha.size() == 4096);
+        CHECK(decodeAlphaMap(a, 1, false).at(20, 20) == 255);
+        CHECK(decodeAlphaMap(a, 2, false).at(0, 15) == 15 * 17);
+    }
+
+    // --- MCLQ liquid parse --------------------------------------------------
+    {
+        // Build an MCNK flagged as river with one MCLQ layer: min/max + 81
+        // verts (8 B each, height in the last 4) + 64 flag bytes.
+        std::vector<uint8_t> hdr(128, 0);
+        auto h32 = [&](size_t off, uint32_t v){ for(int i=0;i<4;i++) hdr[off+i]=(v>>(8*i))&0xFF; };
+        h32(0x00, 0x0004);   // flags: MCNK_LQ_RIVER
+        h32(0x0C, 0);        // nLayers
+
+        std::vector<uint8_t> mclq;
+        putf(mclq, 10.0f);   // minHeight
+        putf(mclq, 20.0f);   // maxHeight
+        for (int i = 0; i < 81; ++i) { put32(mclq, 0); putf(mclq, 15.0f); } // union + height
+        for (int i = 0; i < 64; ++i) mclq.push_back(i == 0 ? 0x0F : 0x00);  // tile 0 = skip
+
+        std::vector<uint8_t> body = hdr;
+        chunk(body, "MCLQ", mclq);
+        std::vector<uint8_t> adtL;
+        chunk(adtL, "MCNK", body);
+
+        MapChunk mcl = parseChunks(adtL)[0];
+        CHECK(mcl.hasLiquid);
+        CHECK(mcl.liquidType == LiquidType::River);
+        CHECK_APPROX(mcl.liquid.minHeight, 10.0f);
+        CHECK_APPROX(mcl.liquid.maxHeight, 20.0f);
+        CHECK_APPROX(mcl.liquid.heights[40], 15.0f);
+        CHECK(!liquidTileRenders(mcl.liquid.renderFlags[0]));  // 0x0F -> skip
+        CHECK(liquidTileRenders(mcl.liquid.renderFlags[1]));   // 0x00 -> draw
+    }
 }

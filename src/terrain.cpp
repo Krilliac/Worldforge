@@ -3,7 +3,10 @@
 #include "chunk.hpp"
 #include "coords.hpp"
 
+#include <algorithm>
 #include <stdexcept>
+
+namespace wf { static void parseMclq(MapChunk&, const uint8_t*, uint32_t); }
 
 namespace wf {
 
@@ -76,6 +79,8 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
             }
         } else if (c.magic == "MCAL") {
             mc.alpha.assign(c.data, c.data + c.size);
+        } else if (c.magic == "MCLQ") {
+            parseMclq(mc, c.data, c.size);
         }
         return true;
     });
@@ -137,6 +142,68 @@ AlphaMap decodeAlphaMap(const MapChunk& mc, size_t layerIndex, bool bigAlpha) {
         map.texels[k] = static_cast<uint8_t>(nib * 17);
     }
     return map;
+}
+
+std::vector<uint8_t> encodeAlphaMap(const AlphaMap& map, bool bigAlpha) {
+    constexpr int N = AlphaMap::DIM * AlphaMap::DIM;   // 4096 texels
+    std::vector<uint8_t> out;
+    if (bigAlpha) {
+        out.assign(map.texels.begin(), map.texels.end());   // 4096 bytes
+        return out;
+    }
+    out.assign(N / 2, 0);                                   // 2048 bytes
+    for (int k = 0; k < N; ++k) {
+        // 0..255 -> nearest 0..15 (round, not truncate): (v + 8) / 17.
+        uint8_t nib = static_cast<uint8_t>((map.texels[k] + 8) / 17);
+        if (nib > 15) nib = 15;
+        if (k & 1) out[k / 2] |= static_cast<uint8_t>(nib << 4);  // high nibble
+        else       out[k / 2] |= nib;                            // low nibble
+    }
+    return out;
+}
+
+void packAlphaLayers(MapChunk& mc, const std::vector<AlphaMap>& maps, bool bigAlpha) {
+    mc.alpha.clear();
+    const size_t n = std::min(mc.layers.size(), maps.size());
+    for (size_t i = 0; i < n; ++i) {
+        TexLayer& layer = mc.layers[i];
+        layer.flags &= ~MCLY_COMPRESSED;           // we never emit RLE
+        if (i == 0) {                              // base layer: no alpha
+            layer.flags &= ~MCLY_USE_ALPHA;
+            layer.ofsAlpha = 0;
+            continue;
+        }
+        layer.flags |= MCLY_USE_ALPHA;
+        layer.ofsAlpha = static_cast<uint32_t>(mc.alpha.size());
+        std::vector<uint8_t> enc = encodeAlphaMap(maps[i], bigAlpha);
+        mc.alpha.insert(mc.alpha.end(), enc.begin(), enc.end());
+    }
+}
+
+// Parse one MCLQ liquid layer (min/max height, 9x9 vertex grid, 8x8 flags).
+static void parseMclq(MapChunk& mc, const uint8_t* data, uint32_t size) {
+    LiquidType t = LiquidType::None;
+    if      (mc.flags & MCNK_LQ_RIVER) t = LiquidType::River;
+    else if (mc.flags & MCNK_LQ_OCEAN) t = LiquidType::Ocean;
+    else if (mc.flags & MCNK_LQ_MAGMA) t = LiquidType::Magma;
+    else if (mc.flags & MCNK_LQ_SLIME) t = LiquidType::Slime;
+
+    ByteReader r(data, size);
+    // 2 floats + 81 verts * 8 bytes + 64 flag bytes = 720 bytes per layer.
+    if (r.remaining() < 8u + 81u * 8u + 64u) return;
+
+    MclqLayer L;
+    L.minHeight = r.f32();
+    L.maxHeight = r.f32();
+    for (int i = 0; i < 81; ++i) {
+        r.skip(4);                // type-specific union (depth/flow or s,t coords)
+        L.heights[i] = r.f32();   // height is always the last 4 bytes
+    }
+    for (int i = 0; i < 64; ++i) L.renderFlags[i] = r.u8();
+
+    mc.hasLiquid  = true;
+    mc.liquidType = t;
+    mc.liquid     = L;
 }
 
 std::vector<MapChunk> parseChunks(const std::vector<uint8_t>& adtBuf) {

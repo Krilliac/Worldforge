@@ -26,6 +26,31 @@ struct TexLayer {              // MCLY entry (16 bytes)
     uint32_t effectId  = 0;    // ground-effect / detail-doodad id
 };
 
+// MCNK header flag bits we act on (ADT/v18).
+constexpr uint32_t MCNK_HAS_MCSH         = 0x0001;
+constexpr uint32_t MCNK_LQ_RIVER         = 0x0004;
+constexpr uint32_t MCNK_LQ_OCEAN         = 0x0008;
+constexpr uint32_t MCNK_LQ_MAGMA         = 0x0010;
+constexpr uint32_t MCNK_LQ_SLIME         = 0x0020;
+constexpr uint32_t MCNK_DO_NOT_FIX_ALPHA = 0x8000;
+
+// Liquid category, derived from the MCNK header liquid flags.
+enum class LiquidType : uint32_t { None = 0, River, Ocean, Magma, Slime };
+
+// One MCLQ liquid layer: a 9x9 height grid over the chunk plus an 8x8 render
+// mask. The per-vertex depth/flow (water) or texture-coord (magma) union is not
+// retained; only the height (the last 4 bytes of each 8-byte vertex) is kept,
+// which is all the mesh/water surface needs.
+struct MclqLayer {
+    float minHeight = 0.0f;
+    float maxHeight = 0.0f;
+    std::array<float, 81>  heights{};      // 9x9 outer grid
+    std::array<uint8_t, 64> renderFlags{}; // 8x8 tiles; low nibble 0xF == skip
+};
+
+// True if an MCLQ 8x8 tile flag indicates the tile should be drawn.
+inline bool liquidTileRenders(uint8_t flag) { return (flag & 0x0F) != 0x0F; }
+
 struct MapChunk {
     uint32_t flags   = 0;
     uint32_t indexX  = 0;      // header IndexX (see terrain.cpp note on axis map)
@@ -36,7 +61,11 @@ struct MapChunk {
     std::array<float, 145> heights{};   // MCVT, relative to position.z
     std::array<Vec3,  145> normals{};   // MCNR, unpacked to unit-ish vectors
     std::vector<TexLayer> layers;       // MCLY
-    std::vector<uint8_t>  alpha;        // raw MCAL blob (unpack deferred to texturing)
+    std::vector<uint8_t>  alpha;        // raw MCAL blob (decode via decodeAlphaMap)
+
+    bool       hasLiquid  = false;      // MCLQ present
+    LiquidType liquidType = LiquidType::None;
+    MclqLayer  liquid;                  // valid when hasLiquid
 };
 
 struct Vertex {
@@ -71,6 +100,18 @@ struct AlphaMap {
 // Out-of-range offsets or truncated data decode to transparent (0) rather than
 // reading past the blob.
 AlphaMap decodeAlphaMap(const MapChunk& mc, size_t layerIndex, bool bigAlpha);
+
+// Encode a single coverage map back to its MCAL byte form (the inverse of
+// decodeAlphaMap, for an editor's texture-paint write path). bigAlpha selects
+// the 8-bit (4096 B) vs packed 4-bit (2048 B) form. The 4-bit form quantises
+// 0..255 -> nearest multiple of 17, so a decode->encode->decode round-trip is
+// exact only for values that are already multiples of 17.
+std::vector<uint8_t> encodeAlphaMap(const AlphaMap& map, bool bigAlpha);
+
+// Rebuild a chunk's MCAL blob from per-layer coverage maps and refresh each
+// MCLY entry's use-alpha flag + ofsAlpha. maps[i] pairs with mc.layers[i];
+// layer 0 (the base) carries no alpha and is skipped. Drops any compression.
+void packAlphaLayers(MapChunk& mc, const std::vector<AlphaMap>& maps, bool bigAlpha);
 
 // Parse all 256 MCNK chunks from a full ADT buffer.
 // blockX/blockY are the tile's WDT indices, needed for world placement.
