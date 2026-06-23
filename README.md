@@ -8,7 +8,7 @@ pair with a mangos-zero server: load real client assets, render the world in a
 running server while connected retail clients see the edits.**
 
 Every parser, transform, and protocol primitive here is **compiled and
-unit-tested in-tree** (114→176 checks). Where a part needs a GPU/display or your
+unit-tested in-tree** (114→273 checks). Where a part needs a GPU/display or your
 mangos checkout to run, it is implemented as far as it can be verified and the
 boundary is stated plainly (see `ARCHITECTURE.md`).
 
@@ -46,6 +46,11 @@ automatically via CMake FetchContent.
 | `worldproto.hpp`  | vanilla header cipher + opcode framing                        |
 | `raster.*`        | software rasteriser (z-buffer, perspective-correct)            |
 | `rhi.hpp`         | GPU render-hardware interface (backend-agnostic)              |
+| `editing.*`       | brush falloff + terrain-height / alpha-coverage edit tools      |
+| `gizmo.*`         | ray/transform picking, mesh hit-test, snapping (move/rotate/scale) |
+| `editor_bridge.*` | editor↔server RPC: `EDITOR_*` op structs + length/opcode framing |
+| `db_export.*`     | placements → mangos `creature`/`gameobject`/`creature_movement` SQL |
+| `byte_writer.hpp` | little-endian write counterpart to `byte_reader.hpp`           |
 
 ## Status at a glance
 

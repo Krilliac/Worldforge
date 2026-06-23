@@ -312,35 +312,43 @@ to the binary `EDITOR_*` channel for high-frequency drag operations.
 - Rendering: `raster` (software, the data-path oracle) + `rhi.hpp` (backend-agnostic
   interface — the GPU backend is the gap).
 - Protocol: `srp6`, `worldproto` (header cipher + framing) — the bridge's framing base.
-- 176 unit checks, all green.
+- **Editor core (new):** `editing` (brush falloff + height/alpha brushes),
+  `gizmo` (ray/transform picking, mesh hit-test, snapping), `editor_bridge`
+  (`EDITOR_*` ops + framing), `db_export` (spawn-table SQL), `byte_writer`.
+- 273 unit checks, all green.
 
 ### E.2 The gaps the editor needs (in dependency order)
 
-1. **GPU RHI backend** — implement `rhi::Device` on OpenGL 3.3 (1.12-era target).
-   The software rasteriser stays as the reference oracle. *(ARCHITECTURE.md §2.)*
-2. **ImGui editor shell** — vendor Dear ImGui + ImGuizmo; port Spark's
+Status: ✅ done · ◻ remaining (GPU/display- or mangos-gated, the stated ceiling).
+
+1. ◻ **GPU RHI backend** — implement `rhi::Device` on OpenGL 3.3 (1.12-era target).
+   The software rasteriser stays as the reference oracle. *(ARCHITECTURE.md §2;
+   cannot be runtime-verified headless.)*
+2. ◻ **ImGui editor shell** — vendor Dear ImGui + ImGuizmo; port Spark's
    `EditorApplication`/dockspace/theme/panels subset (Part B.1). New CMake target
-   `wforge-editor`, gated like Spark's `ENABLE_EDITOR`.
-3. **MCAL write path** — per-layer 64×64 working buffer + brush + **re-encode**
-   (inverse of `decodeAlphaMap`), honoring the 63→64 fix. Unit-test round-trip
-   (decode→paint→encode→decode).
-4. **Terrain & object tools** — port Spark `TerrainEditor` brushes onto MCVT heights
-   and MCAL; wire `GizmoSystem` to MDDF/MODF placements (both rotation encodings).
-5. **MCLQ liquid parse** — add to `terrain.*` for water editing (least-documented;
-   validate byte layout against a real 1.12 ADT).
-6. **Editor↔mangos bridge** — WorldForge side: `EDITOR_*` op structs + connect/queue
-   (copy `LiveEditBridge` shape). mangos side: a `.worldforge` `ChatHandler` subtree
-   (MVP) → a queued binary channel drained at `Map::Update` head (D.1/D.4).
-7. **Persistence** — emit `creature`/`gameobject`/`creature_movement` rows (D.3).
+   `wforge-editor`, gated like Spark's `ENABLE_EDITOR`. *(needs a window/GL context.)*
+3. ✅ **MCAL write path** — `encodeAlphaMap` / `packAlphaLayers` (inverse of
+   `decodeAlphaMap`); round-trip tested. *(Renderer still owes the 63→64 edge fix
+   at draw time.)*
+4. ✅ **Terrain & object tool logic** — `editing` brushes over MCVT heights + MCAL
+   coverage; `gizmo` ray-pick / transform / snap for MDDF/MODF placement. The
+   ImGui/GL *presentation* of these is #2.
+5. ✅ **MCLQ liquid parse** — in `terrain.*` (`MclqLayer`, `LiquidType`). *(Byte
+   layout still to confirm against a real 1.12 ADT — flagged in C.4.)*
+6. ◑ **Editor↔mangos bridge** — ✅ WorldForge side: `editor_bridge` op structs +
+   framing. ◻ mangos side: a `.worldforge` `ChatHandler` subtree (MVP) → a queued
+   binary channel drained at `Map::Update` head (D.1/D.4); needs your mangos tree.
+7. ✅ **Persistence** — `db_export` emits `creature`/`gameobject`/`creature_movement`
+   SQL (D.3).
 
 ### E.3 Suggested first milestone
 
 A read-only **viewport**: GPU RHI backend renders a real ADT tile
-(`buildTileMesh` + multi-layer MCAL splat using the new write/working buffers in
-read mode) inside the ImGui shell, with WASD+RMB fly-cam and the Spark dark/teal
-theme. No server yet. This proves renderer + shell + texturing end-to-end and is
-fully verifiable offline — the same "runnable proof of the data path" discipline the
-project already follows. The live-server bridge is milestone two.
+(`buildTileMesh` + multi-layer MCAL splat) inside the ImGui shell, with WASD+RMB
+fly-cam and the Spark dark/teal theme. No server yet. The data path beneath it —
+mesh, texturing/encode, brushes, picking — is now all in-tree and tested; this
+milestone adds the GL backend + shell on top. The live-server bridge (editor side
+done) is milestone two.
 
 ---
 
