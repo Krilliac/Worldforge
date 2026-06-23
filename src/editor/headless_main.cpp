@@ -1,8 +1,9 @@
-// Headless editor: render the whole editor on the CPU -- the 3D scene via the
-// software rasteriser and the ImGui UI via the software backend -- and write a
-// PNG. This is WorldForge's NullRHI/llvmpipe fallback: the editor "runs" and is
-// screenshotted with no GPU or display. Proof the CPU path composites scene +
-// chrome end to end.
+// Headless editor: render the whole editor on the CPU -- the embedded 3D
+// viewport via the software rasteriser and the ImGui UI via the software backend
+// -- and write a PNG. WorldForge's NullRHI/llvmpipe fallback: the editor runs
+// and is screenshotted with no GPU or display. The scene is shown INSIDE a
+// Viewport panel (with a gizmo over a selected object), flanked by the
+// Atmosphere and Debug Visualisation panels.
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -11,9 +12,9 @@
 
 #include "editor/AtmospherePanel.hpp"
 #include "editor/DebugVisPanel.hpp"
+#include "editor/ViewportPanel.hpp"
 #include "editor/SoftwareImGui.hpp"
 
-#include "raster.hpp"
 #include "debugdraw.hpp"
 #include "image.hpp"
 #include "math.hpp"
@@ -27,11 +28,10 @@ static float heightAt(float x, float y) {
 
 int main() {
     const int W = 1280, H = 720;
+    const ImTextureID kAtlasTex = (ImTextureID)1;
+    const ImTextureID kSceneTex = (ImTextureID)2;
 
-    // --- 3D scene on the CPU rasteriser ------------------------------------
-    Framebuffer fb(W, H);
-    fb.clear(Rgba{ 18, 20, 28, 255 });
-
+    // --- terrain mesh + debug overlay --------------------------------------
     const int G = 90; const float span = 300.0f; const float step = span / (G - 1);
     Mesh mesh; mesh.vertices.resize(size_t(G) * G);
     for (int j = 0; j < G; ++j) for (int i = 0; i < G; ++i) {
@@ -43,23 +43,13 @@ int main() {
         uint32_t a=j*G+i, b=j*G+i+1, c=(j+1)*G+i, d=(j+1)*G+i+1;
         mesh.indices.insert(mesh.indices.end(), {a,b,c,b,d,c});
     }
-    Vec3 center{span*0.5f, span*0.5f, 8.0f};
-    Mat4 view = Mat4::lookAt(center + Vec3{-180,-180,150}, center, {0,0,1});
-    Mat4 proj = Mat4::perspective(55.0, double(W)/H, 1.0, 3000.0);
-    Mat4 mvp = proj * view;
-    rasterMesh(fb, mesh, mvp, Vec3{0.5f,0.4f,0.8f});
-
     DebugDraw dd;
     std::vector<Vec3> path;
     for (int k=0;k<=8;++k){ float x=40+k*28.f, y=150+50*std::sin(k*0.7f); path.push_back({x,y,heightAt(x,y)+2}); }
     dd.path(path, Rgba{255,220,60,255}, DebugCategory::Waypoint, true);
     dd.aabb({200,60,heightAt(200,60)}, {245,105,heightAt(222,82)+35}, Rgba{80,255,140,255}, DebugCategory::Trigger);
-    DebugDrawOptions opt; opt.depthTest = true;
-    rasterDebug(fb, dd, mvp, opt);
 
-    Image img = fb.color;   // the viewport is now the background
-
-    // --- ImGui UI on the CPU -----------------------------------------------
+    // --- ImGui (CPU) -------------------------------------------------------
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -69,10 +59,18 @@ int main() {
     ImGui::StyleColorsDark();
     unsigned char* atlas = nullptr; int aw = 0, ah = 0;
     io.Fonts->GetTexDataAsRGBA32(&atlas, &aw, &ah);
-    io.Fonts->SetTexID(static_cast<ImTextureID>(1));
+    io.Fonts->SetTexID(kAtlasTex);
 
     editor::AtmospherePanel atmosphere;
     editor::DebugVisPanel    debugVis;
+    editor::ViewportPanel    viewport(820, 540);
+    editor::GizmoController  giz;
+    giz.op = editor::GizmoController::Op::Translate;
+
+    // A selected doodad sitting on the terrain -> the gizmo draws over it.
+    Mat4 selected = Mat4::translate(Vec3{ 150.0f, 150.0f, heightAt(150,150) + 4.0f });
+
+    viewport.render(mesh, dd);
 
     ImGui::NewFrame();
     if (ImGui::BeginMainMenuBar()) {
@@ -81,19 +79,34 @@ int main() {
         ImGui::EndMainMenuBar();
     }
     std::vector<std::vector<uint8_t>> outgoing;
-    ImGui::SetNextWindowPos(ImVec2(20, 40), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(320, 420), ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImVec2(0, 24), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(300, H - 24), ImGuiCond_Always);
     atmosphere.draw(outgoing);
-    ImGui::SetNextWindowPos(ImVec2(W - 300, 40), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(280, 360), ImGuiCond_Always);
+
+    ImGui::SetNextWindowPos(ImVec2(308, 24), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(848, 580), ImGuiCond_Always);
+    viewport.draw(kSceneTex, giz, &selected);
+
+    ImGui::SetNextWindowPos(ImVec2(W - 280, 24), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(280, H - 24), ImGuiCond_Always);
     debugVis.draw(dd);
     ImGui::Render();
 
-    editor::renderImGuiSoftware(ImGui::GetDrawData(), img, atlas, aw, ah);
+    // Composite: dark desktop background, then ImGui (which samples the atlas
+    // for chrome and the scene texture for the viewport image).
+    Image img(W, H);
+    for (Rgba& p : img.pixels) p = Rgba{ 30, 32, 38, 255 };
+
+    editor::SoftwareImGuiRenderer renderer;
+    renderer.setTexture(kAtlasTex, { atlas, aw, ah });
+    renderer.setTexture(kSceneTex, {
+        reinterpret_cast<const unsigned char*>(viewport.scene().pixels.data()),
+        viewport.width(), viewport.height() });
+    renderer.render(ImGui::GetDrawData(), img);
     ImGui::DestroyContext();
 
     const char* out = "worldforge_editor.png";
     if (!writePng(img, out)) { std::fprintf(stderr, "write failed\n"); return 1; }
-    std::printf("wrote %s  (%dx%d, CPU scene + CPU ImGui)\n", out, W, H);
+    std::printf("wrote %s  (%dx%d, embedded CPU viewport + CPU ImGui)\n", out, W, H);
     return 0;
 }

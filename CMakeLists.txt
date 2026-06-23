@@ -148,6 +148,7 @@ if(WFORGE_EDITOR)
     src/editor/DebugVisPanel.cpp
     src/editor/GizmoController.cpp
     src/editor/SoftwareImGui.cpp
+    src/editor/ViewportPanel.cpp
   )
   target_include_directories(wforge-editor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(wforge-editor PUBLIC wforge imgui)
@@ -160,6 +161,7 @@ if(WFORGE_EDITOR)
     tests/editor/test_panels.cpp
     tests/editor/test_gizmo_controller.cpp
     tests/editor/test_software_imgui.cpp
+    tests/editor/test_viewport.cpp
   )
   target_link_libraries(wforge-editor-tests PRIVATE wforge-editor)
   target_include_directories(wforge-editor-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)

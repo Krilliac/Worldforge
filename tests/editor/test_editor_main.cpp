@@ -9,6 +9,7 @@
 void test_panels();
 void test_gizmo_controller();
 void test_software_imgui();
+void test_viewport();
 
 static void setupHeadlessImGui() {
     IMGUI_CHECKVERSION();
@@ -32,6 +33,7 @@ int main() {
     test_panels();
     test_gizmo_controller();
     test_software_imgui();
+    test_viewport();
     ImGui::DestroyContext();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
