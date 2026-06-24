@@ -86,7 +86,7 @@ LightEntry lightEntry(const Dbc& dbc, uint32_t rec) {
     e.z            = fieldF32(dbc, rec, 4);
     e.falloffStart = fieldF32(dbc, rec, 5);
     e.falloffEnd   = fieldF32(dbc, rec, 6);
-    for (uint32_t i = 0; i < 8; ++i) e.lightParams[i] = dbc.getU32(rec, 7 + i);
+    for (uint32_t i = 0; i < e.lightParams.size(); ++i) e.lightParams[i] = dbc.getU32(rec, 7 + i);
     return e;
 }
 

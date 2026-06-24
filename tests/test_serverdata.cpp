@@ -89,19 +89,25 @@ void test_dbc_defs() {
         CHECK(e.id == 5 && e.liquidId == 23 && e.type == 3);
     }
 
-    // --- Light.dbc: id, map, x,y,z, falloffStart/End, params[8] ---
+    // --- Light.dbc: id, map, x,y,z, falloffStart/End, params[5] ---
+    // Real vanilla 1.12 Light.dbc has exactly 12 fields => 5 LightParams refs
+    // (fields 7..11). Reading 8 params (the old layout) overran fields 12..14 and
+    // crashed on the real dbc; this fixture matches the real shape so the field
+    // count is a regression guard.
     {
-        std::vector<uint32_t> rec(15, 0);
+        std::vector<uint32_t> rec(12, 0);
         rec[0] = 1; rec[1] = 0;
         rec[2] = fbits(-9000.0f); rec[3] = fbits(100.0f); rec[4] = fbits(50.0f);
         rec[5] = fbits(0.0f); rec[6] = fbits(1000.0f);
-        rec[7] = 396; rec[14] = 7;
-        Dbc dbc = Dbc::parse(makeDbc(15, { rec }, std::string(1, '\0')));
+        rec[7] = 396; rec[11] = 7;                    // first and last LightParams
+        Dbc dbc = Dbc::parse(makeDbc(12, { rec }, std::string(1, '\0')));
+        CHECK(dbc.fieldCount() == 12);
         LightEntry e = lightEntry(dbc, 0);
         CHECK(e.id == 1 && e.mapId == 0);
         CHECK_APPROX(e.x, -9000.0f);
         CHECK_APPROX(e.falloffEnd, 1000.0f);
-        CHECK(e.lightParams[0] == 396 && e.lightParams[7] == 7);
+        CHECK(e.lightParams.size() == 5);
+        CHECK(e.lightParams[0] == 396 && e.lightParams[4] == 7);
     }
 }
 

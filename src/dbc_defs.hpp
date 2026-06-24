@@ -67,7 +67,10 @@ struct LightEntry {
     float    x = 0, y = 0, z = 0;          // fields 2,3,4 (game coords)
     float    falloffStart = 0;   // field 5
     float    falloffEnd   = 0;   // field 6
-    std::array<uint32_t, 8> lightParams{}; // fields 7..14 (LightParams.dbc refs)
+    // fields 7..11 -- 5 LightParams.dbc refs (clear-weather, fog, rain, ...).
+    // Vanilla 1.12 Light.dbc has exactly 12 fields, so there are 5 params, NOT 8;
+    // reading 8 walks past the record and the string block (verified vs real dbc).
+    std::array<uint32_t, 5> lightParams{};
 };
 
 // Typed accessors. `rec` is a 0-based record index in `[0, dbc.recordCount())`.
