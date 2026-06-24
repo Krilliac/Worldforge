@@ -225,9 +225,25 @@ bool renderTile(const wf::MpqManager& mpq, const std::string& map, int x, int y,
     wf::Vec3 c{ (lo.x+hi.x)*0.5f, (lo.y+hi.y)*0.5f, (lo.z+hi.z)*0.5f };
     float r = wf::length(hi - c) + 1.0f;
 
+    // Sky backdrop from the zone's resolved lighting: fog colour at the horizon,
+    // a brighter tint up top. Falls back to the default slate when no Light data.
+    auto u8 = [](float v) { return (uint8_t)std::clamp(v * 255.0f + 0.5f, 0.0f, 255.0f); };
+    wf::LightingSample sky = lights.lightingAt(c, mapId);
+    wf::Rgba horizon{ 24, 28, 40, 255 }, top{ 24, 28, 40, 255 };
+    if (sky.valid) {
+        horizon = wf::Rgba{ u8(sky.fog.x), u8(sky.fog.y), u8(sky.fog.z), 255 };
+        top     = wf::Rgba{ u8(sky.fog.x * 0.55f + 0.10f), u8(sky.fog.y * 0.55f + 0.16f),
+                            u8(sky.fog.z * 0.55f + 0.32f), 255 };
+    }
     const int W = 1024, H = 768;
     wf::Framebuffer fb(W, H);
-    fb.clear(wf::Rgba{ 24, 28, 40, 255 });
+    fb.clear(horizon);                       // also clears the depth buffer
+    for (int py = 0; py < H; ++py) {         // vertical sky gradient (top -> horizon)
+        const float ty = float(py) / float(H - 1);
+        auto mix = [&](uint8_t a, uint8_t b) { return (uint8_t)(a + (b - a) * ty + 0.5f); };
+        const wf::Rgba row{ mix(top.r, horizon.r), mix(top.g, horizon.g), mix(top.b, horizon.b), 255 };
+        for (int px = 0; px < W; ++px) fb.color.at(px, py) = row;
+    }
     wf::Mat4 view = wf::Mat4::lookAt(c + wf::Vec3{ r*0.9f, r*0.9f, r*0.8f }, c, { 0, 0, 1 });
     wf::Mat4 proj = wf::Mat4::perspective(55.0, double(W)/H, 1.0, r * 6.0 + 100.0);
     scene.renderLit(fb, proj * view, wf::Vec3{ 0.5f, 0.4f, 0.8f });
