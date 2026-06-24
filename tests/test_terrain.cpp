@@ -35,9 +35,11 @@ std::vector<uint8_t> makeMCNK(uint16_t holes, float baseZ, uint32_t idxX, uint32
     std::vector<uint8_t> mcvt;
     for (int i = 0; i < 145; ++i) putf(mcvt, (float)i);
 
-    // MCNR: 145 * int8[3] (X,Z,Y) all pointing straight up (0,127,0) + 13 pad.
+    // MCNR: 145 * int8[3] in file order (x,y,z) all pointing straight up
+    // (0,0,127) + 13 pad. Matches real vanilla tiles where flat ground stores
+    // its up component in the LAST byte.
     std::vector<uint8_t> mcnr;
-    for (int i = 0; i < 145; ++i) { mcnr.push_back(0); mcnr.push_back(127); mcnr.push_back(0); }
+    for (int i = 0; i < 145; ++i) { mcnr.push_back(0); mcnr.push_back(0); mcnr.push_back(127); }
     for (int i = 0; i < 13; ++i) mcnr.push_back(0);
 
     // MCLY: one layer.
@@ -73,9 +75,10 @@ void test_terrain() {
     CHECK(mc.layers[0].textureId == 7 && mc.layers[0].effectId == 42);
     CHECK_APPROX(mc.heights[0],   0.0f);
     CHECK_APPROX(mc.heights[144], 144.0f);
-    // Normal (0,127,0) stored as X,Z,Y -> world up (+Z).
+    // Normal bytes (0,0,127) in file order (x,y,z) -> world up (+Z).
     CHECK_APPROX(mc.normals[0].z, 1.0f);
     CHECK_APPROX(mc.normals[0].x, 0.0f);
+    CHECK_APPROX(mc.normals[0].y, 0.0f);
 
     // --- mesh: full chunk, no holes ---
     Mesh full = buildChunkMesh(mc, /*blockX*/30, /*blockY*/30);
@@ -310,7 +313,8 @@ void test_terrain() {
         for (int i = 0; i < 145; ++i) putf(mcvt, (float)i);
 
         std::vector<uint8_t> mcnr;                       // 435 bytes, no padding here
-        for (int i = 0; i < 145; ++i) { mcnr.push_back(0); mcnr.push_back(127); mcnr.push_back(0); }
+        // file order (x,y,z): up component is the last byte (matches real tiles).
+        for (int i = 0; i < 145; ++i) { mcnr.push_back(0); mcnr.push_back(0); mcnr.push_back(127); }
 
         std::vector<uint8_t> mcly;                       // 2 layers * 16 bytes
         put32(mcly, 5); put32(mcly, 0);                  // layer0: base, no alpha

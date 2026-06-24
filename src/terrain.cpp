@@ -27,10 +27,16 @@ constexpr size_t kOffHoles      = 0x3C;
 constexpr size_t kOffOfsMCLQ    = 0x60;   // liquid sub-chunk offset
 constexpr size_t kOffPosition   = 0x68;
 
-// Unpack one int8 MCNR triple (stored order X, Z, Y; 127 == 1.0) to a Vec3 in
-// world axes (x=north, y=west, z=up).
-Vec3 unpackNormal(int8_t nx, int8_t nz, int8_t ny) {
-    return normalize(Vec3{ nx / 127.0f, ny / 127.0f, nz / 127.0f });
+// Unpack one int8 MCNR triple to a Vec3 in world axes (x=north, y=west, z=up).
+//
+// The three bytes are stored in file order (b0, b1, b2) and map straight to
+// (x, y, z); the up component is b2 (127 == 1.0). Verified against real vanilla
+// tiles: flat ground stores (0, 0, 127), i.e. the up axis is the *last* byte.
+// (An earlier reading treated the layout as X,Z,Y, which routed the up component
+// into world Y -- that made flat chunks face sideways and self-shadow into the
+// dark, flat, untextured-looking wedges seen in renders. See test_terrain.)
+Vec3 unpackNormal(int8_t b0, int8_t b1, int8_t b2) {
+    return normalize(Vec3{ b0 / 127.0f, b1 / 127.0f, b2 / 127.0f });
 }
 } // namespace
 
