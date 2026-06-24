@@ -283,11 +283,18 @@ static void parseMclq(MapChunk& mc, const uint8_t* data, uint32_t size) {
     // 2 floats + 81 verts * 8 bytes + 64 flag bytes = 720 bytes per layer.
     if (r.remaining() < 8u + 81u * 8u + 64u) return;
 
+    const bool isWater = (t == LiquidType::River || t == LiquidType::Ocean);
+
     MclqLayer L;
     L.minHeight = r.f32();
     L.maxHeight = r.f32();
     for (int i = 0; i < 81; ++i) {
-        r.skip(4);                // type-specific union (depth/flow or s,t coords)
+        // The 4-byte union is water {depth,flow0,flow1,filler} or magma {x,y}.
+        // For water the first byte is the depth (0..255) that drives shoreline
+        // transparency; magma/slime store texcoords we don't need here.
+        uint8_t b0 = r.u8();
+        r.skip(3);                // remaining union bytes (flow / texcoord tail)
+        L.depth[i]   = isWater ? b0 : 0;
         L.heights[i] = r.f32();   // height is always the last 4 bytes
     }
     for (int i = 0; i < 64; ++i) L.renderFlags[i] = r.u8();
@@ -367,6 +374,67 @@ Mesh buildChunkMesh(const MapChunk& mc, int blockX, int blockY) {
             mesh.indices.insert(mesh.indices.end(), { C, TR, BR });
             mesh.indices.insert(mesh.indices.end(), { C, BR, BL });
             mesh.indices.insert(mesh.indices.end(), { C, BL, TL });
+        }
+    }
+    return mesh;
+}
+
+Rgba liquidTint(LiquidType type) {
+    switch (type) {
+        case LiquidType::River: return Rgba{  40, 110, 180, 140 };  // translucent blue
+        case LiquidType::Ocean: return Rgba{  30,  90, 160, 150 };  // deeper blue
+        case LiquidType::Magma: return Rgba{ 235, 110,  25, 235 };  // emissive orange
+        case LiquidType::Slime: return Rgba{ 120, 175,  45, 220 };  // murky green
+        case LiquidType::None:  break;
+    }
+    return Rgba{ 0, 0, 0, 0 };
+}
+
+Mesh buildLiquidMesh(const MapChunk& mc, int blockX, int blockY) {
+    Mesh mesh;
+    if (!mc.hasLiquid) return mesh;
+
+    const MclqLayer& L = mc.liquid;
+
+    // Same outer-grid footprint as buildChunkMesh: indexX = west-east column,
+    // indexY = north-south row. Only Z changes -- use the liquid height.
+    const int   col    = static_cast<int>(mc.indexX);   // west-east
+    const int   row    = static_cast<int>(mc.indexY);   // north-south
+    const Vec3  corner = chunkCornerWorld(blockX, blockY, row, col, mc.position.z);
+    const float U      = static_cast<float>(UNIT_SIZE);
+
+    auto gridIdx = [](int i, int j) { return i * 9 + j; };   // 0..80, row-major
+
+    // 9x9 surface vertices: world XY identical to the terrain outer ring, Z from
+    // the stored liquid height (clamped to the layer's [min,max] envelope).
+    mesh.vertices.resize(81);
+    for (int i = 0; i < 9; ++i) {
+        for (int j = 0; j < 9; ++j) {
+            int idx = gridIdx(i, j);
+            float z = L.heights[idx];
+            if (z < L.minHeight) z = L.minHeight;
+            if (z > L.maxHeight) z = L.maxHeight;
+            mesh.vertices[idx].position = {
+                corner.x - i * U,   // X north: south -> lower
+                corner.y - j * U,   // Y west:  east  -> lower
+                z
+            };
+            mesh.vertices[idx].normal = { 0.0f, 0.0f, 1.0f };  // flat surface
+        }
+    }
+
+    // Two triangles per rendered 8x8 cell; skip cells the MCLQ mask flags as
+    // "don't render" (low nibble 0xF), so water covers only the wet cells.
+    mesh.indices.reserve(8 * 8 * 2 * 3);
+    for (int i = 0; i < 8; ++i) {
+        for (int j = 0; j < 8; ++j) {
+            if (!liquidTileRenders(L.renderFlags[i * 8 + j])) continue;
+            uint32_t TL = static_cast<uint32_t>(gridIdx(i,     j));
+            uint32_t TR = static_cast<uint32_t>(gridIdx(i,     j + 1));
+            uint32_t BL = static_cast<uint32_t>(gridIdx(i + 1, j));
+            uint32_t BR = static_cast<uint32_t>(gridIdx(i + 1, j + 1));
+            mesh.indices.insert(mesh.indices.end(), { TL, TR, BR });
+            mesh.indices.insert(mesh.indices.end(), { TL, BR, BL });
         }
     }
     return mesh;

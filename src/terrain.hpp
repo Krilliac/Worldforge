@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <vector>
 #include "math.hpp"
+#include "image.hpp"   // Rgba
 
 namespace wf {
 
@@ -45,11 +46,24 @@ struct MclqLayer {
     float minHeight = 0.0f;
     float maxHeight = 0.0f;
     std::array<float, 81>  heights{};      // 9x9 outer grid
+    std::array<uint8_t, 81> depth{};       // per-vertex water depth (0..255); 0 for magma/slime
     std::array<uint8_t, 64> renderFlags{}; // 8x8 tiles; low nibble 0xF == skip
 };
 
 // True if an MCLQ 8x8 tile flag indicates the tile should be drawn.
 inline bool liquidTileRenders(uint8_t flag) { return (flag & 0x0F) != 0x0F; }
+
+// Base translucent tint for a liquid category (RGBA). Water/ocean are a
+// semi-transparent blue; magma is a near-opaque emissive orange; slime a murky
+// green. These are deliberate placeholder tints (the real client derives them
+// from Light*Band.dbc water-color curves) -- enough to read the surface offline.
+Rgba liquidTint(LiquidType type);
+
+// True for liquids that glow (magma/slime): the render path skips directional
+// shading so they read as emissive rather than going dark on shadowed slopes.
+inline bool liquidEmissive(LiquidType type) {
+    return type == LiquidType::Magma || type == LiquidType::Slime;
+}
 
 struct MapChunk {
     uint32_t flags   = 0;
@@ -119,6 +133,15 @@ std::vector<MapChunk> parseChunks(const std::vector<uint8_t>& adtBuf);
 
 // Build a single chunk's world-space mesh (hole-aware).
 Mesh buildChunkMesh(const MapChunk& mc, int blockX, int blockY);
+
+// Build a chunk's liquid SURFACE mesh from its MCLQ layer: a 9x9 vertex grid at
+// the stored liquid heights, in the same world-XY footprint as buildChunkMesh
+// (only Z differs -- the liquid height, clamped to [minHeight,maxHeight]). Each
+// of the 64 8x8 cells emits two triangles ONLY when liquidTileRenders() is true
+// (the "don't render" mask is skipped), so dry land carries no water quads.
+// Vertex normals are +Z (a flat surface). Returns an empty mesh when the chunk
+// has no liquid. This is a separate, translucent pass -- never the opaque path.
+Mesh buildLiquidMesh(const MapChunk& mc, int blockX, int blockY);
 
 // Convenience: build one merged mesh for an entire tile.
 Mesh buildTileMesh(const std::vector<MapChunk>& chunks, int blockX, int blockY);
