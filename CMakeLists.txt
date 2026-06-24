@@ -31,6 +31,7 @@ FetchContent_MakeAvailable(stormlib)
 add_library(wforge STATIC
   src/mpq.cpp
   src/wow_files.cpp
+  src/wdl.cpp
   src/terrain.cpp
   src/image.cpp
   src/blp.cpp
@@ -111,6 +112,7 @@ add_executable(wforge-tests
   tests/test_math.cpp
   tests/test_coords.cpp
   tests/test_terrain.cpp
+  tests/test_wdl.cpp
   tests/test_blp.cpp
   tests/test_m2.cpp
   tests/test_m2_material.cpp
@@ -174,6 +176,10 @@ target_link_libraries(wforge-m2dump PRIVATE wforge)
 # world-space scene and render it to a PNG with no world server.
 add_executable(wforge-flythrough src/flythrough_demo.cpp)
 target_link_libraries(wforge-flythrough PRIVATE wforge)
+
+# Whole-map low-res overview from the .wdl heightfield (top-down elevation minimap).
+add_executable(wforge-minimap src/minimap_demo.cpp)
+target_link_libraries(wforge-minimap PRIVATE wforge)
 
 # ---------------------------------------------------------------------------
 # Editor: Dear ImGui panels. ImGui core compiles with no GPU/display (it only

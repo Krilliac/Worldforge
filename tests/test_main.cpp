@@ -3,6 +3,7 @@
 void test_math();
 void test_coords();
 void test_terrain();
+void test_wdl();
 void test_blp();
 void test_m2();
 void test_m2_material();
@@ -41,6 +42,7 @@ int main() {
     test_math();
     test_coords();
     test_terrain();
+    test_wdl();
     test_blp();
     test_m2();
     test_m2_material();
