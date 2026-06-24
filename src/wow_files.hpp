@@ -15,6 +15,10 @@ namespace wf {
 // WDT  --  which of the 64x64 ADT tiles actually exist for a map.
 // ===========================================================================
 struct Wdt {
+    // MPHD (SMMapHeader) flag bits we care about.
+    static constexpr uint32_t MPHD_GLOBAL_WMO = 0x1;   // WMO-only map (dungeon)
+    static constexpr uint32_t MPHD_BIG_ALPHA  = 0x4;   // MCAL alpha maps are 8-bit (4096 B)
+
     uint32_t mphdFlags = 0;
     bool     globalWmo = false;          // mphdFlags & 0x1  (WMO-only map, e.g. a dungeon)
     std::array<bool, 64 * 64> tiles{};   // index = y * 64 + x
@@ -23,6 +27,10 @@ struct Wdt {
         if (x < 0 || x >= 64 || y < 0 || y >= 64) return false;
         return tiles[static_cast<size_t>(y) * 64 + static_cast<size_t>(x)];
     }
+
+    // Whether this map's MCAL alpha maps use the 8-bit "big alpha" form (4096 B
+    // per layer) vs the vanilla packed 4-bit form (2048 B). Governed by MPHD.
+    bool bigAlpha() const { return (mphdFlags & MPHD_BIG_ALPHA) != 0; }
 };
 
 // Parse a WDT buffer. Throws std::runtime_error on malformed input.

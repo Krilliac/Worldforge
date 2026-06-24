@@ -97,7 +97,7 @@ std::vector<uint8_t> makeMcnk() {
     w32(0x0C, 1);                          // nLayers = 1
     std::vector<uint8_t> mcvt; for (int i=0;i<145;i++) pf(mcvt, 0.0f);
     std::vector<uint8_t> mcnr;
-    for (int i=0;i<145;i++){ mcnr.push_back(0); mcnr.push_back(127); mcnr.push_back(0); }
+    for (int i=0;i<145;i++){ mcnr.push_back(0); mcnr.push_back(0); mcnr.push_back(127); }
     for (int i=0;i<13;i++) mcnr.push_back(0);
     std::vector<uint8_t> mcly;
     p32(mcly, 0);  p32(mcly, 0); p32(mcly, 0); p32(mcly, 0);   // textureId 0, flags 0, ofs 0, effect 0
@@ -198,8 +198,8 @@ std::vector<uint8_t> makeAdt() {
     return adt;
 }
 
-std::vector<uint8_t> makeWdt() {
-    std::vector<uint8_t> mphd; p32(mphd, 0);            // flags = 0 (4-bit alpha)
+std::vector<uint8_t> makeWdt(uint32_t mphdFlags = 0) {
+    std::vector<uint8_t> mphd; p32(mphd, mphdFlags);    // bit 0x4 => 8-bit "big alpha"
     std::vector<uint8_t> main(64*64*8, 0);
     size_t e = (size_t)(32*64 + 32) * 8;                // tile (x=32,y=32)
     main[e] = 1;                                        // flags & 1 -> has ADT
@@ -207,6 +207,40 @@ std::vector<uint8_t> makeWdt() {
     chunk(wdt, "MPHD", mphd);
     chunk(wdt, "MAIN", main);
     return wdt;
+}
+
+// A 2-layer MCNK: base layer 0 + overlay layer 1 carrying an alpha map at
+// MCAL offset 0. `mcal` is the raw alpha blob (4096 B for 8-bit, 2048 B for
+// 4-bit) -- its interpretation is what the WDT big-alpha flag selects.
+std::vector<uint8_t> makeMcnk2Layer(const std::vector<uint8_t>& mcal) {
+    std::vector<uint8_t> hdr(128, 0);
+    auto w32 = [&](size_t off, uint32_t v){ for(int i=0;i<4;i++) hdr[off+i]=(v>>(8*i))&0xFF; };
+    w32(0x0C, 2);                          // nLayers = 2
+    std::vector<uint8_t> mcvt; for (int i=0;i<145;i++) pf(mcvt, 0.0f);
+    std::vector<uint8_t> mcnr;
+    for (int i=0;i<145;i++){ mcnr.push_back(0); mcnr.push_back(0); mcnr.push_back(127); }
+    for (int i=0;i<13;i++) mcnr.push_back(0);
+    std::vector<uint8_t> mcly;
+    // layer 0: textureId 0, flags 0, ofsAlpha 0, effect 0
+    p32(mcly, 0); p32(mcly, 0);            p32(mcly, 0); p32(mcly, 0);
+    // layer 1: textureId 0, flags MCLY_USE_ALPHA(0x100), ofsAlpha 0, effect 0
+    p32(mcly, 0); p32(mcly, MCLY_USE_ALPHA); p32(mcly, 0); p32(mcly, 0);
+    std::vector<uint8_t> body = hdr;
+    chunk(body, "MCVT", mcvt);
+    chunk(body, "MCNR", mcnr);
+    chunk(body, "MCLY", mcly);
+    chunk(body, "MCAL", mcal);
+    std::vector<uint8_t> out; chunk(out, "MCNK", body); return out;
+}
+
+// Minimal ADT carrying just MTEX + a single 2-layer MCNK (no placements).
+std::vector<uint8_t> makeAdt2Layer(const std::vector<uint8_t>& mcal) {
+    std::vector<uint8_t> mtex; for (char c : std::string("test.blp")) mtex.push_back((uint8_t)c); mtex.push_back(0);
+    std::vector<uint8_t> adt;
+    chunk(adt, "MTEX", mtex);
+    std::vector<uint8_t> mcnk = makeMcnk2Layer(mcal);
+    adt.insert(adt.end(), mcnk.begin(), mcnk.end());
+    return adt;
 }
 } // namespace
 
@@ -314,4 +348,69 @@ void test_asset() {
     CHECK(loader.buildTileScene("TestMap", 5, 5).terrain.empty());
 
     std::remove(mpqPath);
+
+    // --- WDT MPHD big-alpha flag drives the MCAL format selection -----------
+    // Same ramp blob byte k == (k & 0xFF). As 8-bit "big alpha" it is one byte
+    // per texel, so texel 1 decodes to 1. As packed 4-bit it is two texels per
+    // byte (low nibble first), so texel 1 is the *high* nibble of byte 0 (== 0).
+    {
+        std::vector<uint8_t> ramp(4096);
+        for (int k = 0; k < 4096; ++k) ramp[k] = static_cast<uint8_t>(k & 0xFF);
+
+        // parseWdt surfaces the flag, and Wdt::bigAlpha() derives from it.
+        CHECK(parseWdt(makeWdt(0x0)).bigAlpha() == false);
+        CHECK(parseWdt(makeWdt(0x4)).bigAlpha() == true);
+        CHECK(parseWdt(makeWdt(0x4)).mphdFlags == 0x4u);
+        CHECK(parseWdt(makeWdt(0x5)).globalWmo == true);   // 0x1 set alongside 0x4
+        CHECK(parseWdt(makeWdt(0x5)).bigAlpha() == true);
+
+        auto buildWith = [&](uint32_t mphdFlags) -> AlphaMap {
+            const char* p = "wforge_bigalpha_test.mpq";
+            std::vector<std::pair<std::string, std::vector<uint8_t>>> f = {
+                { "test.blp", makeRawBlp(2, 2, Rgba{40, 200, 60, 255}) },
+                { "World\\Maps\\BAMap\\BAMap.wdt", makeWdt(mphdFlags) },
+                { "World\\Maps\\BAMap\\BAMap_32_32.adt", makeAdt2Layer(ramp) },
+            };
+            CHECK(writeMpqArchive(p, f));
+            MpqManager m; CHECK(m.addArchive(p));
+            AssetLoader l(m);
+            // No explicit bigAlpha override -> auto-derived from the WDT MPHD flag.
+            TileRender tr = l.buildTile("BAMap", 32, 32);
+            CHECK(!tr.empty());
+            CHECK(tr.chunkAlphas.size() == 1 && tr.chunkAlphas[0].size() == 1);
+            AlphaMap am = tr.chunkAlphas[0][0];
+            std::remove(p);
+            return am;
+        };
+
+        AlphaMap packed4 = buildWith(0x0);    // flag clear -> packed 4-bit
+        AlphaMap big8    = buildWith(0x4);    // flag set   -> 8-bit big alpha
+
+        // Texel 0 is byte 0 == 0 in both forms.
+        CHECK(packed4.at(0, 0) == 0);
+        CHECK(big8.at(0, 0) == 0);
+        // Texel 1 is where the two formats diverge -- proof the flag was honoured.
+        CHECK(packed4.at(0, 1) == 0);         // high nibble of byte 0 (0x0) * 17
+        CHECK(big8.at(0, 1) == 1);            // byte 1 == 1
+        // A few more: byte 16 == 16 -> big alpha texel 16; 4-bit texel 16 = low
+        // nibble of byte 8 (== 8) * 17 == 136.
+        CHECK(big8.texels[16] == 16);
+        CHECK(packed4.texels[16] == 8 * 17);
+
+        // Explicit override still wins over the WDT flag (test/editor escape hatch).
+        {
+            const char* p = "wforge_bigalpha_ovr.mpq";
+            std::vector<std::pair<std::string, std::vector<uint8_t>>> f = {
+                { "test.blp", makeRawBlp(2, 2, Rgba{40, 200, 60, 255}) },
+                { "World\\Maps\\BAMap\\BAMap.wdt", makeWdt(0x0) },   // flag clear
+                { "World\\Maps\\BAMap\\BAMap_32_32.adt", makeAdt2Layer(ramp) },
+            };
+            CHECK(writeMpqArchive(p, f));
+            MpqManager m; CHECK(m.addArchive(p));
+            AssetLoader l(m);
+            TileRender tr = l.buildTile("BAMap", 32, 32, /*bigAlpha*/true);  // force 8-bit
+            CHECK(tr.chunkAlphas[0][0].at(0, 1) == 1);   // decoded as big alpha
+            std::remove(p);
+        }
+    }
 }

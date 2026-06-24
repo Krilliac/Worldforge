@@ -10,6 +10,7 @@
 // writeMpqArchive, then loading them back -- no copyrighted assets needed.
 // ---------------------------------------------------------------------------
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -105,27 +106,39 @@ public:
     AudioClip soundClip(const std::string& path) const;
 
     // Build a tile's textured terrain (MCNK meshes + MCAL splat layers from
-    // MTEX). bigAlpha selects the 8-bit vs 4-bit MCAL form (WDT MPHD flag).
-    TileRender buildTile(const std::string& map, int x, int y, bool bigAlpha = false);
+    // MTEX). bigAlpha selects the 8-bit vs 4-bit MCAL form; it is governed by the
+    // map's WDT MPHD "big alpha" flag (0x4). Pass std::nullopt (the default) to
+    // auto-derive it from the WDT -- the correct behaviour for real tiles. Pass
+    // an explicit value only to override (e.g. synthetic test fixtures).
+    TileRender buildTile(const std::string& map, int x, int y,
+                         std::optional<bool> bigAlpha = std::nullopt);
 
     // Build a fully-populated tile: terrain + every resolvable M2 doodad placed
     // by its MDDF transform; WMO placements get a marker (full WMO geometry is a
     // multi-file follow-up). Missing models are skipped, never fatal.
-    TileScene buildTileScene(const std::string& map, int x, int y, bool bigAlpha = false);
+    TileScene buildTileScene(const std::string& map, int x, int y,
+                             std::optional<bool> bigAlpha = std::nullopt);
+
+    std::shared_ptr<const Image> fallback();  // TEMP-PUBLIC-DBG (revert)
 
 private:
     static std::string wdtPath(const std::string& map);
     static std::string adtPath(const std::string& map, int x, int y);
-    std::shared_ptr<const Image> fallback();
 
     TileRender buildTerrain(const Adt& adt, const std::vector<MapChunk>& chunks,
                             int x, int y, bool bigAlpha);
+
+    // Resolve the effective bigAlpha for a map: honour an explicit override, else
+    // derive it from the map's WDT MPHD flag (0x4). Cached per map; defaults to
+    // false (vanilla packed 4-bit) if the WDT is missing/unreadable.
+    bool resolveBigAlpha(const std::string& map, std::optional<bool> override_);
 
     const MpqManager& mpq_;
     std::unordered_map<std::string, std::shared_ptr<const Image>>   texCache_;
     std::unordered_map<std::string, std::shared_ptr<const M2Model>> modelCache_;
     std::unordered_map<std::string, Aabb>                          boundsCache_;
     std::unordered_map<std::string, std::shared_ptr<const WmoModel>> wmoCache_;
+    std::unordered_map<std::string, bool>                          bigAlphaCache_;
     std::shared_ptr<const Image> fallback_;
 };
 

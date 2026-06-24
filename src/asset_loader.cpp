@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 
 #include "blp.hpp"
 #include "coords.hpp"
@@ -187,11 +188,22 @@ AudioClip AssetLoader::soundClip(const std::string& path) const {
     return makeClip(path, buf);
 }
 
-TileRender AssetLoader::buildTile(const std::string& map, int x, int y, bool bigAlpha) {
+bool AssetLoader::resolveBigAlpha(const std::string& map, std::optional<bool> override_) {
+    if (override_) return *override_;            // explicit caller override
+    auto it = bigAlphaCache_.find(map);
+    if (it != bigAlphaCache_.end()) return it->second;
+    Wdt wdt;
+    bool big = loadWdt(map, wdt) ? wdt.bigAlpha() : false;
+    bigAlphaCache_.emplace(map, big);
+    return big;
+}
+
+TileRender AssetLoader::buildTile(const std::string& map, int x, int y,
+                                  std::optional<bool> bigAlpha) {
     Adt adt;
     std::vector<MapChunk> chunks;
     if (!loadAdt(map, x, y, adt, chunks)) return TileRender{};   // empty
-    return buildTerrain(adt, chunks, x, y, bigAlpha);
+    return buildTerrain(adt, chunks, x, y, resolveBigAlpha(map, bigAlpha));
 }
 
 TileRender AssetLoader::buildTerrain(const Adt& adt, const std::vector<MapChunk>& chunks,
@@ -210,9 +222,25 @@ TileRender AssetLoader::buildTerrain(const Adt& adt, const std::vector<MapChunk>
     tile.chunkAlphas.resize(chunks.size());
     tile.chunkLayers.resize(chunks.size());
 
+    static const bool DBG = std::getenv("WF_DBG_TERRAIN") != nullptr;
+    auto avgBright = [](const Image* im) -> int {
+        if (!im || im->pixels.empty()) return -1;
+        long s = 0; for (const Rgba& p : im->pixels) s += (long)p.r + p.g + p.b;
+        return (int)(s / (3 * (long)im->pixels.size()));
+    };
+
     for (size_t c = 0; c < chunks.size(); ++c) {
         const MapChunk& mc = chunks[c];
         tile.chunkMeshes.push_back(buildChunkTexMesh(mc, x, y));
+
+        if (DBG && !mc.layers.empty()) {
+            uint32_t bid = mc.layers[0].textureId;
+            const char* bname = (bid < adt.textures.size()) ? adt.textures[bid].c_str() : "?";
+            const Image* bim = texFor(bid);
+            std::fprintf(stderr, "BLD chunk=%zu nLayers=%zu base[id=%u bright=%d %dx%d] %s\n",
+                         c, mc.layers.size(), bid, avgBright(bim),
+                         bim?bim->width:-1, bim?bim->height:-1, bname);
+        }
 
         std::vector<TerrainLayer>& layers = tile.chunkLayers[c];
         std::vector<AlphaMap>&     alphas = tile.chunkAlphas[c];
@@ -233,13 +261,14 @@ TileRender AssetLoader::buildTerrain(const Adt& adt, const std::vector<MapChunk>
     return tile;
 }
 
-TileScene AssetLoader::buildTileScene(const std::string& map, int x, int y, bool bigAlpha) {
+TileScene AssetLoader::buildTileScene(const std::string& map, int x, int y,
+                                      std::optional<bool> bigAlpha) {
     TileScene ts;
     Adt adt;
     std::vector<MapChunk> chunks;
     if (!loadAdt(map, x, y, adt, chunks)) return ts;   // empty
 
-    ts.terrain = buildTerrain(adt, chunks, x, y, bigAlpha);
+    ts.terrain = buildTerrain(adt, chunks, x, y, resolveBigAlpha(map, bigAlpha));
 
     // Each resolvable M2 doodad becomes a skinned (bind-pose) mesh instance,
     // transformed into world space by its MDDF placement. A missing or malformed

@@ -20,7 +20,7 @@ Wdt parseWdt(const std::vector<uint8_t>& buf) {
             if (c.size >= 4) {
                 ByteReader r(c.data, c.size);
                 wdt.mphdFlags = r.u32();
-                wdt.globalWmo = (wdt.mphdFlags & 0x1) != 0;
+                wdt.globalWmo = (wdt.mphdFlags & Wdt::MPHD_GLOBAL_WMO) != 0;
             }
         } else if (c.magic == "MAIN") {
             // 64*64 entries of 8 bytes: { uint32 flags; uint32 asyncId }.
