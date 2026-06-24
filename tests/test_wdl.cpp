@@ -57,4 +57,33 @@ void test_wdl() {
     std::vector<uint8_t> empty; chunk(empty, "MVER", mver);
     Wdl e = parseWdl(empty);
     CHECK(e.tileCount() == 0);
+
+    // --- two present tiles at distinct indices, with gaps absent between them ---
+    {
+        const int ax = 5, ay = 3, bx = 10, by = 20;
+        std::vector<uint8_t> mA, mB;
+        for (int i = 0; i < Wdl::N; ++i) put16(mA, (uint16_t)(int16_t)i);          // 0..288
+        for (int i = 0; i < 16 * 16; ++i) put16(mA, 0);
+        for (int i = 0; i < Wdl::N; ++i) put16(mB, (uint16_t)(int16_t)(1000 + i));  // 1000..
+        for (int i = 0; i < 16 * 16; ++i) put16(mB, 0);
+
+        std::vector<uint8_t> f2;
+        chunk(f2, "MVER", mver);
+        std::vector<uint8_t> maof2(64 * 64 * 4, 0);
+        const size_t maofStart = f2.size();
+        chunk(f2, "MAOF", maof2);
+        const size_t aStart = f2.size(); chunk(f2, "MARE", mA);
+        const size_t bStart = f2.size(); chunk(f2, "MARE", mB);
+        auto patch = [&](int idx, size_t v) { for (int i = 0; i < 4; ++i) f2[maofStart + 8 + (size_t)idx * 4 + i] = (uint8_t)((v >> (8 * i)) & 0xFF); };
+        patch(ay * 64 + ax, aStart);
+        patch(by * 64 + bx, bStart);
+
+        Wdl w2 = parseWdl(f2);
+        CHECK(w2.tileCount() == 2);
+        CHECK(w2.tilePresent(ax, ay) && w2.tilePresent(bx, by));
+        CHECK(!w2.tilePresent(ax, by) && !w2.tilePresent(bx, ay));   // gaps absent
+        CHECK(w2.height(ax, ay, 0, 0) == 0);
+        CHECK(w2.height(bx, by, 0, 0) == 1000);
+        CHECK(w2.height(bx, by, 1, 0) == 1017);                     // row1col0 = 1000+17
+    }
 }
