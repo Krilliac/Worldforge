@@ -234,4 +234,29 @@ void test_wmo() {
         CHECK(p.mesh.indices.size() == 3);             // one triangle each
     }
     CHECK(sawWall && sawEmpty);
+
+    // --- ClientProfile version gate -------------------------------------------
+    // A minimal root with an MVER chunk: v17 parses, a newer version fails loud
+    // under the vanilla profile but parses under a profile that allows it.
+    {
+        auto makeWmoVer = [](uint32_t ver) {
+            std::vector<uint8_t> mver; put32(mver, ver);
+            std::vector<uint8_t> mohd(64, 0);          // counts/bbox/flags, all zero
+            std::vector<uint8_t> w;
+            chunk(w, "MVER", mver);
+            chunk(w, "MOHD", mohd);
+            return w;
+        };
+        CHECK(parseWmoRoot(makeWmoVer(17)).version == 17);   // vanilla v17 parses
+
+        bool threw = false;
+        try { parseWmoRoot(makeWmoVer(18)); } catch (const std::exception&) { threw = true; }
+        CHECK(threw);                                        // vanilla profile rejects v18
+
+        ClientProfile prof = vanilla1121Profile();
+        prof.wmoVersion = 18;
+        bool ok = true;
+        try { (void)parseWmoRoot(makeWmoVer(18), prof); } catch (...) { ok = false; }
+        CHECK(ok);                                           // a profile allowing v18 parses it
+    }
 }

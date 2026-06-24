@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include "math.hpp"
+#include "client_version.hpp"
 
 namespace wf {
 
@@ -46,6 +47,7 @@ struct WmoGroupInfo {                 // MOGI entry
 };
 
 struct WmoRoot {
+    uint32_t version = 0;   // MVER (17 for vanilla..Cata); 0 if no MVER chunk
     uint32_t nTextures = 0, nGroups = 0, nPortals = 0, nLights = 0;
     uint32_t nDoodadNames = 0, nDoodadDefs = 0, nDoodadSets = 0;
     uint16_t flags = 0;
@@ -58,7 +60,11 @@ struct WmoRoot {
     std::vector<WmoDoodad>    doodads;          // MODD
 };
 
-WmoRoot parseWmoRoot(const std::vector<uint8_t>& buf);
+// Parse a WMO root file. `profile` gates the WMO version this client understands
+// (vanilla..Cata = 17); a newer root fails loud. Defaults to the vanilla profile
+// so existing callers are unaffected.
+WmoRoot parseWmoRoot(const std::vector<uint8_t>& buf,
+                     const ClientProfile& profile = vanilla1121Profile());
 
 // ---- group ----
 struct WmoBatch {                     // MOBA entry

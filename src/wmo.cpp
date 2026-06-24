@@ -32,13 +32,15 @@ std::vector<std::string> splitBlob(const std::vector<char>& blob, uint32_t expec
 
 } // namespace
 
-WmoRoot parseWmoRoot(const std::vector<uint8_t>& buf) {
+WmoRoot parseWmoRoot(const std::vector<uint8_t>& buf, const ClientProfile& profile) {
     WmoRoot root;
     std::vector<char> motx, modn, mogn;
 
     forEachChunk(buf.data(), buf.size(), [&](const Chunk& c) {
         ByteReader r(c.data, c.size);
-        if (c.magic == "MOHD") {
+        if (c.magic == "MVER") {
+            root.version = r.u32();
+        } else if (c.magic == "MOHD") {
             root.nTextures    = r.u32();
             root.nGroups      = r.u32();
             root.nPortals     = r.u32();
@@ -109,6 +111,12 @@ WmoRoot parseWmoRoot(const std::vector<uint8_t>& buf) {
     for (WmoDoodad& d : root.doodads)     d.modelName      = strAt(modn, d.nameOffset);
     for (WmoGroupInfo& g : root.groups)
         if (g.nameOffset >= 0) g.name = strAt(mogn, static_cast<uint32_t>(g.nameOffset));
+
+    // The client profile gates the WMO version: vanilla..Cata are v17. A newer
+    // root (when an MVER is present and exceeds the profile) fails loud rather than
+    // mis-parsing. version == 0 means no MVER chunk -> no gate (older test fixtures).
+    if (root.version != 0 && root.version > profile.wmoVersion)
+        throw std::runtime_error("WMO version newer than the client profile supports");
 
     return root;
 }
