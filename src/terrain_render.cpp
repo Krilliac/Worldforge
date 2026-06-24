@@ -60,25 +60,6 @@ void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
     int W = fb.color.width, H = fb.color.height;
     Vec3 Lr = normalize(lightDir);
 
-    // --- TEMP DEBUG ---
-    static const bool DBG = std::getenv("WF_DBG_TERRAIN") != nullptr;
-    static int dbgChunk = -1;
-    if (DBG) ++dbgChunk;
-    long dbgPix = 0, dbgDark = 0, dbgSkipInvalid = 0, dbgBackface = 0;
-    bool dbgFirstIsFallback = (!layers.empty() && layers[0].texture &&
-                               layers[0].texture->width == 8 && layers[0].texture->height == 8);
-    float dbgZmin = 1e30f, dbgZmax = -1e30f;
-    long dbgR = 0, dbgG = 0, dbgB = 0;
-    double dbgNx = 0, dbgNy = 0, dbgNz = 0; double dbgLitSum = 0; long dbgLitN = 0;
-    if (DBG) {
-        for (const TexVertex& vtx : mesh.vertices) {
-            dbgNx += vtx.normal.x; dbgNy += vtx.normal.y; dbgNz += vtx.normal.z;
-            dbgLitSum += 0.4 + 0.6 * std::max(0.0f, dot(normalize(vtx.normal), Lr));
-            ++dbgLitN;
-        }
-    }
-    // --- END TEMP DEBUG ---
-
     struct VOut { Vec4 clip; bool valid; };
     std::vector<VOut> vo(mesh.vertices.size());
     for (size_t i = 0; i < mesh.vertices.size(); ++i) {
@@ -94,7 +75,7 @@ void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
 
     for (size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
         uint32_t i0 = mesh.indices[t], i1 = mesh.indices[t+1], i2 = mesh.indices[t+2];
-        if (!vo[i0].valid || !vo[i1].valid || !vo[i2].valid) { if (DBG) ++dbgSkipInvalid; continue; }
+        if (!vo[i0].valid || !vo[i1].valid || !vo[i2].valid) continue;
         float x0,y0,z0,iw0, x1,y1,z1,iw1, x2,y2,z2,iw2;
         toScreen(vo[i0].clip, x0,y0,z0,iw0);
         toScreen(vo[i1].clip, x1,y1,z1,iw1);
@@ -135,26 +116,9 @@ void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                 c.a = 255;
                 dref = z;
                 fb.color.at(px, py) = c;
-                if (DBG) {
-                    ++dbgPix; dbgR += c.r; dbgG += c.g; dbgB += c.b;
-                    if ((int)c.r + c.g + c.b < 90) ++dbgDark;
-                    dbgZmin = std::min(dbgZmin, z); dbgZmax = std::max(dbgZmax, z);
-                }
             }
         }
     }
-    if (DBG && dbgPix > 0) {
-        long darkPct = dbgDark * 100 / dbgPix;
-        if (darkPct > 30 || dbgFirstIsFallback || dbgChunk < 2 || dbgChunk == 100) {
-            std::fprintf(stderr,
-                "DBG chunk=%d layers=%zu fallbackBase=%d pix=%ld dark%%=%ld "
-                "avgRGB=(%ld,%ld,%ld) z=[%.4f,%.4f] avgN=(%.2f,%.2f,%.2f) avgLit=%.2f skipInvalid=%ld\n",
-                dbgChunk, layers.size(), (int)dbgFirstIsFallback, dbgPix, darkPct,
-                dbgR/dbgPix, dbgG/dbgPix, dbgB/dbgPix, dbgZmin, dbgZmax,
-                dbgNx/dbgLitN, dbgNy/dbgLitN, dbgNz/dbgLitN, dbgLitSum/dbgLitN, dbgSkipInvalid);
-        }
-    }
-    (void)dbgBackface;
 }
 
 } // namespace wf

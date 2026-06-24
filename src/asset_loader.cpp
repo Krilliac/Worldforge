@@ -230,13 +230,6 @@ TileRender AssetLoader::buildTerrain(const Adt& adt, const std::vector<MapChunk>
     tile.chunkAlphas.resize(chunks.size());
     tile.chunkLayers.resize(chunks.size());
 
-    static const bool DBG = std::getenv("WF_DBG_TERRAIN") != nullptr;
-    auto avgBright = [](const Image* im) -> int {
-        if (!im || im->pixels.empty()) return -1;
-        long s = 0; for (const Rgba& p : im->pixels) s += (long)p.r + p.g + p.b;
-        return (int)(s / (3 * (long)im->pixels.size()));
-    };
-
     for (size_t c = 0; c < chunks.size(); ++c) {
         const MapChunk& mc = chunks[c];
         tile.chunkMeshes.push_back(buildChunkTexMesh(mc, x, y));
@@ -252,15 +245,6 @@ TileRender AssetLoader::buildTerrain(const Adt& adt, const std::vector<MapChunk>
                                          liquidEmissive(mc.liquidType),
                                          mc.liquidType });
             }
-        }
-
-        if (DBG && !mc.layers.empty()) {
-            uint32_t bid = mc.layers[0].textureId;
-            const char* bname = (bid < adt.textures.size()) ? adt.textures[bid].c_str() : "?";
-            const Image* bim = texFor(bid);
-            std::fprintf(stderr, "BLD chunk=%zu nLayers=%zu base[id=%u bright=%d %dx%d] %s\n",
-                         c, mc.layers.size(), bid, avgBright(bim),
-                         bim?bim->width:-1, bim?bim->height:-1, bname);
         }
 
         std::vector<TerrainLayer>& layers = tile.chunkLayers[c];
