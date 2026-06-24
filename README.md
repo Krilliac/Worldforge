@@ -27,8 +27,17 @@ cmake --build build -j$(nproc)
 ./build/wforge-model-viewer      # animated M2 in a model-viewer panel -> PNG
 ./build/wforge-terrain-demo      # textured terrain (MCAL grass+rock splat) -> PNG
 ./build/wforge-stub-server [port]   # run the standalone bridge server (no mangos)
-./build/wforge-dump <DataDir> <Map> [x y] [--render tile.png]   # inspect/render a real MPQ tile
+./build/wforge-dump <DataDir> <Map> [x y] [--render tile.png] [--dbc <Name>]   # inspect/render a real MPQ tile (zone-lit, with sky)
+./build/wforge-m2dump <DataDir> <archived\path.m2> [out.png]   # parse + render one real M2 model
+./build/wforge-flythrough <DataDir> <Map> <cx> <cy> [N] [out.png]   # stitch an NxN block of real tiles -> one zone-lit scene with sky
+./build/wforge-minimap <DataDir> <Map> [out.png] [cell]   # whole-continent elevation minimap from the .wdl heightfield
 ```
+
+Real-asset rendering uses the client's `Light.dbc` for zone-appropriate lighting and a
+sky backdrop; pass a WoW install root (next to `Wow.exe`), a `Data` dir, or `.` for the
+`<DataDir>` argument. Multi-expansion is scaffolded behind `ClientProfile`
+(`src/client_version.hpp`, threaded through the M2/WMO parsers); only vanilla 1.12.1 is
+implemented and every other version fails loud.
 
 No GPU? The editor has a **CPU/NullRHI fallback**: the software rasteriser
 (`rhi_software`) draws the 3D scene and a software ImGui backend
