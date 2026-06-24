@@ -1,5 +1,7 @@
 #include "test.hpp"
 #include "m2.hpp"
+#include "m2_render.hpp"
+#include "bounds.hpp"
 
 #include <cstring>
 #include <vector>
@@ -95,4 +97,31 @@ void test_m2() {
 
     // The resolve chain (triangle -> lookup -> global vertex) is consistent.
     CHECK(m.resolveVertex(m.triangles[2]) == 2);
+
+    // Every submesh draw range must stay inside the view's lookup/triangle lists
+    // (an out-of-range start/count is the classic "exploded mesh" symptom on a
+    // wrong stride). This mirrors the real-data sanity check in wforge-m2dump.
+    for (const M2Submesh& s : m.submeshes) {
+        CHECK(size_t(s.vertexStart) + s.vertexCount <= m.vertexLookup.size());
+        CHECK(size_t(s.indexStart)  + s.indexCount  <= m.triangles.size());
+    }
+
+    // ---- skinning + bounds (the bind-pose path the M2 render tool exercises) ----
+    // With an empty pose, skinM2 yields the static bind pose: one TexMesh vertex
+    // per lookup entry, a multiple-of-3 index count, and every index in range.
+    TexMesh mesh = skinM2(m, {});
+    CHECK(mesh.vertices.size() == m.vertexLookup.size());
+    CHECK(mesh.indices.size() % 3 == 0);
+    CHECK(mesh.indices.size() == m.triangles.size());
+    for (uint32_t idx : mesh.indices) CHECK(idx < mesh.vertices.size());
+    // The skinned positions follow the global vertices through the lookup.
+    CHECK_APPROX(mesh.vertices[2].position.x, 2.0f);   // lookup[2] -> global vtx 2
+    CHECK_APPROX(mesh.vertices[2].position.z, 6.0f);
+
+    // Model-local bounds are non-degenerate and enclose the bind-pose vertices.
+    Aabb box = modelBounds(m);
+    CHECK(box.valid());
+    CHECK(box.radius() > 0.0f);
+    CHECK_APPROX(box.min.x, 0.0f);   // verts span x in [0,2], y [0,4], z [0,6]
+    CHECK_APPROX(box.max.z, 6.0f);
 }

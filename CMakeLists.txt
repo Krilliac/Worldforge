@@ -161,6 +161,11 @@ target_link_libraries(wforge-debug-demo PRIVATE wforge)
 add_executable(wforge-terrain-demo src/terrain_demo.cpp)
 target_link_libraries(wforge-terrain-demo PRIVATE wforge)
 
+# M2 model geometry validation on real vanilla models: parse + skin a bind pose,
+# report vertex/triangle/bone counts + bounds, and render the model to a PNG.
+add_executable(wforge-m2dump src/m2_demo.cpp)
+target_link_libraries(wforge-m2dump PRIVATE wforge)
+
 # ---------------------------------------------------------------------------
 # Editor: Dear ImGui panels. ImGui core compiles with no GPU/display (it only
 # emits draw data), so the panels + a headless smoke test build everywhere.
