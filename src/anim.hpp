@@ -19,6 +19,8 @@ inline Vec3 interpolate(const Vec3& a, const Vec3& b, float f) {
     return { a.x + (b.x-a.x)*f, a.y + (b.y-a.y)*f, a.z + (b.z-a.z)*f };
 }
 inline Quat interpolate(const Quat& a, const Quat& b, float f) { return slerp(a, b, f); }
+// Scalar lerp, used by fixed16 material tracks (alpha / texture-weight).
+inline float interpolate(float a, float b, float f) { return a + (b - a) * f; }
 
 // A single animation's keyframes for one channel.
 template <typename T>
@@ -44,6 +46,51 @@ struct KeyTrack {
         return interpolate(values[i], values[i + 1], f);
     }
 };
+
+// Sample a raw (single-array + per-animation ranges) channel with optional
+// global-sequence support -- the on-disk M2Track shape used by bone, color,
+// alpha and texture-weight tracks alike. `Channel` must expose `interp`,
+// `globalSeq`, `ranges` ([first,last] index pairs), `times` (ms) and `values`.
+//
+// Behaviour mirrors WoWModelViewer's Animated<T>::getValue:
+//   * globalSeq >= 0 : ignore the current animation; sample over the WHOLE
+//     track at `globalTimeMs % globalSeqs[globalSeq]` (0 if duration is 0).
+//   * otherwise      : slice to ranges[animIndex] (or the whole track if no
+//     range is present) and sample at `animTimeMs`.
+// Interpolation type 0 = step, anything else = linear (lerp/slerp).
+template <typename Channel, typename T>
+T sampleChannel(const Channel& ch, int animIndex, uint32_t animTimeMs,
+                uint32_t globalTimeMs, const std::vector<uint32_t>& globalSeqs,
+                const T& fallback) {
+    if (ch.times.empty()) return fallback;
+
+    size_t first = 0, last = ch.times.size() - 1;
+    uint32_t t = animTimeMs;
+
+    if (ch.globalSeq >= 0) {
+        // Global sequence: whole-track sampling on a looped global clock.
+        size_t gs = static_cast<size_t>(ch.globalSeq);
+        uint32_t dur = (gs < globalSeqs.size()) ? globalSeqs[gs] : 0;
+        t = (dur > 0) ? (globalTimeMs % dur) : 0;
+    } else if (animIndex >= 0 && static_cast<size_t>(animIndex) < ch.ranges.size()) {
+        first = ch.ranges[animIndex].first;
+        last  = ch.ranges[animIndex].second;
+    }
+    if (first >= ch.times.size()) return fallback;
+    if (last >= ch.times.size()) last = ch.times.size() - 1;
+    if (last < first) return ch.values[first];
+
+    if (first == last)                 return ch.values[first];
+    if (t <= ch.times[first])          return ch.values[first];
+    if (t >= ch.times[last])           return ch.values[last];
+
+    size_t i = first;
+    while (i + 1 <= last && ch.times[i + 1] <= t) ++i;
+    if (ch.interp == 0) return ch.values[i];     // step
+    uint32_t t0 = ch.times[i], t1 = ch.times[i + 1];
+    float f = (t1 > t0) ? float(t - t0) / float(t1 - t0) : 0.0f;
+    return interpolate(ch.values[i], ch.values[i + 1], f);
+}
 
 struct Bone {
     int  parent = -1;           // index into the bone array, -1 for root

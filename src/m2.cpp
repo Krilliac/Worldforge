@@ -138,6 +138,17 @@ namespace {
 constexpr size_t kOffAnimations = 0x01C; // nAnimations, ofsAnimations
 constexpr size_t kOffBones      = 0x034; // nBones, ofsBones
 
+// Material-animation header arrays (vanilla version 0x100, verified against
+// getMaNGOS' layout). `nViews` is a SINGLE uint32 at 0x40, which shifts these
+// relative to a naive (count,offset)-pair read of every field.
+constexpr size_t kOffGlobalSeqs   = 0x010; // nGlobalSequences, ofs (uint32 ms each)
+constexpr size_t kOffColors       = 0x044; // nColors, ofsColors (ModelColorDef[])
+constexpr size_t kOffTransparency = 0x054; // nTransparency, ofs (ModelTransDef[])
+constexpr size_t kOffTransLookup  = 0x08C; // nTransparencyLookup, ofs (uint16[])
+
+constexpr size_t kColorStride = 0x38;      // ModelColorDef: 2 * AnimationBlock = 56
+constexpr size_t kTransStride = 0x1C;      // ModelTransDef:  1 * AnimationBlock = 28
+
 // VERIFY-AGAINST-REAL-FILE constants (vanilla specifics that differ across
 // sources). The parser logic below is independent of these; only the byte
 // strides depend on them, so a single real 1.12 .m2 confirms/adjusts them:
@@ -229,7 +240,104 @@ M2Animation parseM2Animation(const std::vector<uint8_t>& buf) {
         }
     }
 
+    // ---- material animation: global sequences + colors + texture-weights ----
+    // Value decoders. fixed16: int16 on disk, normalised by 32767 (matches WMV
+    // ShortToFloat and three-m2loader value/0x7fff).
+    auto readVec3    = [](ByteReader& b){ return Vec3{ b.f32(), b.f32(), b.f32() }; };
+    auto readFixed16 = [](ByteReader& b){
+        return static_cast<float>(static_cast<int16_t>(b.u16())) / 32767.0f;
+    };
+
+    // global sequences (uint32 ms durations)
+    {
+        r.seek(kOffGlobalSeqs);
+        uint32_t n = r.u32(), ofs = r.u32();
+        if (n && static_cast<size_t>(ofs) + static_cast<size_t>(n) * 4 <= buf.size()) {
+            ByteReader g(buf.data() + ofs, n * 4);
+            for (uint32_t i = 0; i < n; ++i) out.globalSeqs.push_back(g.u32());
+        }
+    }
+
+    // colors: ModelColorDef[] = { AnimationBlock rgb (Vec3); AnimationBlock alpha (fixed16) }
+    {
+        r.seek(kOffColors);
+        uint32_t n = r.u32(), ofs = r.u32();
+        if (n && static_cast<size_t>(ofs) + static_cast<size_t>(n) * kColorStride <= buf.size()) {
+            for (uint32_t i = 0; i < n; ++i) {
+                size_t base = ofs + i * kColorStride;
+                M2ColorRaw c;
+                c.rgb   = readChannel<Vec3 >(buf, base,             12, readVec3);
+                c.alpha = readChannel<float>(buf, base + kAnimBlock, 2, readFixed16);
+                out.colors.push_back(c);
+            }
+        }
+    }
+
+    // transparency / texture-weight: ModelTransDef[] = { AnimationBlock weight (fixed16) }
+    {
+        r.seek(kOffTransparency);
+        uint32_t n = r.u32(), ofs = r.u32();
+        if (n && static_cast<size_t>(ofs) + static_cast<size_t>(n) * kTransStride <= buf.size()) {
+            for (uint32_t i = 0; i < n; ++i) {
+                size_t base = ofs + i * kTransStride;
+                M2TextureWeightRaw w;
+                w.weight = readChannel<float>(buf, base, 2, readFixed16);
+                out.textureWeights.push_back(w);
+            }
+        }
+    }
+
+    // transparency lookup table (uint16 indices into textureWeights)
+    {
+        r.seek(kOffTransLookup);
+        uint32_t n = r.u32(), ofs = r.u32();
+        if (n && static_cast<size_t>(ofs) + static_cast<size_t>(n) * 2 <= buf.size()) {
+            ByteReader l(buf.data() + ofs, n * 2);
+            for (uint32_t i = 0; i < n; ++i) out.transparencyLookup.push_back(l.u16());
+        }
+    }
+
     return out;
+}
+
+// ===========================================================================
+// Material-animation sampling
+// ===========================================================================
+M2Tint sampleM2Color(const M2Animation& anim, int colorIndex,
+                     int animIndex, uint32_t animTimeMs, uint32_t globalTimeMs) {
+    M2Tint out;
+    if (colorIndex < 0 || static_cast<size_t>(colorIndex) >= anim.colors.size())
+        return out;                                   // identity tint
+    const M2ColorRaw& c = anim.colors[colorIndex];
+    out.rgb   = sampleChannel<RawChannel<Vec3>,  Vec3 >(
+                    c.rgb,   animIndex, animTimeMs, globalTimeMs, anim.globalSeqs, Vec3{1,1,1});
+    out.alpha = sampleChannel<RawChannel<float>, float>(
+                    c.alpha, animIndex, animTimeMs, globalTimeMs, anim.globalSeqs, 1.0f);
+    return out;
+}
+
+float sampleM2TextureWeight(const M2Animation& anim, int weightIndex,
+                            int animIndex, uint32_t animTimeMs, uint32_t globalTimeMs) {
+    if (weightIndex < 0) return 1.0f;
+    // Redirect through the transparency lookup table when present (indirection
+    // differs subtly across vanilla files; honour the lookup if it exists).
+    int idx = weightIndex;
+    if (!anim.transparencyLookup.empty()) {
+        if (static_cast<size_t>(weightIndex) >= anim.transparencyLookup.size()) return 1.0f;
+        idx = anim.transparencyLookup[weightIndex];
+    }
+    if (idx < 0 || static_cast<size_t>(idx) >= anim.textureWeights.size()) return 1.0f;
+    return sampleChannel<RawChannel<float>, float>(
+               anim.textureWeights[idx].weight, animIndex, animTimeMs,
+               globalTimeMs, anim.globalSeqs, 1.0f);
+}
+
+M2Tint sampleM2Tint(const M2Animation& anim, int colorIndex, int weightIndex,
+                    int animIndex, uint32_t animTimeMs, uint32_t globalTimeMs) {
+    M2Tint t = sampleM2Color(anim, colorIndex, animIndex, animTimeMs, globalTimeMs);
+    float w = sampleM2TextureWeight(anim, weightIndex, animIndex, animTimeMs, globalTimeMs);
+    t.alpha *= w;
+    return t;
 }
 
 // Slice each bone's raw channels down to one animation, producing pose-ready

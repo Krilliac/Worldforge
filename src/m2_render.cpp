@@ -60,4 +60,13 @@ TexMesh poseM2(const M2Model& model, const M2Animation& anim, int animIndex, uin
     return skinM2(model, pose);
 }
 
+M2Tint submeshTint(const M2Animation& anim, int colorIndex, int weightIndex,
+                   int animIndex, uint32_t animTimeMs, uint32_t globalTimeMs) {
+    // Delegate to the material-animation sampler: color RGB * (colorAlpha *
+    // textureWeight). The per-texel BLP alpha is multiplied later in the
+    // rasteriser, completing texelAlpha * colorAlpha * textureWeight.
+    return sampleM2Tint(anim, colorIndex, weightIndex,
+                        animIndex, animTimeMs, globalTimeMs);
+}
+
 } // namespace wf

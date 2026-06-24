@@ -83,9 +83,30 @@ struct M2BoneRaw {
     RawChannel<Vec3> scale;
 };
 
+// ---- material animation (color / alpha / texture-weight) ----
+// Color animations carry an animated RGB tint and a separate animated alpha;
+// texture-weight (a.k.a. transparency) animations carry an animated scalar
+// opacity. Both ride the same 28-byte AnimationBlock / M2Track machinery as
+// bones (RawChannel<T>) and may be driven by a global sequence. Alpha/weight
+// are stored on disk as fixed16 (int16, value/32767) and decoded to float here.
+struct M2ColorRaw {                 // ModelColorDef (56 bytes = 2 AnimationBlocks)
+    RawChannel<Vec3>  rgb;          // value type = Vec3 (linear 0..1)
+    RawChannel<float> alpha;        // value type = fixed16 -> float (0..1)
+};
+struct M2TextureWeightRaw {         // ModelTransDef (28 bytes = 1 AnimationBlock)
+    RawChannel<float> weight;       // value type = fixed16 -> float (0..1)
+};
+
 struct M2Animation {
     std::vector<M2Sequence> sequences;
     std::vector<M2BoneRaw>  bones;
+
+    // Material-level animation tracks + their lookup tables + the global
+    // sequence duration table. Parsed additively; empty on models without them.
+    std::vector<uint32_t>          globalSeqs;        // durations (ms) per global sequence
+    std::vector<M2ColorRaw>        colors;            // ModelColorDef[]   (nColors @ 0x44)
+    std::vector<M2TextureWeightRaw> textureWeights;   // ModelTransDef[]   (nTransparency @ 0x54)
+    std::vector<uint16_t>          transparencyLookup; // transparency_lookup_table (@ 0x8C)
 };
 
 // Parse sequences + bones from an M2 buffer.
@@ -93,5 +114,33 @@ M2Animation parseM2Animation(const std::vector<uint8_t>& buf);
 
 // Slice raw channels to one animation, producing pose-ready Bones (anim.hpp).
 std::vector<Bone> buildBonesForAnimation(const M2Animation& anim, int animIndex);
+
+// ---- material-animation sampling -------------------------------------------
+// A sampled material tint: an RGB color and a combined alpha. The alpha already
+// folds colorAlpha * textureWeight; the renderer additionally multiplies the
+// per-texel BLP alpha to get final pixel alpha (texelAlpha*colorAlpha*weight).
+struct M2Tint {
+    Vec3  rgb   = {1, 1, 1};
+    float alpha = 1.0f;
+};
+
+// Sample a color animation `colorIndex` (into anim.colors) at the given times.
+// `animIndex` selects the per-animation keyframe range; `animTimeMs` is the
+// time within that animation; `globalTimeMs` drives any global-sequence track.
+// Returns {1,1,1,1} for an out-of-range index (no animation -> identity tint).
+M2Tint sampleM2Color(const M2Animation& anim, int colorIndex,
+                     int animIndex, uint32_t animTimeMs, uint32_t globalTimeMs);
+
+// Sample a texture-weight (transparency) animation. `weightIndex` may index the
+// textureWeights array directly, or -- when the transparency lookup table is
+// populated -- be redirected through it (resolved internally). Returns 1.0 for
+// an out-of-range index.
+float sampleM2TextureWeight(const M2Animation& anim, int weightIndex,
+                            int animIndex, uint32_t animTimeMs, uint32_t globalTimeMs);
+
+// Combined per-submesh tint: color.rgb, alpha = colorAlpha * textureWeight.
+// Pass the raw batch indices (colorIndex / textureWeightIndex, -1 if none).
+M2Tint sampleM2Tint(const M2Animation& anim, int colorIndex, int weightIndex,
+                    int animIndex, uint32_t animTimeMs, uint32_t globalTimeMs);
 
 } // namespace wf
