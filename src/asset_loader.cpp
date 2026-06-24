@@ -6,6 +6,7 @@
 
 #include "blp.hpp"
 #include "coords.hpp"
+#include "lighting.hpp"
 #include "m2_render.hpp"
 #include "wmo_render.hpp"
 
@@ -19,6 +20,16 @@ void TileRender::renderTerrain(Framebuffer& fb, const Mat4& mvp, Vec3 lightDir) 
 void TileRender::renderLiquid(Framebuffer& fb, const Mat4& mvp, Vec3 lightDir) const {
     for (const LiquidSurface& ls : liquids)
         rasterLiquidMesh(fb, ls.mesh, mvp, ls.tint, lightDir, ls.emissive);
+}
+
+void TileRender::renderTerrain(Framebuffer& fb, const Mat4& mvp, const ShadeLight& light) const {
+    for (size_t c = 0; c < chunkMeshes.size(); ++c)
+        rasterTerrainSplat(fb, chunkMeshes[c], mvp, chunkLayers[c], tiling, light);
+}
+
+void TileRender::renderLiquid(Framebuffer& fb, const Mat4& mvp, const ShadeLight& light) const {
+    for (const LiquidSurface& ls : liquids)
+        rasterLiquidMesh(fb, ls.mesh, mvp, ls.tint, light.dir, ls.emissive);
 }
 
 Mat4 doodadMatrix(const DoodadDef& d) {
@@ -45,6 +56,38 @@ void TileScene::render(Framebuffer& fb, const Mat4& viewProj, Vec3 lightDir) con
     terrain.renderLiquid(fb, viewProj, lightDir);
     DebugDrawOptions opt; opt.depthTest = true;
     rasterDebug(fb, markers, viewProj, opt);
+}
+
+void TileScene::renderLit(Framebuffer& fb, const Mat4& viewProj, Vec3 lightDir) const {
+    // Same composition as render(), but terrain + liquid use this tile's resolved
+    // zone lighting (ShadeLight ambient/diffuse) with the sun direction overridden.
+    // Object instances keep the directional shade (no per-instance colour grading).
+    ShadeLight tl = light;        tl.dir = lightDir;
+    ShadeLight ll = liquidLight;  ll.dir = lightDir;
+    terrain.renderTerrain(fb, viewProj, tl);
+    for (const Inst& in : instances)
+        rasterTexMesh(fb, meshes[in.mesh], viewProj * in.transform, *textures[in.tex], lightDir);
+    for (const Inst& in : wmoRenderInstances)
+        rasterTexMesh(fb, meshes[in.mesh], viewProj * in.transform, *textures[in.tex],
+                      lightDir, in.blend);
+    terrain.renderLiquid(fb, viewProj, ll);
+    DebugDrawOptions opt; opt.depthTest = true;
+    rasterDebug(fb, markers, viewProj, opt);
+}
+
+void AssetLoader::applyLighting(TileScene& ts, const LightDatabase& lights,
+                                uint32_t mapId, int x, int y, float dayTick) {
+    if (lights.empty()) return;
+    // World position at the tile centre. Tile (x,y) covers a TILE_SIZE square whose
+    // north/west edges are at (32 - x)/(32 - y) * TILE_SIZE (WoW Z-up world space).
+    const float wx = (32.0f - static_cast<float>(x) - 0.5f) * static_cast<float>(TILE_SIZE);
+    const float wy = (32.0f - static_cast<float>(y) - 0.5f) * static_cast<float>(TILE_SIZE);
+    LightingSample s = lights.lightingAt(Vec3{ wx, wy, 0.0f }, mapId, dayTick);
+    if (!s.valid) return;
+    ts.light.ambient      = s.ambient;
+    ts.light.diffuse      = s.diffuse;
+    ts.liquidLight.ambient = s.waterDark;
+    ts.liquidLight.diffuse = s.waterLight;
 }
 
 std::string AssetLoader::wdtPath(const std::string& map) {

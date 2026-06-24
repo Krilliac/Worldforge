@@ -17,6 +17,7 @@
 #include "client_data.hpp"
 #include "wow_files.hpp"
 #include "asset_loader.hpp"
+#include "lighting.hpp"
 #include "raster.hpp"
 #include "image.hpp"
 #include "math.hpp"
@@ -28,6 +29,15 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+
+// Parse DBFilesClient\<name>.dbc from the chain; empty Dbc if absent/malformed.
+static wf::Dbc loadDbc(const wf::MpqManager& mpq, const std::string& name) {
+    std::vector<uint8_t> buf; wf::Dbc d;
+    if (mpq.readFile("DBFilesClient\\" + name + ".dbc", buf)) {
+        try { d = wf::Dbc::parse(buf); } catch (...) {}
+    }
+    return d;
+}
 
 // Accumulate the world-space AABB of a tile's terrain into lo/hi.
 static void accumulateBounds(const wf::TileRender& t, wf::Vec3& lo, wf::Vec3& hi) {
@@ -64,6 +74,15 @@ int main(int argc, char** argv) {
     wf::Wdt wdt;
     if (!loader.loadWdt(map, wdt)) { std::fprintf(stderr, "WDT not found for map %s\n", map.c_str()); return 1; }
 
+    // Build the Light.dbc database so tiles render with zone-appropriate lighting
+    // (a no-op fallback to the legacy grey light if the tables are missing).
+    wf::Dbc light = loadDbc(mpq, "Light"), lparams = loadDbc(mpq, "LightParams");
+    wf::Dbc lint = loadDbc(mpq, "LightIntBand"), lfloat = loadDbc(mpq, "LightFloatBand");
+    wf::LightDatabase lights;
+    lights.build(&light, &lparams, &lint, &lfloat);
+    const uint32_t mapId = (map == "Kalimdor") ? 1u : 0u;   // Azeroth=0 default
+    if (!lights.empty()) std::printf("  (zone lighting: Light.dbc loaded)\n");
+
     // Build every present tile in the NxN block; keep them alive and accumulate bounds.
     std::vector<wf::TileScene> scenes;
     wf::Vec3 lo{ 1e30f, 1e30f, 1e30f }, hi{ -1e30f, -1e30f, -1e30f };
@@ -73,6 +92,7 @@ int main(int argc, char** argv) {
             if (!wdt.hasTile(x, y)) continue;
             wf::TileScene s = loader.buildTileScene(map, x, y);
             if (s.terrain.empty()) continue;
+            wf::AssetLoader::applyLighting(s, lights, mapId, x, y);   // zone light (noon)
             accumulateBounds(s.terrain, lo, hi);
             doodads += s.doodadCount();
             wmos    += s.wmoCount();
@@ -93,7 +113,7 @@ int main(int argc, char** argv) {
     wf::Mat4 proj = wf::Mat4::perspective(55.0, double(W)/H, 1.0, r * 6.0 + 100.0);
     wf::Mat4 vp = proj * view;
     for (const wf::TileScene& s : scenes)
-        s.render(fb, vp, wf::Vec3{ 0.5f, 0.4f, 0.8f });
+        s.renderLit(fb, vp, wf::Vec3{ 0.5f, 0.4f, 0.8f });   // zone-lit (Light.dbc)
 
     if (!wf::writePng(fb.color, outPng)) { std::fprintf(stderr, "write failed: %s\n", outPng.c_str()); return 1; }
     std::printf("## flythrough: wrote %s  (%zu tiles, %zu doodads, %zu wmos)\n",
