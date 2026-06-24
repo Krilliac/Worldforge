@@ -148,8 +148,6 @@ public:
     TileScene buildTileScene(const std::string& map, int x, int y,
                              std::optional<bool> bigAlpha = std::nullopt);
 
-    std::shared_ptr<const Image> fallback();  // TEMP-PUBLIC-DBG (revert)
-
     // Resolve zone lighting for a tile from a prebuilt LightDatabase and stamp it
     // into `ts.light` / `ts.liquidLight`. Samples the world position at the tile's
     // centre (block indices x,y) at `dayTick` (noon by default). A no-op (keeps the
@@ -163,6 +161,10 @@ private:
 
     TileRender buildTerrain(const Adt& adt, const std::vector<MapChunk>& chunks,
                             int x, int y, bool bigAlpha);
+
+    // Lazily-built 8x8 magenta/grey checker, returned for any missing/undecodable
+    // texture so rendering never fails hard.
+    std::shared_ptr<const Image> fallback();
 
     // Resolve the effective bigAlpha for a map: honour an explicit override, else
     // derive it from the map's WDT MPHD flag (0x4). Cached per map; defaults to
