@@ -112,6 +112,7 @@ add_executable(wforge-tests
   tests/test_terrain.cpp
   tests/test_blp.cpp
   tests/test_m2.cpp
+  tests/test_m2_material.cpp
   tests/test_wmo.cpp
   tests/test_anim.cpp
   tests/test_proto.cpp
@@ -126,6 +127,7 @@ add_executable(wforge-tests
   tests/test_serverdata.cpp
   tests/test_rhi.cpp
   tests/test_world_sim.cpp
+  tests/test_net.cpp
   tests/test_render.cpp
   tests/test_asset.cpp
   tests/test_client_data.cpp

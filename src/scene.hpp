@@ -38,6 +38,12 @@ struct Scene {
     std::vector<LiquidInstance> liquids;            // translucent liquid surfaces
     const DebugDraw*           debug   = nullptr;   // optional overlay
     Vec3 lightDir{ 0.5f, 0.4f, 0.8f };
+    // Zone lighting (Light.dbc) ambient/diffuse colours; defaults reproduce the
+    // legacy grey light for opaque (0.4/0.6) and liquid (0.5/0.5 sheen) passes.
+    // Populate from a resolved LightingSample to apply zone-appropriate light;
+    // leave default for the original fixed-light behaviour.
+    ShadeLight light;                                     // opaque terrain/objects
+    ShadeLight liquidLight{ {0.5f,0.4f,0.8f}, {0.5f,0.5f,0.5f}, {0.5f,0.5f,0.5f} };
 };
 
 // Render the scene into `fb` through `viewProj`: terrain first (lit/shaded),

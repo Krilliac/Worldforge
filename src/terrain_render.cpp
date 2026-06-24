@@ -57,8 +57,16 @@ inline uint8_t clamp8(float v) { return (uint8_t)std::clamp(v + 0.5f, 0.0f, 255.
 
 void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                         const std::vector<TerrainLayer>& layers, float tiling, Vec3 lightDir) {
+    // Legacy grey terrain light (ambient 0.4, diffuse 0.6) -- the ShadeLight default.
+    ShadeLight sl; sl.dir = lightDir;
+    rasterTerrainSplat(fb, mesh, mvp, layers, tiling, sl);
+}
+
+void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
+                        const std::vector<TerrainLayer>& layers, float tiling,
+                        const ShadeLight& light) {
     int W = fb.color.width, H = fb.color.height;
-    Vec3 Lr = normalize(lightDir);
+    Vec3 Lr = normalize(light.dir);
 
     struct VOut { Vec4 clip; bool valid; };
     std::vector<VOut> vo(mesh.vertices.size());
@@ -109,10 +117,10 @@ void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                 float v = (l0*V0.uv.y*iw0 + l1*V1.uv.y*iw1 + l2*V2.uv.y*iw2) / iw;
                 Vec3 n = (V0.normal*(l0*iw0) + V1.normal*(l1*iw1) + V2.normal*(l2*iw2)) * (1.0f/iw);
                 n = normalize(n);
-                float light = 0.4f + 0.6f * std::max(0.0f, dot(n, Lr));
+                Vec3 lf = light.shade(n, Lr);
 
                 Rgba c = splatSample(layers, u, v, tiling);
-                c.r = clamp8(c.r * light); c.g = clamp8(c.g * light); c.b = clamp8(c.b * light);
+                c.r = clamp8(c.r * lf.x); c.g = clamp8(c.g * lf.y); c.b = clamp8(c.b * lf.z);
                 c.a = 255;
                 dref = z;
                 fb.color.at(px, py) = c;

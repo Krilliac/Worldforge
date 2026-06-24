@@ -25,6 +25,7 @@
 #include "bounds.hpp"
 #include "debugdraw.hpp"
 #include "audio.hpp"
+#include "lighting.hpp"
 
 namespace wf {
 
@@ -59,9 +60,11 @@ struct TileRender {
     bool hasLiquid() const { return !liquids.empty(); }
     // Rasterise every chunk's terrain splat into `fb` through `mvp`.
     void renderTerrain(Framebuffer& fb, const Mat4& mvp, Vec3 lightDir) const;
+    void renderTerrain(Framebuffer& fb, const Mat4& mvp, const ShadeLight& light) const;
     // Composite every liquid surface (translucent) -- call AFTER renderTerrain
     // and the opaque object passes so blending reads the correct background.
     void renderLiquid(Framebuffer& fb, const Mat4& mvp, Vec3 lightDir) const;
+    void renderLiquid(Framebuffer& fb, const Mat4& mvp, const ShadeLight& light) const;
 };
 
 // A fully-populated tile: textured terrain + placed model instances + markers.
@@ -80,9 +83,19 @@ struct TileScene {
 
     DebugDraw markers;                                    // WMO/doodad placement markers
 
+    // Zone lighting (Light.dbc) resolved for this tile. Defaults reproduce the
+    // legacy fixed light; AssetLoader::applyLighting() populates it from the
+    // client's Light/LightParams/LightIntBand/LightFloatBand tables.
+    ShadeLight light;                                     // opaque terrain/objects
+    ShadeLight liquidLight{ {0.5f,0.4f,0.8f}, {0.5f,0.5f,0.5f}, {0.5f,0.5f,0.5f} };
+
     size_t doodadCount() const { return instances.size(); }
     size_t wmoCount()    const { return wmoInstances.size(); }
+    // Legacy fixed-light render (lightDir only -> grey ambient/diffuse).
     void render(Framebuffer& fb, const Mat4& viewProj, Vec3 lightDir) const;
+    // Zone-lit render: uses this tile's resolved `light` / `liquidLight`, with the
+    // sun direction overridden to `lightDir`.
+    void renderLit(Framebuffer& fb, const Mat4& viewProj, Vec3 lightDir) const;
 };
 
 class AssetLoader {
@@ -136,6 +149,13 @@ public:
                              std::optional<bool> bigAlpha = std::nullopt);
 
     std::shared_ptr<const Image> fallback();  // TEMP-PUBLIC-DBG (revert)
+
+    // Resolve zone lighting for a tile from a prebuilt LightDatabase and stamp it
+    // into `ts.light` / `ts.liquidLight`. Samples the world position at the tile's
+    // centre (block indices x,y) at `dayTick` (noon by default). A no-op (keeps the
+    // default grey light) when the database is empty or has no matching sky.
+    static void applyLighting(TileScene& ts, const LightDatabase& lights,
+                              uint32_t mapId, int x, int y, float dayTick = kNoonTick);
 
 private:
     static std::string wdtPath(const std::string& map);

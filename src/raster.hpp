@@ -5,6 +5,7 @@
 // data->image pipeline (parse -> mesh -> world transform -> camera -> pixels)
 // end to end with no GPU. Not a hot path; clarity over speed.
 // ---------------------------------------------------------------------------
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <vector>
@@ -27,6 +28,26 @@ struct Framebuffer {
     }
 };
 
+// Per-channel directional shading for the software path. The legacy fixed light
+// was a scalar `ambient + diffuse * max(0, dot(n,L))` applied equally to RGB;
+// zone lighting (Light.dbc) instead supplies coloured ambient + diffuse terms.
+// The default reproduces the legacy grey light exactly (ambient 0.4, diffuse
+// 0.6 per channel) so callers that pass nothing are unchanged.
+struct ShadeLight {
+    Vec3 dir{ 0.5f, 0.4f, 0.8f };          // directional light vector (world)
+    Vec3 ambient{ 0.4f, 0.4f, 0.4f };      // ambient colour (added)
+    Vec3 diffuse{ 0.6f, 0.6f, 0.6f };      // diffuse colour (× N·L)
+
+    // light contribution per channel for a surface normal n (already normalised
+    // L is taken from dir). Returns a per-channel multiplier in [0, ambient+diffuse].
+    Vec3 shade(const Vec3& n, const Vec3& Lnorm) const {
+        float d = std::max(0.0f, dot(n, Lnorm));
+        return { ambient.x + diffuse.x * d,
+                 ambient.y + diffuse.y * d,
+                 ambient.z + diffuse.z * d };
+    }
+};
+
 // Screen-space vertex: pixel x/y plus NDC depth.
 struct ScreenVert { float x, y, z; };
 
@@ -37,6 +58,8 @@ void fillTriangleSolid(Framebuffer& fb, const ScreenVert& a, const ScreenVert& b
 // Render a world-space mesh through `mvp`, lit by a directional light. Terrain
 // is shaded by slope + height so structure is visible without textures.
 void rasterMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp, Vec3 lightDir);
+// Coloured-light overload: ambient/diffuse come from zone lighting (Light.dbc).
+void rasterMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp, const ShadeLight& light);
 
 // A textured mesh vertex: position + normal + a texture coordinate.
 struct TexVertex { Vec3 position; Vec3 normal; Vec2 uv; };
@@ -55,6 +78,9 @@ Rgba sampleTextureWrap(const Image& tex, float u, float v);
 // it is the opaque alpha-tested path.
 void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                    const Image& texture, Vec3 lightDir, bool alphaBlend = false);
+// Coloured-light overload.
+void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
+                   const Image& texture, const ShadeLight& light, bool alphaBlend = false);
 
 // Render an untextured mesh as a single flat-tinted, alpha-blended surface --
 // the translucent liquid pass (ADT MCLQ water/ocean/magma/slime). `tint` is the
@@ -67,6 +93,9 @@ void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
 // opaque terrain + objects so blending composites correctly.
 void rasterLiquidMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp,
                       Rgba tint, Vec3 lightDir, bool emissive = false);
+// Coloured-light overload: the diffuse sheen uses the zone diffuse colour.
+void rasterLiquidMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp,
+                      Rgba tint, const ShadeLight& light, bool emissive = false);
 
 struct DebugDrawOptions {
     bool depthTest  = true;    // overlay respects the z-buffer (hidden by terrain)

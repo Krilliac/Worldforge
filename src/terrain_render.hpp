@@ -30,5 +30,9 @@ Rgba splatSample(const std::vector<TerrainLayer>& layers, float u, float v, floa
 // Rasterise a terrain TexMesh (uv = chunk 0..1) with the layer splat + lighting.
 void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                         const std::vector<TerrainLayer>& layers, float tiling, Vec3 lightDir);
+// Coloured-light overload: ambient/diffuse from zone lighting (Light.dbc).
+void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
+                        const std::vector<TerrainLayer>& layers, float tiling,
+                        const ShadeLight& light);
 
 } // namespace wf

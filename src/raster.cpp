@@ -46,8 +46,17 @@ void fillTriangleSolid(Framebuffer& fb, const ScreenVert& a, const ScreenVert& b
 }
 
 void rasterMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp, Vec3 lightDir) {
+    // Legacy grey terrain light: ambient 0.35, diffuse 0.65 (unchanged behaviour).
+    ShadeLight sl;
+    sl.dir = lightDir;
+    sl.ambient = { 0.35f, 0.35f, 0.35f };
+    sl.diffuse = { 0.65f, 0.65f, 0.65f };
+    rasterMesh(fb, mesh, mvp, sl);
+}
+
+void rasterMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp, const ShadeLight& light) {
     int W = fb.color.width, H = fb.color.height;
-    Vec3 L = normalize(lightDir);
+    Vec3 L = normalize(light.dir);
 
     // Precompute clip-space for all vertices.
     struct VOut { Vec4 clip; bool valid; };
@@ -107,16 +116,15 @@ void rasterMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp, Vec3 lightDi
                 Vec3 wp = (V0.position*(l0*iw0) + V1.position*(l1*iw1) + V2.position*(l2*iw2)) * (1.0f/iw);
                 n = normalize(n);
 
-                float diff = std::max(0.0f, dot(n, L));
-                float light = 0.35f + 0.65f * diff;              // ambient + diffuse
+                Vec3 lf = light.shade(n, L);                     // per-channel ambient+diffuse
 
                 // Height tint: low = green, high = grey/white (slope-aware).
                 float h = wp.z;
                 float t01 = std::min(1.0f, std::max(0.0f, (h - (-50.0f)) / 200.0f));
                 Rgba c;
-                c.r = clamp8((60 + 150*t01) * light);
-                c.g = clamp8((110 + 90*t01) * light);
-                c.b = clamp8((50 + 140*t01) * light);
+                c.r = clamp8((60 + 150*t01) * lf.x);
+                c.g = clamp8((110 + 90*t01) * lf.y);
+                c.b = clamp8((50 + 140*t01) * lf.z);
                 c.a = 255;
 
                 dref = z;
@@ -136,8 +144,15 @@ Rgba sampleTextureWrap(const Image& tex, float u, float v) {
 
 void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                    const Image& tex, Vec3 lightDir, bool alphaBlend) {
+    // Legacy grey model light (ambient 0.4, diffuse 0.6) -- the ShadeLight default.
+    ShadeLight sl; sl.dir = lightDir;
+    rasterTexMesh(fb, mesh, mvp, tex, sl, alphaBlend);
+}
+
+void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
+                   const Image& tex, const ShadeLight& light, bool alphaBlend) {
     int W = fb.color.width, H = fb.color.height;
-    Vec3 L = normalize(lightDir);
+    Vec3 L = normalize(light.dir);
 
     struct VOut { Vec4 clip; bool valid; };
     std::vector<VOut> vo(mesh.vertices.size());
@@ -194,12 +209,12 @@ void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
 
                 Vec3 n = (V0.normal*(l0*iw0) + V1.normal*(l1*iw1) + V2.normal*(l2*iw2)) * (1.0f/iw);
                 n = normalize(n);
-                float light = 0.4f + 0.6f * std::max(0.0f, dot(n, L));
+                Vec3 lf = light.shade(n, L);
 
                 Rgba c;
-                c.r = clamp8(texel.r * light);
-                c.g = clamp8(texel.g * light);
-                c.b = clamp8(texel.b * light);
+                c.r = clamp8(texel.r * lf.x);
+                c.g = clamp8(texel.g * lf.y);
+                c.b = clamp8(texel.b * lf.z);
                 if (alphaBlend) {
                     // Composite over the framebuffer; translucent -> no depth write.
                     float a = texel.a / 255.0f;
@@ -219,8 +234,18 @@ void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
 
 void rasterLiquidMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp,
                       Rgba tint, Vec3 lightDir, bool emissive) {
+    // Legacy water sheen is a neutral scalar 0.5 + 0.5*N·L: a ShadeLight with
+    // ambient 0.5 / diffuse 0.5 (white) reproduces it exactly.
+    ShadeLight sl; sl.dir = lightDir;
+    sl.ambient = { 0.5f, 0.5f, 0.5f };
+    sl.diffuse = { 0.5f, 0.5f, 0.5f };
+    rasterLiquidMesh(fb, mesh, mvp, tint, sl, emissive);
+}
+
+void rasterLiquidMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp,
+                      Rgba tint, const ShadeLight& light, bool emissive) {
     int W = fb.color.width, H = fb.color.height;
-    Vec3 L = normalize(lightDir);
+    Vec3 L = normalize(light.dir);
     const float alpha = tint.a / 255.0f;
 
     struct VOut { Vec4 clip; bool valid; };
@@ -270,18 +295,18 @@ void rasterLiquidMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp,
                 float& dref = fb.depth[(size_t)py*W + px];
                 if (z >= dref) continue;          // depth-test only; no depth write
 
-                float light = 1.0f;
+                Vec3 lf{ 1.0f, 1.0f, 1.0f };
                 if (!emissive) {
                     float iw = l0*iw0 + l1*iw1 + l2*iw2;
                     Vec3 n = (V0.normal*(l0*iw0) + V1.normal*(l1*iw1) + V2.normal*(l2*iw2)) * (1.0f/iw);
                     n = normalize(n);
-                    light = 0.5f + 0.5f * std::max(0.0f, dot(n, L));   // soft sheen
+                    lf = light.shade(n, L);                        // per-channel soft sheen
                 }
 
                 Rgba& d = fb.color.at(px, py);
-                d.r = clamp8(tint.r * light * alpha + d.r * (1.0f - alpha));
-                d.g = clamp8(tint.g * light * alpha + d.g * (1.0f - alpha));
-                d.b = clamp8(tint.b * light * alpha + d.b * (1.0f - alpha));
+                d.r = clamp8(tint.r * lf.x * alpha + d.r * (1.0f - alpha));
+                d.g = clamp8(tint.g * lf.y * alpha + d.g * (1.0f - alpha));
+                d.b = clamp8(tint.b * lf.z * alpha + d.b * (1.0f - alpha));
             }
         }
     }
