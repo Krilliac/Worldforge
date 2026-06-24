@@ -23,6 +23,7 @@
 #include "math.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -131,6 +132,29 @@ int main(int argc, char** argv) {
     wf::Mat4 vp = proj * view;
     for (const wf::TileScene& s : scenes)
         s.renderLit(fb, vp, wf::Vec3{ 0.5f, 0.4f, 0.8f });   // zone-lit (Light.dbc)
+
+    // Distance fog (post-process): blend rendered geometry toward the zone fog
+    // colour by view depth, so the far edge fades into the horizon. Sky pixels
+    // (depth == +inf) are left as the sky gradient. No-op without Light data.
+    if (sky.valid) {
+        float zmin = 1e30f, zmax = -1e30f;
+        for (float d : fb.depth)
+            if (std::isfinite(d)) { zmin = std::min(zmin, d); zmax = std::max(zmax, d); }
+        if (zmax > zmin) {
+            const float span = zmax - zmin, maxFog = 0.65f;
+            const wf::Rgba fog{ horizon.r, horizon.g, horizon.b, 255 };  // horizon = fog colour
+            for (int py = 0; py < H; ++py)
+                for (int px = 0; px < W; ++px) {
+                    const float d = fb.depth[(size_t)py * W + px];
+                    if (!std::isfinite(d)) continue;
+                    const float f = std::clamp((d - zmin) / span, 0.0f, 1.0f) * maxFog;
+                    wf::Rgba& cc = fb.color.at(px, py);
+                    cc.r = (uint8_t)(cc.r + (fog.r - cc.r) * f);
+                    cc.g = (uint8_t)(cc.g + (fog.g - cc.g) * f);
+                    cc.b = (uint8_t)(cc.b + (fog.b - cc.b) * f);
+                }
+        }
+    }
 
     if (!wf::writePng(fb.color, outPng)) { std::fprintf(stderr, "write failed: %s\n", outPng.c_str()); return 1; }
     std::printf("## flythrough: wrote %s  (%zu tiles, %zu doodads, %zu wmos)\n",
