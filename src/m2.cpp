@@ -41,7 +41,7 @@ std::string readCStr(const std::vector<uint8_t>& buf, uint32_t off, uint32_t cou
 
 } // namespace
 
-M2Model parseM2(const std::vector<uint8_t>& buf) {
+M2Model parseM2(const std::vector<uint8_t>& buf, const ClientProfile& profile) {
     ByteReader r(buf);
     if (buf.size() < 0x100) throw std::runtime_error("M2 too small for a header");
     if (r.fourccRaw() != "MD20") throw std::runtime_error("not an MD20 (M2) file");
@@ -49,6 +49,12 @@ M2Model parseM2(const std::vector<uint8_t>& buf) {
     M2Model m;
     r.seek(0x004);
     m.version = r.u32();
+
+    // The client profile gates which M2 versions this build can parse. Vanilla
+    // 1.12.1 is 0x100; a newer model (TBC 0x104+) fed to the vanilla profile fails
+    // loud rather than mis-parsing a layout this build does not yet understand.
+    if (m.version > profile.m2Version)
+        throw std::runtime_error("M2 version newer than the client profile supports");
 
     // name
     {

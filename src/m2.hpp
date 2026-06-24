@@ -14,6 +14,7 @@
 #include <vector>
 #include "math.hpp"
 #include "anim.hpp"
+#include "client_version.hpp"
 
 namespace wf {
 
@@ -54,7 +55,11 @@ struct M2Model {
 };
 
 // Parse an M2 buffer. Throws std::runtime_error on a non-MD20 / malformed file.
-M2Model parseM2(const std::vector<uint8_t>& buf);
+// Parse a vanilla MD20 (M2) model. `profile` gates which on-disk M2 version this
+// client understands (vanilla 1.12.1 = 0x100); a newer model fails loud. Defaults
+// to the vanilla profile so existing callers are unaffected.
+M2Model parseM2(const std::vector<uint8_t>& buf,
+                const ClientProfile& profile = vanilla1121Profile());
 
 // ---- animation (sequences + bones) ----
 // Vanilla M2Track uses per-animation interpolation ranges into single

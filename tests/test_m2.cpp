@@ -124,4 +124,23 @@ void test_m2() {
     CHECK(box.radius() > 0.0f);
     CHECK_APPROX(box.min.x, 0.0f);   // verts span x in [0,2], y [0,4], z [0,6]
     CHECK_APPROX(box.max.z, 6.0f);
+
+    // --- ClientProfile version gate -------------------------------------------
+    // A newer M2 (version 0x104, TBC) must fail loud under the vanilla profile,
+    // but parse under a profile that allows that version.
+    {
+        std::vector<uint8_t> tbc = f;
+        patch32(tbc, 0x004, 0x104);
+        bool threw = false;
+        try { parseM2(tbc); } catch (const std::exception&) { threw = true; }
+        CHECK(threw);                                  // default (vanilla) profile rejects 0x104
+
+        ClientProfile prof = vanilla1121Profile();
+        prof.m2Version = 0x104;
+        bool ok = true;
+        try { (void)parseM2(tbc, prof); } catch (...) { ok = false; }
+        CHECK(ok);                                     // a profile allowing 0x104 parses it
+
+        CHECK(parseM2(f).version == 0x100);            // vanilla model still parses by default
+    }
 }
