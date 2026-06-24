@@ -169,6 +169,11 @@ target_link_libraries(wforge-terrain-demo PRIVATE wforge)
 add_executable(wforge-m2dump src/m2_demo.cpp)
 target_link_libraries(wforge-m2dump PRIVATE wforge)
 
+# Offline multi-tile map overview: stitch an NxN block of real ADT tiles into one
+# world-space scene and render it to a PNG with no world server.
+add_executable(wforge-flythrough src/flythrough_demo.cpp)
+target_link_libraries(wforge-flythrough PRIVATE wforge)
+
 # ---------------------------------------------------------------------------
 # Editor: Dear ImGui panels. ImGui core compiles with no GPU/display (it only
 # emits draw data), so the panels + a headless smoke test build everywhere.
