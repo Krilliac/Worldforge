@@ -17,8 +17,14 @@ constexpr size_t kOffFlags      = 0x00;
 constexpr size_t kOffIndexX     = 0x04;
 constexpr size_t kOffIndexY     = 0x08;
 constexpr size_t kOffNLayers    = 0x0C;
+constexpr size_t kOffOfsMCVT    = 0x14;   // height map sub-chunk offset
+constexpr size_t kOffOfsMCNR    = 0x18;   // normal map sub-chunk offset
+constexpr size_t kOffOfsMCLY    = 0x1C;   // texture layer sub-chunk offset
+constexpr size_t kOffOfsMCAL    = 0x24;   // alpha map sub-chunk offset
+constexpr size_t kOffSizeMCAL   = 0x28;   // alpha map sub-chunk size
 constexpr size_t kOffAreaId     = 0x34;
 constexpr size_t kOffHoles      = 0x3C;
+constexpr size_t kOffOfsMCLQ    = 0x60;   // liquid sub-chunk offset
 constexpr size_t kOffPosition   = 0x68;
 
 // Unpack one int8 MCNR triple (stored order X, Z, Y; 127 == 1.0) to a Vec3 in
@@ -40,30 +46,109 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
 
     MapChunk mc;
     ByteReader h(data, kHdrSize);
-    h.seek(kOffFlags);   mc.flags  = h.u32();
-    h.seek(kOffIndexX);  mc.indexX = h.u32();
-    h.seek(kOffIndexY);  mc.indexY = h.u32();
-    h.seek(kOffAreaId);  mc.areaId = h.u32();
-    h.seek(kOffHoles);   mc.holes  = h.u16();
+    h.seek(kOffFlags);    mc.flags  = h.u32();
+    h.seek(kOffIndexX);   mc.indexX = h.u32();
+    h.seek(kOffIndexY);   mc.indexY = h.u32();
+    h.seek(kOffAreaId);   mc.areaId = h.u32();
+    h.seek(kOffHoles);    mc.holes  = h.u16();
     h.seek(kOffPosition);
     mc.position = { h.f32(), h.f32(), h.f32() };
 
-    // Sub-chunks (MCVT/MCNR/MCLY/MCAL/...) follow the header as standard
-    // magic+size chunks. Iterating them avoids the documented ambiguity over
-    // whether header offsets are relative to chunk-start or chunk-data.
-    const uint8_t* sub = data + kHdrSize;
+    auto u32At = [&](size_t off) -> uint32_t { ByteReader t(data, kHdrSize); t.seek(off); return t.u32(); };
+    const uint32_t nLayers = u32At(kOffNLayers);
+    const uint32_t ofsMCVT = u32At(kOffOfsMCVT);
+    const uint32_t ofsMCNR = u32At(kOffOfsMCNR);
+    const uint32_t ofsMCLY = u32At(kOffOfsMCLY);
+    const uint32_t ofsMCAL = u32At(kOffOfsMCAL);
+    const uint32_t szMCAL  = u32At(kOffSizeMCAL);
+    const uint32_t ofsMCLQ = u32At(kOffOfsMCLQ);
+
+    // Two ways to find the MCVT/MCNR/MCLY/MCAL/MCLQ sub-chunks:
+    //
+    //  (1) Real vanilla files pad MCNR with 13 bytes that its size field does NOT
+    //      count, so a linear magic+size walk desyncs at MCNR and loses every
+    //      sub-chunk after it. But those files always populate the MCNK header
+    //      offsets, so we jump straight to each sub-chunk by offset -- immune to
+    //      the padding. The offsets are documented ambiguously (relative to the
+    //      MCNK chunk start vs. its data); detect the base from MCVT's magic.
+    //
+    //  (2) Some writers leave the header offsets zero. There we fall back to the
+    //      linear walk, which is correct precisely because such files fold any
+    //      MCNR padding into the declared size.
+    const bool haveOffsets = ofsMCVT || ofsMCNR || ofsMCLY || ofsMCAL || ofsMCLQ;
+
+    if (haveOffsets) {
+        auto magicAt = [&](size_t pos) -> std::string {
+            if (pos + 8 > size) return std::string();
+            ByteReader t(data + pos, 8);
+            return t.fourccReversed();
+        };
+        long baseAdj = 0;
+        if (ofsMCVT && magicAt(ofsMCVT) != "MCVT" &&
+            ofsMCVT >= 8 && magicAt(ofsMCVT - 8) == "MCVT")
+            baseAdj = -8;
+
+        // {payload, size} for the sub-chunk at header offset `ofs`, verifying its
+        // magic. Size is taken from the sub-chunk header and clamped to the MCNK.
+        auto sub = [&](uint32_t ofs, const char* expect) -> std::pair<const uint8_t*, uint32_t> {
+            if (ofs == 0) return { nullptr, 0 };
+            long p = static_cast<long>(ofs) + baseAdj;
+            if (p < 0 || static_cast<size_t>(p) + 8 > size) return { nullptr, 0 };
+            ByteReader t(data + p, 8);
+            std::string m = t.fourccReversed();
+            uint32_t sz   = t.u32();
+            if (m != expect) return { nullptr, 0 };
+            const size_t payload = static_cast<size_t>(p) + 8;
+            if (payload + sz > size) sz = static_cast<uint32_t>(size - payload);
+            return { data + payload, sz };
+        };
+
+        if (auto [p, sz] = sub(ofsMCVT, "MCVT"); p) {
+            ByteReader r(p, sz);
+            for (int i = 0; i < 145 && r.remaining() >= 4; ++i) mc.heights[i] = r.f32();
+        }
+        if (auto [p, sz] = sub(ofsMCNR, "MCNR"); p) {
+            ByteReader r(p, sz);
+            for (int i = 0; i < 145 && r.remaining() >= 3; ++i) {
+                int8_t a  = static_cast<int8_t>(r.u8());
+                int8_t b  = static_cast<int8_t>(r.u8());
+                int8_t cc = static_cast<int8_t>(r.u8());
+                mc.normals[i] = unpackNormal(a, b, cc);
+            }
+        }
+        if (auto [p, sz] = sub(ofsMCLY, "MCLY"); p) {
+            ByteReader r(p, sz);
+            for (uint32_t i = 0; i < nLayers && r.remaining() >= 16; ++i) {
+                TexLayer l;
+                l.textureId = r.u32();
+                l.flags     = r.u32();
+                l.ofsAlpha  = r.u32();
+                l.effectId  = r.u32();
+                mc.layers.push_back(l);
+            }
+        }
+        if (auto [p, sz] = sub(ofsMCAL, "MCAL"); p) {
+            uint32_t n = std::min(sz, szMCAL ? szMCAL : sz);
+            mc.alpha.assign(p, p + n);
+        }
+        if (auto [p, sz] = sub(ofsMCLQ, "MCLQ"); p)
+            parseMclq(mc, p, sz);
+
+        return mc;
+    }
+
+    // Fallback: linear sub-chunk walk for files with no header offsets.
+    const uint8_t* subData = data + kHdrSize;
     size_t subLen = size - kHdrSize;
-    forEachChunk(sub, subLen, [&](const Chunk& c) {
+    forEachChunk(subData, subLen, [&](const Chunk& c) {
         if (c.magic == "MCVT") {
             ByteReader r(c.data, c.size);
-            for (int i = 0; i < 145 && r.remaining() >= 4; ++i)
-                mc.heights[i] = r.f32();
+            for (int i = 0; i < 145 && r.remaining() >= 4; ++i) mc.heights[i] = r.f32();
         } else if (c.magic == "MCNR") {
-            // 145 entries * 3 int8. (Trailing 13 padding bytes may follow.)
             ByteReader r(c.data, c.size);
             for (int i = 0; i < 145 && r.remaining() >= 3; ++i) {
-                int8_t a = static_cast<int8_t>(r.u8());
-                int8_t b = static_cast<int8_t>(r.u8());
+                int8_t a  = static_cast<int8_t>(r.u8());
+                int8_t b  = static_cast<int8_t>(r.u8());
                 int8_t cc = static_cast<int8_t>(r.u8());
                 mc.normals[i] = unpackNormal(a, b, cc);
             }

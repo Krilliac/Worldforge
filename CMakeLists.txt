@@ -5,6 +5,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# On Windows, socket/StormLib code pulls in <windows.h>, whose min/max macros
+# clobber std::min/std::max and whose bulk slows compiles. Suppress both engine-
+# wide so the same source builds clean on MSVC and MinGW as it does on GCC/Clang.
+if(WIN32)
+  add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 # ---------------------------------------------------------------------------
 # StormLib: battle-tested MPQ reader. Do NOT roll your own.
 # Pinned to a real release tag; bump deliberately and re-test.
@@ -66,6 +73,14 @@ target_include_directories(wforge PUBLIC
   ${stormlib_SOURCE_DIR}/src        # StormLib.h lives here
 )
 target_link_libraries(wforge PUBLIC storm)
+# StormLib.h (v9.31) emits an MSVC #pragma comment(lib, "StormLib<cfg>.lib") auto-
+# link directive (e.g. StormLibRAD.lib) in any consumer TU. That name never matches
+# the target's actual output ("StormLib.lib"), so MSVC fails with LNK1104. The header
+# gates this on __STORMLIB_NO_STATIC_LINK__ (StormLib's own sources self-suppress via
+# __STORMLIB_SELF__). Define it PUBLIC so mpq.cpp and every downstream target skip the
+# pragma and let CMake drive the linking. (The target's INTERFACE STORMLIB_NO_AUTO_LINK
+# is a no-op here -- that macro does not exist in this header version.)
+target_compile_definitions(wforge PUBLIC __STORMLIB_NO_STATIC_LINK__)
 
 add_executable(wforge-dump src/main.cpp)
 target_link_libraries(wforge-dump PRIVATE wforge)

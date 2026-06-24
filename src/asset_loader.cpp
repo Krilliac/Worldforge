@@ -1,5 +1,6 @@
 #include "asset_loader.hpp"
 
+#include <cctype>
 #include <cstdio>
 
 #include "blp.hpp"
@@ -91,7 +92,26 @@ bool AssetLoader::loadAdt(const std::string& map, int x, int y,
     return true;
 }
 
-std::shared_ptr<const M2Model> AssetLoader::model(const std::string& path) {
+namespace {
+// MDDF/MMDX reference models by their legacy ".mdx"/".mdl" name, but vanilla MPQs
+// store the converted models as ".m2". The client swaps the extension on lookup.
+std::string m2Path(const std::string& path) {
+    auto endsWith = [&](const char* ext) {
+        size_t n = std::char_traits<char>::length(ext);
+        if (path.size() < n) return false;
+        for (size_t i = 0; i < n; ++i)
+            if (std::tolower(static_cast<unsigned char>(path[path.size() - n + i])) != ext[i])
+                return false;
+        return true;
+    };
+    if (endsWith(".mdx") || endsWith(".mdl"))
+        return path.substr(0, path.size() - 4) + ".m2";
+    return path;
+}
+} // namespace
+
+std::shared_ptr<const M2Model> AssetLoader::model(const std::string& rawPath) {
+    const std::string path = m2Path(rawPath);
     auto it = modelCache_.find(path);
     if (it != modelCache_.end()) return it->second;
 

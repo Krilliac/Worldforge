@@ -294,4 +294,56 @@ void test_terrain() {
         CHECK(!liquidTileRenders(mcl.liquid.renderFlags[0]));  // 0x0F -> skip
         CHECK(liquidTileRenders(mcl.liquid.renderFlags[1]));   // 0x00 -> draw
     }
+
+    // --- real vanilla MCNK layout: header offsets + uncounted MCNR padding ---
+    // Reproduces the actual 1.12 file shape that a linear magic+size walk cannot
+    // parse: MCNR declares 435 bytes but is followed by 13 pad bytes outside its
+    // size, and the sub-chunks are located via the MCNK header offsets. A purely
+    // iterative parser desyncs at MCNR and drops MCLY/MCAL; the offset path must
+    // recover all of them.
+    {
+        std::vector<uint8_t> hdr(128, 0);
+        auto h32 = [&](size_t off, uint32_t v){ for(int i=0;i<4;i++) hdr[off+i]=(v>>(8*i))&0xFF; };
+        h32(0x0C, 2);          // nLayers (base + one alpha layer)
+
+        std::vector<uint8_t> mcvt;
+        for (int i = 0; i < 145; ++i) putf(mcvt, (float)i);
+
+        std::vector<uint8_t> mcnr;                       // 435 bytes, no padding here
+        for (int i = 0; i < 145; ++i) { mcnr.push_back(0); mcnr.push_back(127); mcnr.push_back(0); }
+
+        std::vector<uint8_t> mcly;                       // 2 layers * 16 bytes
+        put32(mcly, 5); put32(mcly, 0);                  // layer0: base, no alpha
+        put32(mcly, 0); put32(mcly, 0);
+        put32(mcly, 6); put32(mcly, MCLY_USE_ALPHA);     // layer1: alpha-mapped
+        put32(mcly, 0); put32(mcly, 0);                  // ofsAlpha=0, effectId=0
+
+        std::vector<uint8_t> mcal(2048, 0xFF);           // one 4-bit map, all opaque
+
+        // Assemble body = 128 header + sub-chunks, recording each sub-chunk's byte
+        // offset within the body (== offset from MCNK data start) into the header.
+        std::vector<uint8_t> body = hdr;
+        h32(0x14, (uint32_t)body.size()); chunk(body, "MCVT", mcvt);
+        h32(0x18, (uint32_t)body.size()); chunk(body, "MCNR", mcnr);
+        for (int i = 0; i < 13; ++i) body.push_back(0);  // MCNR pad NOT in its size
+        h32(0x1C, (uint32_t)body.size()); chunk(body, "MCLY", mcly);
+        h32(0x24, (uint32_t)body.size());                // ofsMCAL
+        h32(0x28, (uint32_t)mcal.size());                // sizeMCAL
+        chunk(body, "MCAL", mcal);
+        std::memcpy(body.data(), hdr.data(), 128);       // copy the finished header in
+
+        std::vector<uint8_t> adtR;
+        chunk(adtR, "MCNK", body);
+
+        auto rc = parseChunks(adtR);
+        CHECK(rc.size() == 1);
+        const MapChunk& r = rc[0];
+        CHECK_APPROX(r.heights[0],   0.0f);              // MCVT survived
+        CHECK_APPROX(r.heights[144], 144.0f);
+        CHECK(r.normals[0].z > 0.9f);                    // MCNR survived
+        CHECK(r.layers.size() == 2);                     // MCLY survived the MCNR pad
+        CHECK(r.layers[1].flags & MCLY_USE_ALPHA);
+        CHECK(r.alpha.size() == 2048);                   // MCAL survived
+        CHECK(decodeAlphaMap(r, 1, false).at(10, 10) == 255);
+    }
 }
