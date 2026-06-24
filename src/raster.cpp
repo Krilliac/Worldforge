@@ -217,6 +217,76 @@ void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
     }
 }
 
+void rasterLiquidMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp,
+                      Rgba tint, Vec3 lightDir, bool emissive) {
+    int W = fb.color.width, H = fb.color.height;
+    Vec3 L = normalize(lightDir);
+    const float alpha = tint.a / 255.0f;
+
+    struct VOut { Vec4 clip; bool valid; };
+    std::vector<VOut> vo(mesh.vertices.size());
+    for (size_t i = 0; i < mesh.vertices.size(); ++i) {
+        Vec4 c = mvp * Vec4(mesh.vertices[i].position, 1.0f);
+        vo[i] = { c, c.w > 1e-4f };
+    }
+    auto toScreen = [&](const Vec4& c, float& sx, float& sy, float& sz, float& invw) {
+        invw = 1.0f / c.w;
+        sx = (c.x * invw * 0.5f + 0.5f) * W;
+        sy = (1.0f - (c.y * invw * 0.5f + 0.5f)) * H;
+        sz = c.z * invw;
+    };
+
+    for (size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
+        uint32_t i0 = mesh.indices[t], i1 = mesh.indices[t+1], i2 = mesh.indices[t+2];
+        if (!vo[i0].valid || !vo[i1].valid || !vo[i2].valid) continue;
+
+        float x0,y0,z0,iw0, x1,y1,z1,iw1, x2,y2,z2,iw2;
+        toScreen(vo[i0].clip, x0,y0,z0,iw0);
+        toScreen(vo[i1].clip, x1,y1,z1,iw1);
+        toScreen(vo[i2].clip, x2,y2,z2,iw2);
+        float area = edge(x0,y0, x1,y1, x2,y2);
+        if (std::fabs(area) < 1e-6f) continue;
+
+        const Vertex& V0 = mesh.vertices[i0];
+        const Vertex& V1 = mesh.vertices[i1];
+        const Vertex& V2 = mesh.vertices[i2];
+
+        int minX = std::max(0,   (int)std::floor(std::min({x0,x1,x2})));
+        int maxX = std::min(W-1, (int)std::ceil (std::max({x0,x1,x2})));
+        int minY = std::max(0,   (int)std::floor(std::min({y0,y1,y2})));
+        int maxY = std::min(H-1, (int)std::ceil (std::max({y0,y1,y2})));
+
+        for (int py = minY; py <= maxY; ++py) {
+            for (int px = minX; px <= maxX; ++px) {
+                float fx = px + 0.5f, fy = py + 0.5f;
+                float w0 = edge(x1,y1, x2,y2, fx,fy);
+                float w1 = edge(x2,y2, x0,y0, fx,fy);
+                float w2 = edge(x0,y0, x1,y1, fx,fy);
+                bool inside = (w0 >= 0 && w1 >= 0 && w2 >= 0) || (w0 <= 0 && w1 <= 0 && w2 <= 0);
+                if (!inside) continue;
+                float l0 = w0/area, l1 = w1/area, l2 = w2/area;
+
+                float z = l0*z0 + l1*z1 + l2*z2;
+                float& dref = fb.depth[(size_t)py*W + px];
+                if (z >= dref) continue;          // depth-test only; no depth write
+
+                float light = 1.0f;
+                if (!emissive) {
+                    float iw = l0*iw0 + l1*iw1 + l2*iw2;
+                    Vec3 n = (V0.normal*(l0*iw0) + V1.normal*(l1*iw1) + V2.normal*(l2*iw2)) * (1.0f/iw);
+                    n = normalize(n);
+                    light = 0.5f + 0.5f * std::max(0.0f, dot(n, L));   // soft sheen
+                }
+
+                Rgba& d = fb.color.at(px, py);
+                d.r = clamp8(tint.r * light * alpha + d.r * (1.0f - alpha));
+                d.g = clamp8(tint.g * light * alpha + d.g * (1.0f - alpha));
+                d.b = clamp8(tint.b * light * alpha + d.b * (1.0f - alpha));
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Debug overlay: lines, point markers, translucent triangles.
 // ---------------------------------------------------------------------------

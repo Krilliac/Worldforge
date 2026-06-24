@@ -218,9 +218,12 @@ bool renderTile(const wf::MpqManager& mpq, const std::string& map, int x, int y,
     scene.render(fb, proj * view, wf::Vec3{ 0.5f, 0.4f, 0.8f });
 
     if (!wf::writePng(fb.color, outPng)) { std::fprintf(stderr, "render: write failed\n"); return false; }
-    std::printf("## render: wrote %s  (%zu chunks, %zu textures, %zu doodads)\n",
+    size_t liqTris = 0;
+    for (const wf::LiquidSurface& ls : tile.liquids) liqTris += ls.mesh.indices.size() / 3;
+    std::printf("## render: wrote %s  (%zu chunks, %zu textures, %zu doodads, "
+                "%zu liquid surfaces / %zu water tris)\n",
                 outPng.c_str(), tile.chunkMeshes.size(), tile.textures.size(),
-                scene.doodadCount());
+                scene.doodadCount(), tile.liquids.size(), liqTris);
     return true;
 }
 

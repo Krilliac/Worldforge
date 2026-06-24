@@ -6,6 +6,7 @@
 #include "math.hpp"
 #include "coords.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -233,6 +234,42 @@ std::vector<uint8_t> makeMcnk2Layer(const std::vector<uint8_t>& mcal) {
     std::vector<uint8_t> out; chunk(out, "MCNK", body); return out;
 }
 
+// A base-layer MCNK flagged as river with one MCLQ liquid sub-chunk: min/max
+// height envelope, 81 surface verts (height 5.0), and all 64 8x8 tiles set to
+// "render" (flag 0x00). buildLiquidMesh should emit 64*2 triangles from this.
+std::vector<uint8_t> makeMcnkLiquid() {
+    std::vector<uint8_t> hdr(128, 0);
+    auto w32 = [&](size_t off, uint32_t v){ for(int i=0;i<4;i++) hdr[off+i]=(v>>(8*i))&0xFF; };
+    w32(0x00, MCNK_LQ_RIVER);              // flags: river water
+    w32(0x0C, 1);                          // nLayers = 1
+    std::vector<uint8_t> mcvt; for (int i=0;i<145;i++) pf(mcvt, 0.0f);
+    std::vector<uint8_t> mcnr;
+    for (int i=0;i<145;i++){ mcnr.push_back(0); mcnr.push_back(0); mcnr.push_back(127); }
+    for (int i=0;i<13;i++) mcnr.push_back(0);
+    std::vector<uint8_t> mcly;
+    p32(mcly, 0); p32(mcly, 0); p32(mcly, 0); p32(mcly, 0);
+    std::vector<uint8_t> mclq;
+    pf(mclq, 0.0f); pf(mclq, 10.0f);                       // min/max height
+    for (int i=0;i<81;i++){ p32(mclq, 0); pf(mclq, 5.0f); } // union + height
+    for (int i=0;i<64;i++) mclq.push_back(0x00);            // every tile renders
+    std::vector<uint8_t> body = hdr;
+    chunk(body, "MCVT", mcvt);
+    chunk(body, "MCNR", mcnr);
+    chunk(body, "MCLY", mcly);
+    chunk(body, "MCLQ", mclq);
+    std::vector<uint8_t> out; chunk(out, "MCNK", body); return out;
+}
+
+// Minimal ADT carrying MTEX + a single river-liquid MCNK (no placements).
+std::vector<uint8_t> makeAdtLiquid() {
+    std::vector<uint8_t> mtex; for (char c : std::string("test.blp")) mtex.push_back((uint8_t)c); mtex.push_back(0);
+    std::vector<uint8_t> adt;
+    chunk(adt, "MTEX", mtex);
+    std::vector<uint8_t> mcnk = makeMcnkLiquid();
+    adt.insert(adt.end(), mcnk.begin(), mcnk.end());
+    return adt;
+}
+
 // Minimal ADT carrying just MTEX + a single 2-layer MCNK (no placements).
 std::vector<uint8_t> makeAdt2Layer(const std::vector<uint8_t>& mcal) {
     std::vector<uint8_t> mtex; for (char c : std::string("test.blp")) mtex.push_back((uint8_t)c); mtex.push_back(0);
@@ -255,6 +292,8 @@ void test_asset() {
         { "wmo\\Box_000.wmo", makeWmoGroup() },
         { "World\\Maps\\TestMap\\TestMap.wdt", makeWdt() },
         { "World\\Maps\\TestMap\\TestMap_32_32.adt", makeAdt() },
+        { "World\\Maps\\LiquidMap\\LiquidMap.wdt", makeWdt() },
+        { "World\\Maps\\LiquidMap\\LiquidMap_32_32.adt", makeAdtLiquid() },
     };
     CHECK(writeMpqArchive(mpqPath, files));
 
@@ -346,6 +385,57 @@ void test_asset() {
     TileRender none = loader.buildTile("TestMap", 5, 5);
     CHECK(none.empty());
     CHECK(loader.buildTileScene("TestMap", 5, 5).terrain.empty());
+
+    // --- liquid tile: the built scene carries a translucent water surface ----
+    {
+        TileRender lt = loader.buildTile("LiquidMap", 32, 32);
+        CHECK(!lt.empty());
+        CHECK(lt.hasLiquid());                          // a liquid surface was built
+        CHECK(lt.liquids.size() == 1);
+        const LiquidSurface& ls = lt.liquids[0];
+        CHECK(ls.type == LiquidType::River);
+        CHECK(!ls.emissive);                            // water is shaded, not glowing
+        CHECK(ls.tint.a < 255);                         // translucent
+        // 64 rendered 8x8 cells * 2 triangles * 3 indices.
+        CHECK(ls.mesh.indices.size() == 64u * 2u * 3u);
+        CHECK(!ls.mesh.vertices.empty());
+
+        // The full scene also carries the liquid and renders without crashing.
+        TileScene lscene = loader.buildTileScene("LiquidMap", 32, 32);
+        CHECK(lscene.terrain.hasLiquid());
+
+        // Render and confirm the translucent water actually composites pixels:
+        // a frame with the liquid pass differs from terrain-only (water tints
+        // the surface bluish). Camera looks straight down at the chunk.
+        const int LW = 64, LH = 64;
+        Vec3 lo{+1e30f,+1e30f,+1e30f}, hi{-1e30f,-1e30f,-1e30f};
+        for (const auto& cm : lscene.terrain.chunkMeshes)
+            for (const auto& v : cm.vertices) {
+                lo.x=std::min(lo.x,v.position.x); lo.y=std::min(lo.y,v.position.y); lo.z=std::min(lo.z,v.position.z);
+                hi.x=std::max(hi.x,v.position.x); hi.y=std::max(hi.y,v.position.y); hi.z=std::max(hi.z,v.position.z);
+            }
+        Vec3 ctr{(lo.x+hi.x)*0.5f,(lo.y+hi.y)*0.5f,(lo.z+hi.z)*0.5f};
+        float rr = length(hi-ctr)+5.0f;
+        Mat4 lview = Mat4::lookAt(ctr + Vec3{0.1f,0.1f,rr}, ctr, {0,1,0});
+        Mat4 lproj = Mat4::perspective(55.0, double(LW)/LH, 1.0, rr*6.0+100.0);
+        Mat4 lvp = lproj * lview;
+
+        Framebuffer fbTerrain(LW, LH); fbTerrain.clear(Rgba{0,0,0,255});
+        lscene.terrain.renderTerrain(fbTerrain, lvp, {0,0,1});
+        Framebuffer fbWater(LW, LH); fbWater.clear(Rgba{0,0,0,255});
+        lscene.terrain.renderTerrain(fbWater, lvp, {0,0,1});
+        lscene.terrain.renderLiquid(fbWater, lvp, {0,0,1});
+
+        int changed = 0, bluer = 0;
+        for (size_t i = 0; i < fbWater.color.pixels.size(); ++i) {
+            const Rgba& a = fbTerrain.color.pixels[i];
+            const Rgba& b = fbWater.color.pixels[i];
+            if (a.r!=b.r || a.g!=b.g || a.b!=b.b) ++changed;
+            if (b.b > a.b) ++bluer;                     // water tints toward blue
+        }
+        CHECK(changed > 0);                             // the liquid pass drew pixels
+        CHECK(bluer > 0);                               // and tinted them bluish
+    }
 
     std::remove(mpqPath);
 

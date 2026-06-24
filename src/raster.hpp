@@ -56,6 +56,18 @@ Rgba sampleTextureWrap(const Image& tex, float u, float v);
 void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                    const Image& texture, Vec3 lightDir, bool alphaBlend = false);
 
+// Render an untextured mesh as a single flat-tinted, alpha-blended surface --
+// the translucent liquid pass (ADT MCLQ water/ocean/magma/slime). `tint` is the
+// liquid colour with its own alpha (tint.a < 255 -> see-through water). Like the
+// blended texture path it composites over the framebuffer and does NOT write the
+// depth buffer, so the surface reads as glass over the terrain beneath while
+// still being occluded by nearer opaque geometry (depth-tested, not -written).
+// With `emissive` the tint is used as-is (lava/slime glow); otherwise it is
+// modulated by the directional light like opaque terrain. Draw this AFTER the
+// opaque terrain + objects so blending composites correctly.
+void rasterLiquidMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp,
+                      Rgba tint, Vec3 lightDir, bool emissive = false);
+
 struct DebugDrawOptions {
     bool depthTest  = true;    // overlay respects the z-buffer (hidden by terrain)
     bool writeDepth = false;   // overlay doesn't occlude later overlay primitives

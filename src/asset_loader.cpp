@@ -16,6 +16,11 @@ void TileRender::renderTerrain(Framebuffer& fb, const Mat4& mvp, Vec3 lightDir) 
         rasterTerrainSplat(fb, chunkMeshes[c], mvp, chunkLayers[c], tiling, lightDir);
 }
 
+void TileRender::renderLiquid(Framebuffer& fb, const Mat4& mvp, Vec3 lightDir) const {
+    for (const LiquidSurface& ls : liquids)
+        rasterLiquidMesh(fb, ls.mesh, mvp, ls.tint, lightDir, ls.emissive);
+}
+
 Mat4 doodadMatrix(const DoodadDef& d) {
     Vec3 world = placementToWorld(Vec3{ d.pos[0], d.pos[1], d.pos[2] });
     float s = d.scale / 1024.0f;
@@ -35,6 +40,9 @@ void TileScene::render(Framebuffer& fb, const Mat4& viewProj, Vec3 lightDir) con
     for (const Inst& in : wmoRenderInstances)
         rasterTexMesh(fb, meshes[in.mesh], viewProj * in.transform, *textures[in.tex],
                       lightDir, in.blend);
+    // Translucent liquid surfaces last (after all opaque geometry) so the
+    // alpha-blend composites over the terrain/objects beneath the water.
+    terrain.renderLiquid(fb, viewProj, lightDir);
     DebugDrawOptions opt; opt.depthTest = true;
     rasterDebug(fb, markers, viewProj, opt);
 }
@@ -232,6 +240,19 @@ TileRender AssetLoader::buildTerrain(const Adt& adt, const std::vector<MapChunk>
     for (size_t c = 0; c < chunks.size(); ++c) {
         const MapChunk& mc = chunks[c];
         tile.chunkMeshes.push_back(buildChunkTexMesh(mc, x, y));
+
+        // Translucent liquid (MCLQ) surface: only chunks that carry water/ocean/
+        // magma/slime emit a mesh, and only the wet 8x8 cells become triangles
+        // (buildLiquidMesh returns empty otherwise).
+        if (mc.hasLiquid) {
+            Mesh lm = buildLiquidMesh(mc, x, y);
+            if (!lm.indices.empty()) {
+                tile.liquids.push_back({ std::move(lm),
+                                         liquidTint(mc.liquidType),
+                                         liquidEmissive(mc.liquidType),
+                                         mc.liquidType });
+            }
+        }
 
         if (DBG && !mc.layers.empty()) {
             uint32_t bid = mc.layers[0].textureId;

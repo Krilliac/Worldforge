@@ -36,16 +36,32 @@ Mat4 wmoMatrix(const WmoDef& w);
 
 // Owns the meshes / textures / alpha maps for one rendered tile, so the
 // TerrainLayer pointers stay valid while the tile is drawn.
+// One chunk's translucent liquid (MCLQ) surface mesh + how to shade it: the
+// per-type tint (water blue / magma orange / slime green, alpha in tint.a) and
+// whether it glows (magma/slime skip directional shading). Drawn as a separate
+// translucent pass after the opaque terrain.
+struct LiquidSurface {
+    Mesh       mesh;
+    Rgba       tint{ 0, 0, 0, 0 };
+    bool       emissive = false;
+    LiquidType type     = LiquidType::None;
+};
+
 struct TileRender {
     std::vector<TexMesh>                      chunkMeshes;   // per MCNK
     std::vector<std::vector<AlphaMap>>        chunkAlphas;   // [chunk][overlay layer]
     std::vector<std::vector<TerrainLayer>>    chunkLayers;   // [chunk] -> splat layers
     std::vector<std::shared_ptr<const Image>> textures;      // MTEX, keep-alive
+    std::vector<LiquidSurface>                liquids;        // translucent water surfaces
     float tiling = 8.0f;
 
     bool empty() const { return chunkMeshes.empty(); }
+    bool hasLiquid() const { return !liquids.empty(); }
     // Rasterise every chunk's terrain splat into `fb` through `mvp`.
     void renderTerrain(Framebuffer& fb, const Mat4& mvp, Vec3 lightDir) const;
+    // Composite every liquid surface (translucent) -- call AFTER renderTerrain
+    // and the opaque object passes so blending reads the correct background.
+    void renderLiquid(Framebuffer& fb, const Mat4& mvp, Vec3 lightDir) const;
 };
 
 // A fully-populated tile: textured terrain + placed model instances + markers.

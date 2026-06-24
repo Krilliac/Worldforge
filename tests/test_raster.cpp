@@ -112,4 +112,52 @@ void test_raster() {
         CHECK(c.r > 90 && c.b > 70);                   // blend of both, not pure either
         CHECK(c.r > c.b);                              // the red is on top
     }
+
+    // ---- rasterLiquidMesh: translucent water composites over the background --
+    {
+        Framebuffer fb(32, 32);
+        fb.clear(Rgba{200, 80, 40, 255});             // warm (reddish) background
+        Mat4 mvp = Mat4::perspective(60.0, 1.0, 0.1, 100.0) *
+                   Mat4::lookAt({0,0,5}, {0,0,0}, {0,1,0});
+
+        // A camera-facing flat quad standing in for a liquid surface (normals +Z).
+        Mesh q;
+        q.vertices = {
+            { {-2,-2,0}, {0,0,1} }, { {2,-2,0}, {0,0,1} },
+            { {2,2,0},   {0,0,1} }, { {-2,2,0}, {0,0,1} },
+        };
+        q.indices = { 0,1,2, 0,2,3 };
+
+        Rgba water{ 40, 110, 180, 140 };               // translucent blue (river tint)
+        rasterLiquidMesh(fb, q, mvp, water, {0,0,1}, /*emissive*/false);
+
+        Rgba c = fb.color.at(16,16);
+        CHECK(c.b > c.r);                              // blue tint dominates the warm bg
+        CHECK(c.r > 0 && c.r < 200);                   // background partially survives
+        // Outside the quad keeps the original background untouched.
+        CHECK(fb.color.at(0,0).r == 200 && fb.color.at(0,0).b == 40);
+    }
+
+    // ---- liquid emissive vs shaded: a glowing surface ignores the light ----
+    {
+        Mat4 mvp = Mat4::perspective(60.0, 1.0, 0.1, 100.0) *
+                   Mat4::lookAt({0,0,5}, {0,0,0}, {0,1,0});
+        Mesh q;
+        q.vertices = {
+            { {-2,-2,0}, {0,0,1} }, { {2,-2,0}, {0,0,1} },
+            { {2,2,0},   {0,0,1} }, { {-2,2,0}, {0,0,1} },
+        };
+        q.indices = { 0,1,2, 0,2,3 };
+        Rgba lava{ 235, 110, 25, 255 };                // opaque emissive orange (magma)
+
+        // Light pointing AWAY from the surface (-Z) would darken a shaded surface.
+        Framebuffer fa(32,32); fa.clear(Rgba{0,0,0,255});
+        rasterLiquidMesh(fa, q, mvp, lava, {0,0,-1}, /*emissive*/true);
+        Framebuffer fb2(32,32); fb2.clear(Rgba{0,0,0,255});
+        rasterLiquidMesh(fb2, q, mvp, lava, {0,0,-1}, /*emissive*/false);
+
+        // Emissive keeps full tint; shaded (back-lit) comes out dimmer.
+        CHECK(fa.color.at(16,16).r == 235);            // emissive == raw tint
+        CHECK(fb2.color.at(16,16).r < fa.color.at(16,16).r);   // shaded is darker
+    }
 }

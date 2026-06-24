@@ -23,9 +23,19 @@ struct ModelInstance {
     Mat4           transform = Mat4::identity();   // local -> world placement
 };
 
+// A translucent liquid (MCLQ) surface in world space: the flat water/lava mesh
+// plus its tint (alpha in tint.a) and whether it glows (magma/slime). Drawn
+// after opaque terrain + instances so the alpha-blend reads the right backdrop.
+struct LiquidInstance {
+    const Mesh* mesh     = nullptr;     // world-space surface (buildLiquidMesh)
+    Rgba        tint{ 40, 110, 180, 140 };
+    bool        emissive = false;
+};
+
 struct Scene {
     const Mesh*                terrain = nullptr;   // optional untextured terrain
     std::vector<ModelInstance> instances;
+    std::vector<LiquidInstance> liquids;            // translucent liquid surfaces
     const DebugDraw*           debug   = nullptr;   // optional overlay
     Vec3 lightDir{ 0.5f, 0.4f, 0.8f };
 };
