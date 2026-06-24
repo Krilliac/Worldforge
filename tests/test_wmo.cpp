@@ -187,4 +187,51 @@ void test_wmo() {
     CHECK(p2.size() == 2);
     CHECK(p2[0].blendMode == 0 && p2[0].texture == "opaque.blp");   // opaque first
     CHECK(p2[1].blendMode == 3 && p2[1].texture == "glass.blp");    // blended last
+
+    // ---------------- MOGP header bbox + 0xFF material id ----------------
+    // The MOGP header carries the group bbox at 0x0C..0x23; make sure it's read.
+    // And a triangle tagged material id 0xFF (collision-only, "no render") must
+    // bucket separately with an out-of-range id resolving to an empty texture --
+    // not silently merge into material 0. This mirrors what real WMO group files
+    // contain (e.g. interior collision geometry).
+    std::vector<uint8_t> g3;
+    std::vector<uint8_t> v3;     // 6 verts -> 2 tris
+    for (int i = 0; i < 6; ++i) { putf(v3, (float)i); putf(v3, 0); putf(v3, 0); }
+    std::vector<uint8_t> i3;     // 2 triangles
+    put16(i3,0);put16(i3,1);put16(i3,2); put16(i3,3);put16(i3,4);put16(i3,5);
+    std::vector<uint8_t> p3;     // tri0 mat=0, tri1 mat=0xFF (collision)
+    p3.push_back(0); p3.push_back(0);
+    p3.push_back(0); p3.push_back(0xFF);
+    std::vector<uint8_t> hdr(0x44, 0);
+    { uint32_t fl = 0x4; for (int i=0;i<4;i++) hdr[0x08+i]=(fl>>(8*i))&0xFF; }   // flags
+    auto putfAt = [&](int off, float f){ uint32_t u; std::memcpy(&u,&f,4);
+                                         for(int i=0;i<4;i++) hdr[off+i]=(u>>(8*i))&0xFF; };
+    putfAt(0x0C,-5);putfAt(0x10,-6);putfAt(0x14,-7);   // bbox min
+    putfAt(0x18, 5);putfAt(0x1C, 6);putfAt(0x20, 7);   // bbox max
+    auto app3 = [&](const char* m, const std::vector<uint8_t>& p){ chunk(hdr, m, p); };
+    app3("MOVT", v3);
+    app3("MOVI", i3);
+    app3("MOPY", p3);
+    chunk(g3, "MOGP", hdr);
+
+    WmoGroup wg3 = parseWmoGroup(g3);
+    CHECK(wg3.flags == 0x4);
+    CHECK_APPROX(wg3.bboxMin.x, -5.0f);
+    CHECK_APPROX(wg3.bboxMax.z,  7.0f);
+    CHECK(wg3.indices.size() == 6 && wg3.triMaterial.size() == 2);
+    CHECK(wg3.triMaterial[1] == 0xFF);
+
+    WmoModel mm3; mm3.groups.push_back(wg3);
+    mm3.root.materials.resize(1);                       // only material 0 exists
+    mm3.root.materials[0].diffuseTexture = "wall.blp";
+    std::vector<WmoRenderPart> p3parts = wmoRenderParts(mm3);
+    CHECK(p3parts.size() == 2);                         // mat 0 + the 0xFF bucket
+    // One part resolves to wall.blp; the 0xFF (out-of-range) part has no texture.
+    bool sawWall = false, sawEmpty = false;
+    for (const WmoRenderPart& p : p3parts) {
+        if (p.texture == "wall.blp") sawWall = true;
+        if (p.texture.empty())       sawEmpty = true;
+        CHECK(p.mesh.indices.size() == 3);             // one triangle each
+    }
+    CHECK(sawWall && sawEmpty);
 }
