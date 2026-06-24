@@ -49,16 +49,22 @@ inline Vec3 worldToPlacement(const Vec3& world) {
     };
 }
 
-// World-space NW corner (max X north, max Y west) of MCNK (chunkCol, chunkRow)
-// inside ADT tile (blockX = north-south tile index, blockY = west-east).
-//   row (north-south, 0 = north) advances southward  -> decreasing X
-//   col (west-east,   0 = west)  advances eastward    -> decreasing Y
-// NOTE: the mapping of MCNK header IndexX/IndexY onto (row,col) is the one fact
-// that must be confirmed against a real tile (same class of risk as the WDT
-// x/y order). See terrain.cpp.
+// World-space NW corner (max X north, max Y west) of an MCNK inside an ADT tile.
+// blockX/blockY are the ADT *filename* indices ("Map_blockX_blockY.adt").
+//
+// VERIFIED against real MCNK header positions (offset 0x68) in Azeroth_32_48:
+// the filename's FIRST index (blockX) is the WEST tile index and the SECOND
+// (blockY) is the NORTH tile index -- the two are NOT symmetric, so they must
+// not be transposed:
+//   worldX(north) = (32 - blockY) * TILE - row * CHUNK
+//   worldY(west)  = (32 - blockX) * TILE - col * CHUNK
+//   row (north-south, 0 = north edge) advances southward -> decreasing X  (= MCNK IndexY)
+//   col (west-east,   0 = west  edge) advances eastward  -> decreasing Y  (= MCNK IndexX)
+// e.g. tile 32,48 chunk Index(0,0): (32-48)*T = -8533.33 north, (32-32)*T = 0 west,
+// which reproduces the header's stored position (-8533.334, 0.000) exactly.
 inline Vec3 chunkCornerWorld(int blockX, int blockY, int row, int col, float baseHeight) {
-    double x = (32.0 - blockX) * TILE_SIZE - row * CHUNK_SIZE; // north
-    double y = (32.0 - blockY) * TILE_SIZE - col * CHUNK_SIZE; // west
+    double x = (32.0 - blockY) * TILE_SIZE - row * CHUNK_SIZE; // north
+    double y = (32.0 - blockX) * TILE_SIZE - col * CHUNK_SIZE; // west
     return { static_cast<float>(x), static_cast<float>(y), baseHeight };
 }
 
