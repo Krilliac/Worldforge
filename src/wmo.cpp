@@ -117,6 +117,38 @@ WmoRoot parseWmoRoot(const std::vector<uint8_t>& buf, const ClientProfile& profi
                 r.u32();                   // color (BGRA)
                 root.doodads.push_back(d);
             }
+        } else if (c.magic == "MOSB") {
+            // Single zero-terminated skybox model path (like MOTX/MODN entries).
+            const char* p = reinterpret_cast<const char*>(c.data);
+            root.skybox = std::string(p, ::strnlen(p, c.size));
+        } else if (c.magic == "MOFG") {
+            // 48-byte SMOFog records; count by chunkLen/48.
+            while (r.remaining() >= 48) {
+                WmoFog f;
+                f.flags         = r.u32();
+                f.position      = { r.f32(), r.f32(), r.f32() };
+                f.smallerRadius = r.f32();
+                f.largerRadius  = r.f32();
+                f.end           = r.f32();        // first of two fog entries
+                f.startScalar   = r.f32();
+                uint8_t b = r.u8(), g = r.u8(), rr = r.u8(); r.u8();  // BGRA, drop A
+                f.color = { rr / 255.0f, g / 255.0f, b / 255.0f };
+                r.f32(); r.f32(); r.u32();         // skip the second fog entry
+                root.fogs.push_back(f);
+            }
+        } else if (c.magic == "MOPV") {
+            // C3Vector portal vertices.
+            while (r.remaining() >= 12) root.portalVertices.push_back({ r.f32(), r.f32(), r.f32() });
+        } else if (c.magic == "MOPT") {
+            // 20-byte SMOPortal records.
+            while (r.remaining() >= 20) {
+                WmoPortal p;
+                p.startVertex = r.u16();
+                p.count       = r.u16();
+                p.normal      = { r.f32(), r.f32(), r.f32() };
+                p.planeDist   = r.f32();
+                root.portals.push_back(p);
+            }
         }
         return true;
     });

@@ -110,6 +110,38 @@ void test_wmo() {
     for (int i = 0; i < 4; ++i) putf(molt, 0.0f);  // trailing unknowns
     chunk(root, "MOLT", molt);
 
+    // MOSB: single zero-terminated skybox model path.
+    std::vector<uint8_t> mosb;
+    cstr(mosb, "Env\\Sky.mdx");
+    chunk(root, "MOSB", mosb);
+
+    // MOFG: one 48-byte SMOFog. Only the first of its two fog entries is read;
+    // BGRA colour matches the MOLT convention -> rgb(255,128,64).
+    std::vector<uint8_t> mofg;
+    put32(mofg, 0x2);                        // flags
+    putf(mofg, 1); putf(mofg, 2); putf(mofg, 3);   // position
+    putf(mofg, 10.0f);                       // smallerRadius
+    putf(mofg, 20.0f);                       // largerRadius
+    putf(mofg, 100.0f);                      // end (first fog)
+    putf(mofg, 0.25f);                       // startScalar
+    mofg.push_back(64); mofg.push_back(128); mofg.push_back(255); mofg.push_back(255); // BGRA
+    putf(mofg, 0.0f); putf(mofg, 0.0f); put32(mofg, 0);   // second fog entry (skipped)
+    chunk(root, "MOFG", mofg);
+
+    // MOPV: two portal vertices.
+    std::vector<uint8_t> mopv;
+    putf(mopv, 1); putf(mopv, 2); putf(mopv, 3);
+    putf(mopv, 4); putf(mopv, 5); putf(mopv, 6);
+    chunk(root, "MOPV", mopv);
+
+    // MOPT: one 20-byte SMOPortal.
+    std::vector<uint8_t> mopt;
+    put16(mopt, 0);                          // startVertex
+    put16(mopt, 2);                          // count
+    putf(mopt, 0); putf(mopt, 0); putf(mopt, 1);   // normal
+    putf(mopt, 7.5f);                        // planeDist
+    chunk(root, "MOPT", mopt);
+
     WmoRoot wr = parseWmoRoot(root);
     CHECK(wr.nGroups == 1 && wr.nTextures == 2);
     CHECK_APPROX(wr.bboxMax.z, 30.0f);
@@ -135,6 +167,22 @@ void test_wmo() {
     CHECK_APPROX(wr.lights[0].position.y, 4.0f);
     CHECK_APPROX(wr.lights[0].intensity, 1.5f);
     CHECK_APPROX(wr.lights[0].attenEnd, 8.0f);
+    CHECK(wr.skybox == "Env\\Sky.mdx");
+    CHECK(wr.fogs.size() == 1);
+    CHECK(wr.fogs[0].flags == 0x2);
+    CHECK_APPROX(wr.fogs[0].smallerRadius, 10.0f);
+    CHECK_APPROX(wr.fogs[0].largerRadius, 20.0f);
+    CHECK_APPROX(wr.fogs[0].end, 100.0f);
+    CHECK_APPROX(wr.fogs[0].startScalar, 0.25f);
+    CHECK_APPROX(wr.fogs[0].color.x, 1.0f);              // R = 255/255
+    CHECK_APPROX(wr.fogs[0].color.y, 128.0f / 255.0f);   // G
+    CHECK_APPROX(wr.fogs[0].color.z, 64.0f / 255.0f);    // B
+    CHECK(wr.portalVertices.size() == 2);
+    CHECK_APPROX(wr.portalVertices[1].x, 4.0f);
+    CHECK(wr.portals.size() == 1);
+    CHECK(wr.portals[0].startVertex == 0 && wr.portals[0].count == 2);
+    CHECK_APPROX(wr.portals[0].normal.z, 1.0f);
+    CHECK_APPROX(wr.portals[0].planeDist, 7.5f);
 
     // ---------------- group ----------------
     std::vector<uint8_t> group;

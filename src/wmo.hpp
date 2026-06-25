@@ -56,6 +56,23 @@ struct WmoLight {                     // MOLT entry (48 bytes), interior lightin
     float   attenEnd   = 0.0f;        // SMOLight floats are version-specific, skipped)
 };
 
+struct WmoFog {                       // MOFG entry (48 bytes), SMOFog
+    uint32_t flags = 0;
+    Vec3     position;                // WMO local space
+    float    smallerRadius = 0.0f;    // attenuation radii
+    float    largerRadius  = 0.0f;
+    float    end   = 0.0f;            // first fog: end distance + start scalar
+    float    startScalar = 0.0f;
+    Vec3     color;                   // RGB 0..1, decoded from the BGRA CImVector
+};
+
+struct WmoPortal {                    // MOPT entry (20 bytes), SMOPortal
+    uint16_t startVertex = 0;         // first vertex in MOPV
+    uint16_t count = 0;               // vertex count
+    Vec3     normal;                  // portal plane normal
+    float    planeDist = 0.0f;        // plane distance
+};
+
 struct WmoRoot {
     uint32_t version = 0;   // MVER (17 for vanilla..Cata); 0 if no MVER chunk
     uint32_t nTextures = 0, nGroups = 0, nPortals = 0, nLights = 0;
@@ -69,6 +86,10 @@ struct WmoRoot {
     std::vector<WmoDoodadSet> doodadSets;      // MODS
     std::vector<WmoDoodad>    doodads;          // MODD
     std::vector<WmoLight>     lights;           // MOLT
+    std::string               skybox;           // MOSB (skybox model path)
+    std::vector<WmoFog>       fogs;             // MOFG
+    std::vector<Vec3>         portalVertices;   // MOPV
+    std::vector<WmoPortal>    portals;          // MOPT
 };
 
 // Parse a WMO root file. `profile` gates the WMO version this client understands
