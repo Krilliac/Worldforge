@@ -53,6 +53,14 @@ struct MclqLayer {
 // True if an MCLQ 8x8 tile flag indicates the tile should be drawn.
 inline bool liquidTileRenders(uint8_t flag) { return (flag & 0x0F) != 0x0F; }
 
+// One MCSE sound emitter (28-byte SoundEmitterRec). Only the sound entry id and
+// world position are retained; the trailing size/min-max distance C3Vectors are
+// skipped over (advanced past for the full 28-byte stride) but not kept.
+struct SoundEmitter {
+    uint32_t soundId = 0;   // SoundEntriesAdvanced.dbc id
+    Vec3     position;      // emitter position
+};
+
 // Base translucent tint for a liquid category (RGBA). Water/ocean are a
 // semi-transparent blue; magma is a near-opaque emissive orange; slime a murky
 // green. These are deliberate placeholder tints (the real client derives them
@@ -79,6 +87,7 @@ struct MapChunk {
     std::vector<uint8_t>  shadow;       // raw MCSH 64x64 shadow bitmap (512 B); empty if absent
     std::vector<uint32_t> doodadRefs;   // MCRF: indices into the ADT's MDDF doodad list
     std::vector<uint32_t> wmoRefs;      // MCRF: indices into the ADT's MODF map-object list
+    std::vector<SoundEmitter> soundEmitters;  // MCSE: per-chunk sound emitters
 
     bool       hasLiquid  = false;      // MCLQ present
     LiquidType liquidType = LiquidType::None;

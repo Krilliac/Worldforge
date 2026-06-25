@@ -387,6 +387,7 @@ void test_terrain() {
         h32(0x00, MCNK_HAS_MCSH);   // flags: shadow map present
         h32(0x10, 2);               // nDoodadRefs
         h32(0x38, 1);               // nMapObjRefs
+        h32(0x58, 1);               // nSndEmitters
 
         std::vector<uint8_t> mcrf;
         put32(mcrf, 11); put32(mcrf, 22);   // doodad (MDDF) indices
@@ -396,9 +397,17 @@ void test_terrain() {
         mcsh[0] = 0x01;             // texel (0,0): bit 0
         mcsh[8] = 0x04;             // texel (1,2): bit index 66 -> byte 8, bit 2
 
+        // MCSE: one 28-byte SoundEmitterRec (id + position + two trailing
+        // C3Vectors we don't keep).
+        std::vector<uint8_t> mcse;
+        put32(mcse, 555);                      // soundEntryId
+        putf(mcse, 10.0f); putf(mcse, 20.0f); putf(mcse, 30.0f);  // position
+        putf(mcse, 1.0f);  putf(mcse, 2.0f);  putf(mcse, 3.0f);   // size/min-max (skipped)
+
         std::vector<uint8_t> body = hdr;
         chunk(body, "MCRF", mcrf);
         chunk(body, "MCSH", mcsh);
+        chunk(body, "MCSE", mcse);
         std::vector<uint8_t> adtS;
         chunk(adtS, "MCNK", body);
 
@@ -411,5 +420,10 @@ void test_terrain() {
         CHECK(!shadowAt(mc, 0, 1));
         CHECK(!shadowAt(mc, 63, 63));
         CHECK(!shadowAt(mc, 100, 0));   // out of range -> false
+        CHECK(mc.soundEmitters.size() == 1);
+        CHECK(mc.soundEmitters[0].soundId == 555);
+        CHECK(mc.soundEmitters[0].position.x == 10.0f);
+        CHECK(mc.soundEmitters[0].position.y == 20.0f);
+        CHECK(mc.soundEmitters[0].position.z == 30.0f);
     }
 }

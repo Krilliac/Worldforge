@@ -10,6 +10,7 @@ namespace wf {
 static void parseMclq(MapChunk&, const uint8_t*, uint32_t);
 static void parseMcrf(MapChunk&, const uint8_t*, uint32_t, uint32_t nDoodad, uint32_t nWmo);
 static void parseMcsh(MapChunk&, const uint8_t*, uint32_t);
+static void parseMcse(MapChunk&, const uint8_t*, uint32_t, uint32_t nSndEmitters);
 }
 
 namespace wf {
@@ -33,6 +34,8 @@ constexpr size_t kOffSizeMCSH   = 0x30;   // shadow map sub-chunk size
 constexpr size_t kOffAreaId     = 0x34;
 constexpr size_t kOffNMapObjRefs= 0x38;   // count of MCRF map-object (MODF) indices
 constexpr size_t kOffHoles      = 0x3C;
+constexpr size_t kOffNSndEmitters= 0x58;  // count of MCSE sound emitters
+constexpr size_t kOffOfsMCSE    = 0x5C;   // sound emitter sub-chunk offset
 constexpr size_t kOffOfsMCLQ    = 0x60;   // liquid sub-chunk offset
 constexpr size_t kOffPosition   = 0x68;
 
@@ -79,6 +82,7 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
     const uint32_t nLayers     = u32At(kOffNLayers);
     const uint32_t nDoodadRefs = u32At(kOffNDoodadRefs);
     const uint32_t nMapObjRefs = u32At(kOffNMapObjRefs);
+    const uint32_t nSndEmitters= u32At(kOffNSndEmitters);
     const uint32_t ofsMCVT = u32At(kOffOfsMCVT);
     const uint32_t ofsMCNR = u32At(kOffOfsMCNR);
     const uint32_t ofsMCLY = u32At(kOffOfsMCLY);
@@ -86,6 +90,7 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
     const uint32_t ofsMCAL = u32At(kOffOfsMCAL);
     const uint32_t szMCAL  = u32At(kOffSizeMCAL);
     const uint32_t ofsMCSH = u32At(kOffOfsMCSH);
+    const uint32_t ofsMCSE = u32At(kOffOfsMCSE);
     const uint32_t ofsMCLQ = u32At(kOffOfsMCLQ);
 
     // Two ways to find the MCVT/MCNR/MCLY/MCAL/MCLQ sub-chunks:
@@ -160,6 +165,8 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
             parseMcrf(mc, p, sz, nDoodadRefs, nMapObjRefs);
         if (auto [p, sz] = sub(ofsMCSH, "MCSH"); p)
             parseMcsh(mc, p, sz);
+        if (auto [p, sz] = sub(ofsMCSE, "MCSE"); p)
+            parseMcse(mc, p, sz, nSndEmitters);
         if (auto [p, sz] = sub(ofsMCLQ, "MCLQ"); p)
             parseMclq(mc, p, sz);
 
@@ -197,6 +204,8 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
             parseMcrf(mc, c.data, c.size, nDoodadRefs, nMapObjRefs);
         } else if (c.magic == "MCSH") {
             parseMcsh(mc, c.data, c.size);
+        } else if (c.magic == "MCSE") {
+            parseMcse(mc, c.data, c.size, nSndEmitters);
         } else if (c.magic == "MCLQ") {
             parseMclq(mc, c.data, c.size);
         }
@@ -327,6 +336,22 @@ static void parseMcsh(MapChunk& mc, const uint8_t* data, uint32_t size) {
     uint32_t n = std::min(size, kBytes);
     mc.shadow.assign(data, data + n);
     if (mc.shadow.size() < kBytes) mc.shadow.resize(kBytes, 0);
+}
+
+// Parse MCSE: nSndEmitters 28-byte SoundEmitterRec records (sound entry id +
+// position + two trailing C3Vectors). Only the id and position are kept; the
+// rest of each record is skipped to keep the 28-byte stride. The count is
+// clamped to what the chunk actually holds.
+static void parseMcse(MapChunk& mc, const uint8_t* data, uint32_t size, uint32_t nSndEmitters) {
+    constexpr uint32_t kStride = 28u;   // uint32 + 6 floats
+    ByteReader r(data, size);
+    for (uint32_t i = 0; i < nSndEmitters && r.remaining() >= kStride; ++i) {
+        SoundEmitter e;
+        e.soundId  = r.u32();
+        e.position = { r.f32(), r.f32(), r.f32() };
+        r.skip(kStride - 16u);   // skip the trailing size/min-max C3Vectors
+        mc.soundEmitters.push_back(e);
+    }
 }
 
 // Parse one MCLQ liquid layer (min/max height, 9x9 vertex grid, 8x8 flags).
