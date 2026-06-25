@@ -21,6 +21,9 @@
 #include "editor/DebugVisPanel.hpp"
 #include "editor/ViewportPanel.hpp"
 #include "editor/EntityInspectorPanel.hpp"
+#include "editor/MapBrowserPanel.hpp"
+#include "editor/AssetBrowserPanel.hpp"
+#include "editor/OutlinerPanel.hpp"
 #include "editor/MoveEmitter.hpp"
 #include "editor/PlacementEditor.hpp"
 #include "editor/Camera.hpp"
@@ -29,6 +32,7 @@
 #include "world_view.hpp"
 #include "scene_pick.hpp"
 #include "asset_loader.hpp"   // TileScene
+#include "asset_catalog.hpp"  // listMaps / listModels
 #include "raster.hpp"         // TexMesh / ShadeLight
 #include "debugdraw.hpp"
 #include "math.hpp"
@@ -146,6 +150,10 @@ int main(int argc, char** argv) {
     editor::EntityInspectorPanel inspector;
     editor::ViewportPanel        viewport(900, 560);
     editor::GizmoController       giz;
+    editor::MapBrowserPanel      mapBrowser;
+    editor::AssetBrowserPanel    assetBrowser;
+    editor::OutlinerPanel        outliner;
+    bool placeMode = false;          // when on, "Place" / the P key drops the active asset
     Mat4 selected = Mat4::translate(Vec3{150, 150, heightAt(150,150) + 4});
 
     // The engine-side mirror of the live server world (NPCs/players) + the
@@ -194,24 +202,46 @@ int main(int argc, char** argv) {
     float          dayRate  = 120.0f;                     // ticks/sec when auto (2880 = 24s/day)
     ShadeLight     sceneLight;                            // recomputed each frame, below
 
-    // Optional: load a real ADT tile from the mounted client and show it in the
-    // viewport instead of the procedural mesh (E.3's read-only-viewport milestone).
-    // Requested via argv "<DataDir> <Map> <x> <y>" or WFORGE_TILE_*; absent or
-    // unresolvable -> useTile stays false and the procedural terrain renders.
+    // A persistent AssetLoader over the mounted client, reused for the whole
+    // session: (re)loading tiles the Map browser selects and placing models the
+    // Asset browser selects. Safe over an empty mpq (methods return fallbacks);
+    // the browsers then simply list nothing.
+    AssetLoader loader(mpq);
+
+    // Populate the browsers from the client catalog (empty without a client).
+    mapBrowser.setMaps(listMaps(mpq));
+    assetBrowser.setModels(listModels(mpq, ModelKind::M2), listModels(mpq, ModelKind::Wmo));
+
+    // The currently-loaded real ADT tile (none until one is loaded). When loaded,
+    // the viewport renders it instead of the procedural mesh.
     TileScene   realTile;
     bool        useTile = false;
     std::string tileMap; int tileX = 0, tileY = 0;
+    std::string browseMap;                 // the map whose tiles the browser shows
+    uint32_t    nextPlaceId = 0xF0000000u; // synthetic uniqueIds for placed WMOs
+    int         placedCount = 0;
+
+    // Load map tile (x,y) into realTile, lit at the current day-tick. Shared by
+    // the argv bootstrap and the Map browser's tile-grid clicks.
+    auto loadTile = [&](const std::string& map, int x, int y) -> bool {
+        TileScene ts = loader.buildTileScene(map, x, y);
+        if (ts.terrain.empty()) { std::printf("[editor] tile %s %d,%d absent\n", map.c_str(), x, y); return false; }
+        AssetLoader::applyLighting(ts, lights, mapId, x, y, dayTick);
+        realTile = std::move(ts); useTile = true; tileMap = map; tileX = x; tileY = y;
+        std::printf("[editor] loaded tile %s %d,%d: %zu chunks, %zu doodads, %zu wmos\n",
+                    map.c_str(), x, y, realTile.terrain.chunkMeshes.size(),
+                    realTile.doodadCount(), realTile.wmoCount());
+        return true;
+    };
+    // Load a map's WDT so the Map browser's tile grid shows which tiles exist.
+    auto showMapTiles = [&](const std::string& map) {
+        Wdt wdt; if (loader.loadWdt(map, wdt)) mapBrowser.setWdt(wdt);
+    };
+
+    // Bootstrap from argv "<DataDir> <Map> <x> <y>" / WFORGE_TILE_* if provided.
     if (mpq.archiveCount() > 0 && resolveTile(argc, argv, tileMap, tileX, tileY)) {
-        AssetLoader loader(mpq);
-        realTile = loader.buildTileScene(tileMap, tileX, tileY);
-        useTile  = !realTile.terrain.empty();
-        if (useTile)
-            std::printf("[editor] tile %s %d,%d: %zu chunks, %zu doodads, %zu wmos\n",
-                        tileMap.c_str(), tileX, tileY, realTile.terrain.chunkMeshes.size(),
-                        realTile.doodadCount(), realTile.wmoCount());
-        else
-            std::printf("[editor] tile %s %d,%d absent -- procedural terrain\n",
-                        tileMap.c_str(), tileX, tileY);
+        showMapTiles(tileMap);
+        loadTile(tileMap, tileX, tileY);
     }
 
     GLuint sceneTex = 0;
@@ -238,6 +268,12 @@ int main(int argc, char** argv) {
         if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) viewport.camera.fly(0, -spd, 0);
         if (glfwGetKey(win, GLFW_KEY_E) == GLFW_PRESS) viewport.camera.fly(0, 0,  spd);
         if (glfwGetKey(win, GLFW_KEY_Q) == GLFW_PRESS) viewport.camera.fly(0, 0, -spd);
+        if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(win, 1);
+
+        // Edge-triggered P: place the active asset at the current terrain pick.
+        static bool pWas = false;
+        bool pNow = glfwGetKey(win, GLFW_KEY_P) == GLFW_PRESS;
+        bool placeKey = pNow && !pWas; pWas = pNow;
 
         // Drain the bridge: live entities/server-status feed the WorldView; the
         // debug-vis stream accumulates (cleared on DEBUG_CLEAR).
@@ -297,6 +333,30 @@ int main(int argc, char** argv) {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+
+        // --- main menu bar + inline toolbar -------------------------------------
+        using Op = editor::GizmoController::Op;
+        bool resetLayout = false;
+        if (ImGui::BeginMainMenuBar()) {
+            if (ImGui::BeginMenu("File")) {
+                if (ImGui::MenuItem("Quit", "Esc")) glfwSetWindowShouldClose(win, 1);
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("View")) {
+                if (ImGui::MenuItem("Reset Layout")) resetLayout = true;
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
+            ImGui::TextUnformatted("Gizmo:");
+            if (ImGui::RadioButton("Move",   giz.op == Op::Translate)) giz.op = Op::Translate;
+            ImGui::SameLine(); if (ImGui::RadioButton("Rotate", giz.op == Op::Rotate)) giz.op = Op::Rotate;
+            ImGui::SameLine(); if (ImGui::RadioButton("Scale",  giz.op == Op::Scale))  giz.op = Op::Scale;
+            ImGui::SameLine(); ImGui::Checkbox("Snap", &giz.snap);
+            ImGui::SameLine(); ImGui::Separator();
+            ImGui::SameLine(); ImGui::Checkbox("Place mode", &placeMode);
+            ImGui::EndMainMenuBar();
+        }
+
         // Default editor layout, built once when no saved layout exists in
         // imgui.ini: a scene/entity column on the left, the 3D viewport filling
         // the centre, and an authoring/inspector column on the right (Atmosphere
@@ -306,16 +366,22 @@ int main(int argc, char** argv) {
         // precedence on the next launch (delete imgui.ini to get this default back).
         ImGuiViewport* mainVp = ImGui::GetMainViewport();
         ImGuiID dockspace_id = ImGui::GetID("WorldForgeDockspace");
+        if (resetLayout) ImGui::DockBuilderRemoveNode(dockspace_id);  // View > Reset Layout
         if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr) {
             ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
             ImGui::DockBuilderSetNodeSize(dockspace_id, mainVp->Size);
 
             ImGuiID center = dockspace_id;
-            ImGuiID left   = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left,  0.20f, nullptr, &center);
+            ImGuiID left   = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left,  0.22f, nullptr, &center);
+            ImGuiID leftB  = ImGui::DockBuilderSplitNode(left,   ImGuiDir_Down,  0.55f, nullptr, &left);
             ImGuiID right  = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.28f, nullptr, &center);
             ImGuiID rightB = ImGui::DockBuilderSplitNode(right,  ImGuiDir_Down,  0.45f, nullptr, &right);
 
+            ImGui::DockBuilderDockWindow("Outliner",            left);
             ImGui::DockBuilderDockWindow("Entities",            left);
+            ImGui::DockBuilderDockWindow("Map Browser",         leftB);
+            ImGui::DockBuilderDockWindow("Assets",              leftB);
+            ImGui::DockBuilderDockWindow("Placement",           leftB);
             ImGui::DockBuilderDockWindow("Viewport",            center);
             ImGui::DockBuilderDockWindow("Sky",                 right);
             ImGui::DockBuilderDockWindow("Atmosphere",          right);
@@ -353,17 +419,74 @@ int main(int argc, char** argv) {
 
         std::vector<std::vector<uint8_t>> outgoing;
         atmosphere.draw(outgoing);
-        // Unified click-to-select: a left-click picks the nearest of the live
-        // entities and the loaded tile -- an entity sets the WorldView
-        // selection, a static object (terrain/doodad/WMO) goes to sceneSel.
+
         // Pick against the real tile when one is loaded (so doodads/WMOs are
         // selectable), else the procedural one-chunk scene.
         const TileScene* activeScene = useTile ? &realTile : &tileScene;
+
+        // Map browser: select a map (loads its WDT tile grid), then click a present
+        // tile to load it into the viewport (takes effect next frame).
+        mapBrowser.draw();
+        { std::string m; if (mapBrowser.takeMapChanged(m)) { browseMap = m; showMapTiles(m); } }
+        { int tx, ty; if (!browseMap.empty() && mapBrowser.takeTileRequest(tx, ty)) loadTile(browseMap, tx, ty); }
+
+        // Asset browser: choose the active placement model.
+        assetBrowser.draw();
+
+        // Outliner: clicking an item selects that entity / scene object.
+        if (auto sel = outliner.draw(view, activeScene);
+            sel.kind != editor::OutlinerSelection::Kind::None) {
+            using K = editor::OutlinerSelection::Kind;
+            if (sel.kind == K::Entity) { view.select(sel.guid); sceneSel = WorldPick{}; }
+            else if (sel.kind == K::Doodad && activeScene && sel.index < activeScene->instances.size()) {
+                const Mat4& t = activeScene->instances[sel.index].transform;
+                sceneSel = WorldPick{}; sceneSel.kind = WorldPick::Kind::Doodad; sceneSel.index = sel.index;
+                sceneSel.point = { t.at(0,3), t.at(1,3), t.at(2,3) }; view.select(0);
+            } else if (sel.kind == K::Wmo && activeScene && sel.index < activeScene->wmoInstances.size()) {
+                const Mat4& t = activeScene->wmoInstances[sel.index].transform;
+                sceneSel = WorldPick{}; sceneSel.kind = WorldPick::Kind::Wmo; sceneSel.index = sel.index;
+                sceneSel.uniqueId = static_cast<uint32_t>(sel.guid);
+                sceneSel.point = { t.at(0,3), t.at(1,3), t.at(2,3) }; view.select(0);
+            }
+        }
+
+        // Unified click-to-select in the viewport: a left-click picks the nearest
+        // of the live entities and the loaded tile -- an entity sets the WorldView
+        // selection, a static object (terrain/doodad/WMO) goes to sceneSel.
         bool gizmoActive = viewport.draw((ImTextureID)(intptr_t)sceneTex, giz, &selected,
                                          &view, &mesh, activeScene, &sceneSel);
         debugVis.draw(debug);
         // live entities + selected static object + spawn/despawn authoring ops
         inspector.draw(view, &sceneSel, &outgoing);
+
+        // Placement: drop the Asset browser's active model at the current terrain
+        // pick point. Enable Place mode, click the ground to choose a spot, then
+        // press P or the button. Needs a loaded real tile so the object renders.
+        {
+            ImGui::Begin("Placement");
+            if (assetBrowser.hasSelection())
+                ImGui::TextWrapped("Active: %s", assetBrowser.selectedPath().c_str());
+            else
+                ImGui::TextDisabled("Pick a model in the Assets panel.");
+            const bool terrainSel = sceneSel.kind == WorldPick::Kind::Terrain;
+            const bool canPlace = placeMode && useTile && assetBrowser.hasSelection() && terrainSel;
+            ImGui::BeginDisabled(!canPlace);
+            bool placeBtn = ImGui::Button("Place at selection (P)");
+            ImGui::EndDisabled();
+            if (!placeMode)        ImGui::TextDisabled("Enable 'Place mode' in the menu bar.");
+            else if (!useTile)     ImGui::TextDisabled("Load a tile (Map Browser) first.");
+            else if (!terrainSel)  ImGui::TextDisabled("Click the ground to choose a spot.");
+            if ((placeBtn || placeKey) && canPlace) {
+                const Vec3 at = sceneSel.point;
+                if (assetBrowser.selectedKind() == ModelKind::M2)
+                    loader.placeDoodad(realTile, assetBrowser.selectedPath(), at);
+                else
+                    loader.placeWmo(realTile, assetBrowser.selectedPath(), at, 0.0f, nextPlaceId++);
+                ++placedCount;
+            }
+            ImGui::Text("Placed this session: %d", placedCount);
+            ImGui::End();
+        }
 
         // Dragging the gizmo on a selected entity relocates it on the server.
         {
@@ -379,6 +502,34 @@ int main(int argc, char** argv) {
 
         // Ship the panels' ops to the server.
         for (auto& pkt : outgoing) bridge.send(pkt);
+
+        // --- status bar pinned to the bottom of the main viewport ---------------
+        {
+            const float barH = ImGui::GetFrameHeight();
+            ImGui::SetNextWindowPos(ImVec2(mainVp->WorkPos.x,
+                                           mainVp->WorkPos.y + mainVp->WorkSize.y - barH));
+            ImGui::SetNextWindowSize(ImVec2(mainVp->WorkSize.x, barH));
+            ImGuiWindowFlags sf = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoDocking |
+                                  ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove |
+                                  ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
+            if (ImGui::Begin("##statusbar", nullptr, sf)) {
+                const Vec3 eye = viewport.camera.eye;
+                ImGui::Text("cam (%.0f, %.0f, %.0f)", eye.x, eye.y, eye.z);
+                ImGui::SameLine(0, 24);
+                if (useTile) ImGui::Text("tile %s %d,%d", tileMap.c_str(), tileX, tileY);
+                else         ImGui::TextUnformatted("tile (procedural)");
+                ImGui::SameLine(0, 24);
+                if (view.hasSelection())
+                    ImGui::Text("sel entity 0x%llX", (unsigned long long)view.selected());
+                else if (sceneSel.kind == WorldPick::Kind::Terrain) ImGui::TextUnformatted("sel terrain");
+                else if (sceneSel.kind == WorldPick::Kind::Doodad)  ImGui::TextUnformatted("sel doodad");
+                else if (sceneSel.kind == WorldPick::Kind::Wmo)     ImGui::TextUnformatted("sel wmo");
+                else ImGui::TextUnformatted("sel none");
+                ImGui::SameLine(0, 24);
+                ImGui::Text("%.0f fps", ImGui::GetIO().Framerate);
+            }
+            ImGui::End();
+        }
 
         ImGui::Render();
         int w, h; glfwGetFramebufferSize(win, &w, &h);
