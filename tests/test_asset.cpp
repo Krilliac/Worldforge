@@ -1,5 +1,6 @@
 #include "test.hpp"
 #include "asset_loader.hpp"
+#include "asset_catalog.hpp"
 #include "mpq.hpp"
 #include "raster.hpp"
 #include "image.hpp"
@@ -316,6 +317,36 @@ void test_asset() {
     MpqManager mgr;
     CHECK(mgr.addArchive(mpqPath));
     AssetLoader loader(mgr);
+
+    // --- listFiles: enumerate archived paths by wildcard (browser backend) ---
+    {
+        auto m2s = mgr.listFiles("*.m2");
+        CHECK(m2s.size() == 1 && m2s[0] == "doodad.m2");
+        auto wmos = mgr.listFiles("*.wmo");                  // root + group files
+        CHECK(wmos.size() == 2);
+        bool hasRoot = false, hasGroup = false;
+        for (const auto& w : wmos) { if (w == "wmo\\Box.wmo") hasRoot = true;
+                                     if (w == "wmo\\Box_000.wmo") hasGroup = true; }
+        CHECK(hasRoot && hasGroup);
+        CHECK(mgr.listFiles("*.m2").size() + mgr.listFiles("*.wdt").size() <= mgr.listFiles("*").size());
+        CHECK(mgr.listFiles("*.dne").empty());               // no match -> empty
+    }
+
+    // --- asset_catalog: maps + placeable models for the browsers ------------
+    {
+        auto maps = listMaps(mgr);
+        // Synthetic MPQ has World\Maps\TestMap and World\Maps\LiquidMap WDTs.
+        CHECK(maps.size() == 2);
+        CHECK(maps[0].name == "LiquidMap" && maps[1].name == "TestMap");   // sorted
+        CHECK(maps[1].wdtPath == "World\\Maps\\TestMap\\TestMap.wdt");
+
+        auto m2models = listModels(mgr, ModelKind::M2);
+        CHECK(m2models.size() == 1 && m2models[0] == "doodad.m2");
+        auto wmoModels = listModels(mgr, ModelKind::Wmo);   // root only, no _000
+        CHECK(wmoModels.size() == 1 && wmoModels[0] == "wmo\\Box.wmo");
+        CHECK(isWmoGroupFile("wmo\\Box_000.wmo"));
+        CHECK(!isWmoGroupFile("wmo\\Box.wmo"));
+    }
 
     // --- texture decode + cache + fallback ----------------------------------
     auto t = loader.texture("test.blp");

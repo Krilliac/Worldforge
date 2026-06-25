@@ -2,6 +2,7 @@
 #include <StormLib.h>
 
 #include <cstdio>
+#include <set>
 
 namespace wf {
 
@@ -92,6 +93,24 @@ bool MpqManager::readFile(const std::string& archivedPath,
         return false; // found but truncated: don't silently fall back to a base copy
     }
     return false;
+}
+
+std::vector<std::string> MpqManager::listFiles(const std::string& mask) const {
+    // Accumulate in a set: deduplicates the same path appearing in multiple
+    // archives (a patch overriding a base file) and yields a sorted listing.
+    std::set<std::string> names;
+    for (auto it = handles_.rbegin(); it != handles_.rend(); ++it) {
+        SFILE_FIND_DATA fd;
+        HANDLE hFind = SFileFindFirstFile(*it, mask.c_str(), &fd, nullptr);
+        if (!hFind) continue;
+        do {
+            const std::string name = fd.cFileName;
+            if (!name.empty() && name.front() != '(')   // skip (listfile)/(attributes)/...
+                names.insert(name);
+        } while (SFileFindNextFile(hFind, &fd));
+        SFileFindClose(hFind);
+    }
+    return std::vector<std::string>(names.begin(), names.end());
 }
 
 } // namespace wf

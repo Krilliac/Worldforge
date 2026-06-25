@@ -58,6 +58,7 @@ add_library(wforge STATIC
   src/scene.cpp
   src/terrain_render.cpp
   src/asset_loader.cpp
+  src/asset_catalog.cpp
   src/lighting.cpp
   src/client_data.cpp
   src/wav.cpp

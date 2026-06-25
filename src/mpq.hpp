@@ -38,6 +38,13 @@ public:
     // Read an entire file into `out`. Returns false if not found anywhere.
     bool readFile(const std::string& archivedPath, std::vector<uint8_t>& out) const;
 
+    // Enumerate archived paths matching a StormLib wildcard `mask` (`*` and `?`),
+    // across the whole chain, deduplicated and sorted. The mask matches the full
+    // backslash path, e.g. "*.wdt" or "World\\Maps\\*". Internal MPQ metadata
+    // files ((listfile)/(attributes)/(signature)) are omitted. Powers the editor's
+    // map and asset browsers; relies on each archive carrying a (listfile).
+    std::vector<std::string> listFiles(const std::string& mask = "*") const;
+
     size_t archiveCount() const noexcept { return handles_.size(); }
 
 private:
