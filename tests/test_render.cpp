@@ -1,6 +1,7 @@
 #include "test.hpp"
 #include "raster.hpp"
 #include "m2_render.hpp"
+#include "wmo_render.hpp"
 #include "scene.hpp"
 #include "terrain_render.hpp"
 #include "modelmesh.hpp"
@@ -198,5 +199,27 @@ void test_render() {
         CHECK(tm.vertices.size() == 3 && tm.indices.size() == 3);
         CHECK_APPROX(tm.vertices[1].uv.x, 1.0f);
         CHECK_APPROX(tm.vertices[2].uv.y, 1.0f);
+    }
+
+    // --- WMO interior liquid (MLIQ) -> surface mesh -----------------------
+    {
+        WmoLiquid liq;
+        liq.xverts = 2; liq.yverts = 2;   // 2x2 verts -> 1x1 tile
+        liq.xtiles = 1; liq.ytiles = 1;
+        liq.baseCoords = {5, 5, 0};
+        liq.heights   = { 1.0f, 2.0f, 3.0f, 4.0f };  // [j*xverts + i]
+        liq.tileFlags = { 0x00 };                    // low nibble 0 -> render
+        liq.present   = true;
+
+        Mesh wm = buildWmoLiquidMesh(liq);
+        CHECK(wm.vertices.size() == 4 && wm.indices.size() == 6);  // one tile = 2 tris
+        CHECK_APPROX(wm.vertices[0].position.z, 1.0f);             // height[0]
+        CHECK_APPROX(wm.vertices[1].position.z, 2.0f);             // height[1]
+        CHECK_APPROX(wm.vertices[2].position.z, 3.0f);             // height[2]
+        CHECK_APPROX(wm.vertices[3].position.z, 4.0f);             // height[3]
+
+        liq.tileFlags = { 0x0F };                    // "don't render" -> skipped
+        Mesh empty = buildWmoLiquidMesh(liq);
+        CHECK(empty.indices.empty());
     }
 }

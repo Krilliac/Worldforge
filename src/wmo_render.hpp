@@ -28,4 +28,12 @@ struct WmoRenderPart {
 // test first, alpha-blended last, so painter's-order rendering looks right.
 std::vector<WmoRenderPart> wmoRenderParts(const WmoModel& wmo);
 
+// Build a triangle mesh for a WMO interior liquid surface. The xverts*yverts
+// height grid spans xtiles*ytiles unit-ish tiles starting at baseCoords (each
+// tile is one liquid unit in WMO-local X/Y; Z = the stored height). Only tiles
+// whose flag's low nibble != 0xF are emitted (matching MCLQ's "don't render"
+// convention). Vertices are in WMO-local space (apply the placement transform at
+// draw time). Returns an empty mesh when the liquid is absent/empty.
+Mesh buildWmoLiquidMesh(const WmoLiquid& liq);
+
 } // namespace wf
