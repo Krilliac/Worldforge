@@ -413,4 +413,46 @@ TileScene AssetLoader::buildTileScene(const std::string& map, int x, int y,
     return ts;
 }
 
+size_t AssetLoader::placeDoodad(TileScene& ts, const std::string& m2Path, Vec3 world,
+                                float rotZ, float scale) {
+    std::shared_ptr<const M2Model> m = model(m2Path);
+    if (!m) return SIZE_MAX;
+    ts.meshes.push_back(skinM2(*m, {}));               // bind pose, like buildTileScene
+
+    std::shared_ptr<const Image> tex;
+    for (const std::string& tn : m->textures)
+        if (!tn.empty()) { tex = texture(tn); break; }
+    if (!tex) tex = fallback();
+    ts.textures.push_back(tex);
+
+    Mat4 xform = Mat4::translate(world) * Mat4::rotateZ(rotZ)
+               * Mat4::scale(Vec3{ scale, scale, scale });
+    ts.instances.push_back({ ts.meshes.size() - 1, ts.textures.size() - 1, xform });
+    return ts.instances.size() - 1;
+}
+
+size_t AssetLoader::placeWmo(TileScene& ts, const std::string& wmoPath, Vec3 world,
+                             float rotZ, uint32_t uniqueId) {
+    std::shared_ptr<const WmoModel> wm = wmo(wmoPath);
+    if (!wm) return SIZE_MAX;
+    const Mat4 xform = Mat4::translate(world) * Mat4::rotateZ(rotZ);
+
+    Mesh pm = wmoPickMesh(*wm);
+    size_t instIdx = SIZE_MAX;
+    if (!pm.indices.empty()) {
+        ts.wmoInstances.push_back({ std::move(pm), xform, uniqueId });
+        instIdx = ts.wmoInstances.size() - 1;
+    }
+    const Vec3 boost = wmoInteriorTint(wm->root.lights);
+    for (WmoRenderPart& part : wmoRenderParts(*wm)) {
+        if (part.mesh.indices.empty()) continue;
+        bool blended = part.blendMode >= 2;
+        ts.meshes.push_back(std::move(part.mesh));
+        ts.textures.push_back(part.texture.empty() ? fallback() : texture(part.texture));
+        ts.wmoRenderInstances.push_back(
+            { ts.meshes.size() - 1, ts.textures.size() - 1, xform, blended, boost });
+    }
+    return instIdx;
+}
+
 } // namespace wf

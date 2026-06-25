@@ -348,6 +348,24 @@ void test_asset() {
         CHECK(!isWmoGroupFile("wmo\\Box.wmo"));
     }
 
+    // --- interactive placement: drop a model into a live scene --------------
+    {
+        TileScene ts;
+        size_t idx = loader.placeDoodad(ts, "doodad.m2", Vec3{100, 200, 50}, 0.0f, 2.0f);
+        CHECK(idx == 0 && ts.instances.size() == 1);
+        const Mat4& xf = ts.instances[idx].transform;
+        CHECK_APPROX(xf.at(0,3), 100.0f);
+        CHECK_APPROX(xf.at(1,3), 200.0f);
+        CHECK_APPROX(xf.at(2,3), 50.0f);
+        CHECK(loader.placeDoodad(ts, "nope.m2", Vec3{0,0,0}) == SIZE_MAX);  // missing -> no-op
+        CHECK(ts.instances.size() == 1);
+
+        size_t widx = loader.placeWmo(ts, "wmo\\Box.wmo", Vec3{300, 0, 0}, 0.0f, 777);
+        CHECK(widx != SIZE_MAX);
+        CHECK(ts.wmoInstances[widx].uniqueId == 777);
+        CHECK_APPROX(ts.wmoInstances[widx].transform.at(0,3), 300.0f);
+    }
+
     // --- texture decode + cache + fallback ----------------------------------
     auto t = loader.texture("test.blp");
     CHECK(t && t->width == 2 && t->height == 2);

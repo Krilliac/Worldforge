@@ -166,6 +166,21 @@ public:
     static void applyLighting(TileScene& ts, const LightDatabase& lights,
                               uint32_t mapId, int x, int y, float dayTick = kNoonTick);
 
+    // --- interactive placement (click-to-place into a live scene) ------------
+    // Place an M2 doodad `m2Path` into `ts` at world position `world`, rotated
+    // `rotZ` radians about Z and uniformly scaled. Appends the mesh/texture/
+    // instance so the doodad renders next frame. Returns the new ts.instances
+    // index, or SIZE_MAX if the model can't be resolved (nothing is added).
+    size_t placeDoodad(TileScene& ts, const std::string& m2Path, Vec3 world,
+                       float rotZ = 0.0f, float scale = 1.0f);
+
+    // Place a WMO `wmoPath` into `ts` at `world` (rotated `rotZ` about Z). Adds
+    // the textured render parts + a pickable instance (uniqueId), mirroring how
+    // buildTileScene places map objects. Returns the new ts.wmoInstances index,
+    // or SIZE_MAX if the WMO can't be resolved.
+    size_t placeWmo(TileScene& ts, const std::string& wmoPath, Vec3 world,
+                    float rotZ = 0.0f, uint32_t uniqueId = 0);
+
 private:
     static std::string wdtPath(const std::string& map);
     static std::string adtPath(const std::string& map, int x, int y);
