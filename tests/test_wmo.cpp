@@ -208,6 +208,19 @@ void test_wmo() {
     put16(moba, 2);    // maxIndex
     moba.push_back(0); // flags
     moba.push_back(1); // materialId
+    std::vector<uint8_t> mobn;     // one collision BSP leaf node (16 bytes)
+    put16(mobn, 4);    // flags (leaf)
+    put16(mobn, 0xFFFF); // negChild = -1
+    put16(mobn, 0xFFFF); // posChild = -1
+    put16(mobn, 1);    // nFaces
+    put32(mobn, 0);    // faceStart
+    putf (mobn, 2.5f); // planeDist
+    std::vector<uint8_t> mobv;     // two face indices into MOVI triangles
+    put16(mobv, 0); put16(mobv, 1);
+    std::vector<uint8_t> mocv;     // 3 vertex colors (BGRA), one per vertex
+    mocv.push_back(64); mocv.push_back(128); mocv.push_back(255); mocv.push_back(255); // BGRA -> rgba(255,128,64,255)
+    mocv.push_back(0);  mocv.push_back(0);   mocv.push_back(0);   mocv.push_back(255);
+    mocv.push_back(255);mocv.push_back(255); mocv.push_back(255); mocv.push_back(255);
 
     // MOGP = 68-byte header + subchunks.
     std::vector<uint8_t> mogp(0x44, 0);
@@ -219,6 +232,9 @@ void test_wmo() {
     append("MOVI", movi);
     append("MOPY", mopy);
     append("MOBA", moba);
+    append("MOBN", mobn);
+    append("MOBV", mobv);
+    append("MOCV", mocv);
     chunk(group, "MOGP", mogp);
 
     WmoGroup wg = parseWmoGroup(group);
@@ -230,6 +246,15 @@ void test_wmo() {
     CHECK(wg.triMaterial.size() == 1 && wg.triMaterial[0] == 1);
     CHECK(wg.batches.size() == 1);
     CHECK(wg.batches[0].indexCount == 3 && wg.batches[0].materialId == 1);
+    CHECK(wg.bspNodes.size() == 1);
+    CHECK(wg.bspNodes[0].flags == 4 && wg.bspNodes[0].nFaces == 1);
+    CHECK(wg.bspNodes[0].negChild == -1 && wg.bspNodes[0].posChild == -1);
+    CHECK_APPROX(wg.bspNodes[0].planeDist, 2.5f);
+    CHECK(wg.bspFaceIndices.size() == 2);
+    CHECK(wg.bspFaceIndices[1] == 1);
+    CHECK(wg.vertexColors.size() == 3);
+    CHECK(wg.vertexColors[0].r == 255 && wg.vertexColors[0].g == 128 &&
+          wg.vertexColors[0].b == 64  && wg.vertexColors[0].a == 255);
 
     // ---------------- render parts ----------------
     // The single triangle uses material 1 -> resolves to texture "B.blp", and

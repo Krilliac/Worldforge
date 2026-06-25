@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include "math.hpp"
+#include "image.hpp"
 #include "client_version.hpp"
 
 namespace wf {
@@ -108,6 +109,15 @@ struct WmoBatch {                     // MOBA entry
     uint8_t  materialId = 0;          // into root MOMT (0xFF = none)
 };
 
+struct WmoBspNode {                  // MOBN entry (16 bytes), T_BSP_NODE
+    uint16_t flags = 0;              // plane type / leaf flags
+    int16_t  negChild = -1;          // child node indices (-1 = none)
+    int16_t  posChild = -1;
+    uint16_t nFaces = 0;             // leaf: face count into MOBV
+    uint32_t faceStart = 0;          // leaf: first face index into MOBV
+    float    planeDist = 0.0f;       // split plane distance
+};
+
 struct WmoGroup {
     uint32_t flags = 0;
     Vec3     bboxMin, bboxMax;
@@ -118,6 +128,9 @@ struct WmoGroup {
     std::vector<uint16_t> indices;    // MOVI (triangle list)
     std::vector<uint8_t>  triMaterial;// MOPY material id per triangle
     std::vector<WmoBatch> batches;    // MOBA
+    std::vector<WmoBspNode> bspNodes;     // MOBN collision BSP tree
+    std::vector<uint16_t>   bspFaceIndices;// MOBV (indexes MOVI triangles)
+    std::vector<Rgba>       vertexColors;  // MOCV (per-vertex BGRA, decoded)
 };
 
 WmoGroup parseWmoGroup(const std::vector<uint8_t>& buf);

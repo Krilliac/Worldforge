@@ -208,6 +208,26 @@ WmoGroup parseWmoGroup(const std::vector<uint8_t>& buf) {
                     b.materialId = r.u8();
                     grp.batches.push_back(b);
                 }
+            } else if (s.magic == "MOBN") {
+                // 16-byte T_BSP_NODE collision tree records.
+                while (r.remaining() >= 16) {
+                    WmoBspNode n;
+                    n.flags     = r.u16();
+                    n.negChild  = static_cast<int16_t>(r.u16());
+                    n.posChild  = static_cast<int16_t>(r.u16());
+                    n.nFaces    = r.u16();
+                    n.faceStart = r.u32();
+                    n.planeDist = r.f32();
+                    grp.bspNodes.push_back(n);
+                }
+            } else if (s.magic == "MOBV") {
+                while (r.remaining() >= 2) grp.bspFaceIndices.push_back(r.u16());
+            } else if (s.magic == "MOCV") {
+                // CImVector BGRA per vertex; decode to Rgba.
+                while (r.remaining() >= 4) {
+                    uint8_t b = r.u8(), g = r.u8(), rr = r.u8(), a = r.u8();
+                    grp.vertexColors.push_back({ rr, g, b, a });
+                }
             }
             return true;
         });
