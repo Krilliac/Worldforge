@@ -96,6 +96,20 @@ void test_wmo() {
     put32(modd, 0xFFFFFFFF);         // color
     chunk(root, "MODD", modd);
 
+    // MOLT: one interior light (48-byte SMOLight). MOHD nLights stays 0 above,
+    // so a correct parse must count by chunk size, not the header field.
+    std::vector<uint8_t> molt;
+    molt.push_back(1);                       // type = spot
+    molt.push_back(1);                       // useAttenuation
+    molt.push_back(0); molt.push_back(0);    // padding
+    molt.push_back(64); molt.push_back(128); molt.push_back(255); molt.push_back(255); // BGRA -> rgb(255,128,64)
+    putf(molt, 3); putf(molt, 4); putf(molt, 5);   // position
+    putf(molt, 1.5f);                        // intensity
+    putf(molt, 2.0f);                        // attenStart
+    putf(molt, 8.0f);                        // attenEnd
+    for (int i = 0; i < 4; ++i) putf(molt, 0.0f);  // trailing unknowns
+    chunk(root, "MOLT", molt);
+
     WmoRoot wr = parseWmoRoot(root);
     CHECK(wr.nGroups == 1 && wr.nTextures == 2);
     CHECK_APPROX(wr.bboxMax.z, 30.0f);
@@ -113,6 +127,14 @@ void test_wmo() {
     CHECK_APPROX(wr.doodads[0].position.x, 5.0f);
     CHECK_APPROX(wr.doodads[0].orientation.w, 1.0f);
     CHECK_APPROX(wr.doodads[0].scale, 2.0f);
+    CHECK(wr.lights.size() == 1);
+    CHECK(wr.lights[0].type == 1 && wr.lights[0].useAttenuation);
+    CHECK_APPROX(wr.lights[0].color.x, 1.0f);              // R = 255/255
+    CHECK_APPROX(wr.lights[0].color.y, 128.0f / 255.0f);   // G
+    CHECK_APPROX(wr.lights[0].color.z, 64.0f / 255.0f);    // B
+    CHECK_APPROX(wr.lights[0].position.y, 4.0f);
+    CHECK_APPROX(wr.lights[0].intensity, 1.5f);
+    CHECK_APPROX(wr.lights[0].attenEnd, 8.0f);
 
     // ---------------- group ----------------
     std::vector<uint8_t> group;

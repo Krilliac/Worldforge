@@ -46,6 +46,16 @@ struct WmoGroupInfo {                 // MOGI entry
     std::string name;
 };
 
+struct WmoLight {                     // MOLT entry (48 bytes), interior lighting
+    uint8_t type = 0;                 // 0 omni, 1 spot, 2 direct, 3 ambient
+    bool    useAttenuation = false;
+    Vec3    color;                    // RGB 0..1, decoded from the BGRA CImVector
+    Vec3    position;                 // WMO local space
+    float   intensity  = 0.0f;
+    float   attenStart = 0.0f;        // attenuation begin/end radii (4 trailing
+    float   attenEnd   = 0.0f;        // SMOLight floats are version-specific, skipped)
+};
+
 struct WmoRoot {
     uint32_t version = 0;   // MVER (17 for vanilla..Cata); 0 if no MVER chunk
     uint32_t nTextures = 0, nGroups = 0, nPortals = 0, nLights = 0;
@@ -58,6 +68,7 @@ struct WmoRoot {
     std::vector<WmoGroupInfo> groups;          // MOGI
     std::vector<WmoDoodadSet> doodadSets;      // MODS
     std::vector<WmoDoodad>    doodads;          // MODD
+    std::vector<WmoLight>     lights;           // MOLT
 };
 
 // Parse a WMO root file. `profile` gates the WMO version this client understands

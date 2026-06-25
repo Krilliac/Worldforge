@@ -87,6 +87,22 @@ WmoRoot parseWmoRoot(const std::vector<uint8_t>& buf, const ClientProfile& profi
                 r.u32();                   // unused
                 root.doodadSets.push_back(s);
             }
+        } else if (c.magic == "MOLT") {
+            // 48-byte SMOLight records; count by chunkLen/48 (robust to MOHD).
+            while (r.remaining() >= 48) {
+                WmoLight L;
+                L.type           = r.u8();
+                L.useAttenuation = r.u8() != 0;
+                r.u8(); r.u8();                              // padding
+                uint8_t b = r.u8(), g = r.u8(), rr = r.u8(); r.u8();  // BGRA, drop A
+                L.color      = { rr / 255.0f, g / 255.0f, b / 255.0f };
+                L.position   = { r.f32(), r.f32(), r.f32() };
+                L.intensity  = r.f32();
+                L.attenStart = r.f32();
+                L.attenEnd   = r.f32();
+                for (int i = 0; i < 4; ++i) r.f32();         // trailing unknowns
+                root.lights.push_back(L);
+            }
         } else if (c.magic == "MODN") {
             modn.assign(c.data, c.data + c.size);
         } else if (c.magic == "MODD") {
