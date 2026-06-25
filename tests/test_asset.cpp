@@ -1,6 +1,7 @@
 #include "test.hpp"
 #include "asset_loader.hpp"
 #include "asset_catalog.hpp"
+#include "dbc_defs.hpp"      // DbcBuilder (display-DBC resolver test)
 #include "mpq.hpp"
 #include "raster.hpp"
 #include "image.hpp"
@@ -364,6 +365,31 @@ void test_asset() {
         CHECK(widx != SIZE_MAX);
         CHECK(ts.wmoInstances[widx].uniqueId == 777);
         CHECK_APPROX(ts.wmoInstances[widx].transform.at(0,3), 300.0f);
+    }
+
+    // --- display-DBC resolver: spawn creatures/objects by display id --------
+    {
+        DbcBuilder cmd(3);                                  // CreatureModelData
+        uint32_t mp = cmd.addString("Creature\\Cat\\Cat.mdx");
+        cmd.addRecord({815, 0, mp});
+        Dbc cmdDbc = Dbc::parse(cmd.build());
+
+        DbcBuilder cdi(5);                                  // CreatureDisplayInfo
+        cdi.addRecord({1234, 815, 0, 0, 0});                // displayId 1234 -> modelId 815
+        Dbc cdiDbc = Dbc::parse(cdi.build());
+
+        auto creatures = listCreatureModels(cdiDbc, cmdDbc);
+        CHECK(creatures.size() == 1);
+        CHECK(creatures[0].displayId == 1234);
+        CHECK(creatures[0].model == "Creature\\Cat\\Cat.m2");   // .mdx -> .m2
+
+        DbcBuilder godi(2);                                 // GameObjectDisplayInfo
+        uint32_t gp = godi.addString("World\\wmo\\Tower.wmo");
+        godi.addRecord({42, gp});
+        Dbc godiDbc = Dbc::parse(godi.build());
+        auto gos = listGameObjectModels(godiDbc);
+        CHECK(gos.size() == 1 && gos[0].displayId == 42);
+        CHECK(gos[0].model == "World\\wmo\\Tower.wmo");         // .wmo unchanged
     }
 
     // --- texture decode + cache + fallback ----------------------------------

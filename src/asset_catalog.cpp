@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <unordered_map>
+
+#include "dbc_defs.hpp"   // creature/gameobject display readers + normalizeModelPath
 
 namespace wf {
 namespace {
@@ -63,6 +66,47 @@ std::vector<std::string> listModels(const MpqManager& mpq, ModelKind kind) {
     std::vector<std::string> out;
     for (const std::string& w : mpq.listFiles("*.wmo"))
         if (!isWmoGroupFile(w)) out.push_back(w);   // root WMOs only
+    return out;
+}
+
+namespace {
+std::string baseName(const std::string& p) {
+    size_t s = p.find_last_of("\\/");
+    return s == std::string::npos ? p : p.substr(s + 1);
+}
+} // namespace
+
+std::vector<DisplayModel> listCreatureModels(const Dbc& displayInfo, const Dbc& modelData) {
+    // Index CreatureModelData: modelId -> on-disk model path (.mdx -> .m2).
+    std::unordered_map<uint32_t, std::string> models;
+    for (uint32_t r = 0; r < modelData.recordCount(); ++r) {
+        CreatureModelDataEntry m = creatureModelDataEntry(modelData, r);
+        if (!m.modelPath.empty()) models[m.id] = normalizeModelPath(m.modelPath);
+    }
+    std::vector<DisplayModel> out;
+    for (uint32_t r = 0; r < displayInfo.recordCount(); ++r) {
+        CreatureDisplayInfoEntry d = creatureDisplayInfoEntry(displayInfo, r);
+        auto it = models.find(d.modelId);
+        if (it == models.end() || it->second.empty()) continue;   // unresolved -> skip
+        out.push_back({ d.id, it->second,
+                        "Creature " + std::to_string(d.id) + "  " + baseName(it->second) });
+    }
+    std::sort(out.begin(), out.end(),
+              [](const DisplayModel& a, const DisplayModel& b) { return a.displayId < b.displayId; });
+    return out;
+}
+
+std::vector<DisplayModel> listGameObjectModels(const Dbc& displayInfo) {
+    std::vector<DisplayModel> out;
+    for (uint32_t r = 0; r < displayInfo.recordCount(); ++r) {
+        GameObjectDisplayInfoEntry g = gameObjectDisplayInfoEntry(displayInfo, r);
+        if (g.modelName.empty()) continue;
+        std::string model = normalizeModelPath(g.modelName);
+        out.push_back({ g.id, model,
+                        "GameObject " + std::to_string(g.id) + "  " + baseName(model) });
+    }
+    std::sort(out.begin(), out.end(),
+              [](const DisplayModel& a, const DisplayModel& b) { return a.displayId < b.displayId; });
     return out;
 }
 
