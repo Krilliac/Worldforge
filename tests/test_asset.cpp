@@ -390,6 +390,18 @@ void test_asset() {
         auto gos = listGameObjectModels(godiDbc);
         CHECK(gos.size() == 1 && gos[0].displayId == 42);
         CHECK(gos[0].model == "World\\wmo\\Tower.wmo");         // .wmo unchanged
+
+        // GroundEffect: texture -> doodad -> detail model.
+        DbcBuilder ged(2);                                  // GroundEffectDoodad
+        uint32_t dp = ged.addString("Detail\\Grass01.mdx");
+        ged.addRecord({777, dp});
+        Dbc gedDbc = Dbc::parse(ged.build());
+        DbcBuilder get(10);                                 // GroundEffectTexture
+        get.addRecord({300, 777, 0, 0, 0, 0, 0, 0, 0, 32}); // doodadIds[0]=777
+        Dbc getDbc = Dbc::parse(get.build());
+        auto detail = listGroundEffectModels(getDbc, gedDbc);
+        CHECK(detail.size() == 1 && detail[0].displayId == 777);
+        CHECK(detail[0].model == "Detail\\Grass01.m2");
     }
 
     // --- texture decode + cache + fallback ----------------------------------

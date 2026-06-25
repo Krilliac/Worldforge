@@ -110,4 +110,28 @@ std::vector<DisplayModel> listGameObjectModels(const Dbc& displayInfo) {
     return out;
 }
 
+std::vector<DisplayModel> listGroundEffectModels(const Dbc& texture, const Dbc& doodad) {
+    // Index GroundEffectDoodad: id -> normalised model path.
+    std::unordered_map<uint32_t, std::string> models;
+    for (uint32_t r = 0; r < doodad.recordCount(); ++r) {
+        GroundEffectDoodadEntry d = groundEffectDoodadEntry(doodad, r);
+        if (!d.modelPath.empty()) models[d.id] = normalizeModelPath(d.modelPath);
+    }
+    std::vector<DisplayModel> out;
+    std::unordered_map<std::string, bool> seen;   // dedup by model
+    for (uint32_t r = 0; r < texture.recordCount(); ++r) {
+        GroundEffectTextureEntry t = groundEffectTextureEntry(texture, r);
+        for (uint32_t did : t.doodadIds) {
+            if (did == 0) continue;
+            auto it = models.find(did);
+            if (it == models.end() || it->second.empty() || seen.count(it->second)) continue;
+            seen[it->second] = true;
+            out.push_back({ did, it->second, "Detail " + std::to_string(did) + "  " + baseName(it->second) });
+        }
+    }
+    std::sort(out.begin(), out.end(),
+              [](const DisplayModel& a, const DisplayModel& b) { return a.displayId < b.displayId; });
+    return out;
+}
+
 } // namespace wf

@@ -50,4 +50,9 @@ std::vector<DisplayModel> listCreatureModels(const Dbc& displayInfo, const Dbc& 
 // (.mdx normalised to .m2; .wmo left as-is). Sorted by display id.
 std::vector<DisplayModel> listGameObjectModels(const Dbc& displayInfo);
 
+// Resolve GroundEffectTexture -> GroundEffectDoodad into the detail doodads
+// (grass/rocks) the client scatters per ground texture. Deduplicated by model,
+// .mdx normalised to .m2. `displayId` carries the source doodad id. Sorted.
+std::vector<DisplayModel> listGroundEffectModels(const Dbc& texture, const Dbc& doodad);
+
 } // namespace wf
