@@ -228,6 +228,31 @@ WmoGroup parseWmoGroup(const std::vector<uint8_t>& buf) {
                     uint8_t b = r.u8(), g = r.u8(), rr = r.u8(), a = r.u8();
                     grp.vertexColors.push_back({ rr, g, b, a });
                 }
+            } else if (s.magic == "MLIQ") {
+                // SMOLiquid header (30 bytes) then a vertex grid + tile flags.
+                if (r.remaining() < 30) return true;
+                WmoLiquid& L = grp.liquid;
+                L.xverts = r.u32();
+                L.yverts = r.u32();
+                L.xtiles = r.u32();
+                L.ytiles = r.u32();
+                L.baseCoords = { r.f32(), r.f32(), r.f32() };
+                L.materialId = r.u16();
+
+                // Clamp counts so a malformed header can't make us over-read.
+                size_t nVerts = static_cast<size_t>(L.xverts) * L.yverts;
+                size_t nTiles = static_cast<size_t>(L.xtiles) * L.ytiles;
+                if (nVerts > r.remaining() / 8) nVerts = r.remaining() / 8;
+                // Each vertex is 8 bytes { uint32 flow/colour, float height }; keep
+                // only the trailing height, mirroring terrain.cpp parseMclq.
+                for (size_t i = 0; i < nVerts && r.remaining() >= 8; ++i) {
+                    r.skip(4);
+                    L.heights.push_back(r.f32());
+                }
+                if (nTiles > r.remaining()) nTiles = r.remaining();
+                for (size_t i = 0; i < nTiles && r.remaining() >= 1; ++i)
+                    L.tileFlags.push_back(r.u8());
+                L.present = true;
             }
             return true;
         });

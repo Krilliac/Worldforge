@@ -118,6 +118,15 @@ struct WmoBspNode {                  // MOBN entry (16 bytes), T_BSP_NODE
     float    planeDist = 0.0f;       // split plane distance
 };
 
+struct WmoLiquid {                   // MLIQ chunk (SMOLiquid), interior water/lava
+    uint32_t xverts = 0, yverts = 0, xtiles = 0, ytiles = 0;
+    Vec3     baseCoords;             // corner position in WMO space
+    uint16_t materialId = 0;
+    std::vector<float>   heights;    // xverts*yverts liquid surface heights
+    std::vector<uint8_t> tileFlags;  // xtiles*ytiles render flags
+    bool present = false;
+};
+
 struct WmoGroup {
     uint32_t flags = 0;
     Vec3     bboxMin, bboxMax;
@@ -131,6 +140,7 @@ struct WmoGroup {
     std::vector<WmoBspNode> bspNodes;     // MOBN collision BSP tree
     std::vector<uint16_t>   bspFaceIndices;// MOBV (indexes MOVI triangles)
     std::vector<Rgba>       vertexColors;  // MOCV (per-vertex BGRA, decoded)
+    WmoLiquid               liquid;        // MLIQ (valid when liquid.present)
 };
 
 WmoGroup parseWmoGroup(const std::vector<uint8_t>& buf);

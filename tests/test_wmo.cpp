@@ -221,6 +221,19 @@ void test_wmo() {
     mocv.push_back(64); mocv.push_back(128); mocv.push_back(255); mocv.push_back(255); // BGRA -> rgba(255,128,64,255)
     mocv.push_back(0);  mocv.push_back(0);   mocv.push_back(0);   mocv.push_back(255);
     mocv.push_back(255);mocv.push_back(255); mocv.push_back(255); mocv.push_back(255);
+    std::vector<uint8_t> mliq;     // 2x2 verts -> 1x1 tile interior liquid
+    put32(mliq, 2);    // xverts
+    put32(mliq, 2);    // yverts
+    put32(mliq, 1);    // xtiles
+    put32(mliq, 1);    // ytiles
+    putf(mliq, 10);putf(mliq, 20);putf(mliq, 30);   // baseCoords
+    put16(mliq, 7);    // materialId
+    // four 8-byte vertices: leading uint32 (flow/colour, ignored) + float height
+    put32(mliq, 0xDEADBEEF); putf(mliq, 1.0f);
+    put32(mliq, 0);          putf(mliq, 2.0f);
+    put32(mliq, 0);          putf(mliq, 3.0f);
+    put32(mliq, 0);          putf(mliq, 4.0f);
+    mliq.push_back(0x01);    // one tile flag
 
     // MOGP = 68-byte header + subchunks.
     std::vector<uint8_t> mogp(0x44, 0);
@@ -235,6 +248,7 @@ void test_wmo() {
     append("MOBN", mobn);
     append("MOBV", mobv);
     append("MOCV", mocv);
+    append("MLIQ", mliq);
     chunk(group, "MOGP", mogp);
 
     WmoGroup wg = parseWmoGroup(group);
@@ -255,6 +269,15 @@ void test_wmo() {
     CHECK(wg.vertexColors.size() == 3);
     CHECK(wg.vertexColors[0].r == 255 && wg.vertexColors[0].g == 128 &&
           wg.vertexColors[0].b == 64  && wg.vertexColors[0].a == 255);
+    CHECK(wg.liquid.present);
+    CHECK(wg.liquid.xverts == 2 && wg.liquid.yverts == 2);
+    CHECK(wg.liquid.xtiles == 1 && wg.liquid.ytiles == 1);
+    CHECK(wg.liquid.materialId == 7);
+    CHECK_APPROX(wg.liquid.baseCoords.x, 10.0f);
+    CHECK(wg.liquid.heights.size() == 4);
+    CHECK_APPROX(wg.liquid.heights[0], 1.0f);
+    CHECK_APPROX(wg.liquid.heights[3], 4.0f);
+    CHECK(wg.liquid.tileFlags.size() == 1 && wg.liquid.tileFlags[0] == 0x01);
 
     // ---------------- render parts ----------------
     // The single triangle uses material 1 -> resolves to texture "B.blp", and
