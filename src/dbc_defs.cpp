@@ -1,5 +1,6 @@
 #include "dbc_defs.hpp"
 
+#include <cctype>
 #include <cstring>
 
 namespace wf {
@@ -11,6 +12,17 @@ float fieldF32(const Dbc& dbc, uint32_t rec, uint32_t field) {
     float f;
     std::memcpy(&f, &bits, sizeof(f));
     return f;
+}
+// Case-insensitive test for a trailing extension (suffix includes the dot).
+bool endsWithCI(const std::string& s, const std::string& suffix) {
+    if (s.size() < suffix.size()) return false;
+    size_t off = s.size() - suffix.size();
+    for (size_t i = 0; i < suffix.size(); ++i) {
+        char a = static_cast<char>(std::tolower((unsigned char)s[off + i]));
+        char b = static_cast<char>(std::tolower((unsigned char)suffix[i]));
+        if (a != b) return false;
+    }
+    return true;
 }
 void put32(std::vector<uint8_t>& b, uint32_t v) {
     for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xFF));
@@ -88,6 +100,34 @@ LightEntry lightEntry(const Dbc& dbc, uint32_t rec) {
     e.falloffEnd   = fieldF32(dbc, rec, 6);
     for (uint32_t i = 0; i < e.lightParams.size(); ++i) e.lightParams[i] = dbc.getU32(rec, 7 + i);
     return e;
+}
+
+CreatureModelDataEntry creatureModelDataEntry(const Dbc& dbc, uint32_t rec) {
+    CreatureModelDataEntry e;
+    e.id        = dbc.getU32(rec, 0);
+    e.modelPath = dbc.getString(rec, 2);
+    return e;
+}
+
+CreatureDisplayInfoEntry creatureDisplayInfoEntry(const Dbc& dbc, uint32_t rec) {
+    CreatureDisplayInfoEntry e;
+    e.id      = dbc.getU32(rec, 0);
+    e.modelId = dbc.getU32(rec, 1);
+    e.scale   = fieldF32(dbc, rec, 4);   // VERIFY-FLAGGED: field index less certain
+    return e;
+}
+
+GameObjectDisplayInfoEntry gameObjectDisplayInfoEntry(const Dbc& dbc, uint32_t rec) {
+    GameObjectDisplayInfoEntry e;
+    e.id        = dbc.getU32(rec, 0);
+    e.modelName = dbc.getString(rec, 1);
+    return e;
+}
+
+std::string normalizeModelPath(const std::string& dbcPath) {
+    if (endsWithCI(dbcPath, ".mdx") || endsWithCI(dbcPath, ".mdl"))
+        return dbcPath.substr(0, dbcPath.size() - 4) + ".m2";
+    return dbcPath;
 }
 
 } // namespace wf

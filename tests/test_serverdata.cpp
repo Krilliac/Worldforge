@@ -109,6 +109,53 @@ void test_dbc_defs() {
         CHECK(e.lightParams.size() == 5);
         CHECK(e.lightParams[0] == 396 && e.lightParams[4] == 7);
     }
+
+    // --- CreatureModelData.dbc: id, _, modelPath@2(str) ---
+    {
+        std::string ms;
+        ms.push_back('\0');
+        size_t offCat = ms.size(); ms += "Creature\\Cat\\Cat.mdx"; ms.push_back('\0');
+        std::vector<uint32_t> rec(10, 0);
+        rec[0] = 815;                                 // id
+        rec[2] = (uint32_t)offCat;                    // modelPath
+        Dbc dbc = Dbc::parse(makeDbc(10, { rec }, ms));
+        CreatureModelDataEntry e = creatureModelDataEntry(dbc, 0);
+        CHECK(e.id == 815);
+        CHECK(e.modelPath == "Creature\\Cat\\Cat.mdx");
+        CHECK(normalizeModelPath(e.modelPath) == "Creature\\Cat\\Cat.m2");
+    }
+
+    // --- CreatureDisplayInfo.dbc: id, modelId@1, _, _, scale@4 ---
+    {
+        std::vector<uint32_t> rec(13, 0);
+        rec[0] = 1234;                                // id (Displayid)
+        rec[1] = 815;                                 // modelId -> CreatureModelData.id
+        rec[4] = fbits(1.5f);                         // scale (VERIFY-FLAGGED)
+        Dbc dbc = Dbc::parse(makeDbc(13, { rec }, std::string(1, '\0')));
+        CreatureDisplayInfoEntry e = creatureDisplayInfoEntry(dbc, 0);
+        CHECK(e.id == 1234 && e.modelId == 815);
+        CHECK_APPROX(e.scale, 1.5f);
+    }
+
+    // --- GameObjectDisplayInfo.dbc: id, modelName@1(str) ---
+    {
+        std::string gs;
+        gs.push_back('\0');
+        size_t offWmo = gs.size(); gs += "World\\wmo\\Azeroth\\Buildings\\Tower.wmo"; gs.push_back('\0');
+        std::vector<uint32_t> rec(18, 0);
+        rec[0] = 42;                                  // id (Displayid)
+        rec[1] = (uint32_t)offWmo;                    // modelName
+        Dbc dbc = Dbc::parse(makeDbc(18, { rec }, gs));
+        GameObjectDisplayInfoEntry e = gameObjectDisplayInfoEntry(dbc, 0);
+        CHECK(e.id == 42);
+        CHECK(e.modelName == "World\\wmo\\Azeroth\\Buildings\\Tower.wmo");
+        CHECK(normalizeModelPath(e.modelName) == "World\\wmo\\Azeroth\\Buildings\\Tower.wmo");
+    }
+
+    // --- normalizeModelPath: .mdx/.mdl -> .m2 (case-insensitive); others unchanged ---
+    CHECK(normalizeModelPath("X\\Y.mdx") == "X\\Y.m2");
+    CHECK(normalizeModelPath("a.MDL") == "a.m2");
+    CHECK(normalizeModelPath("z.wmo") == "z.wmo");
 }
 
 void test_gridmap() {

@@ -73,10 +73,34 @@ struct LightEntry {
     std::array<uint32_t, 5> lightParams{};
 };
 
+struct CreatureModelDataEntry {
+    uint32_t    id        = 0;   // field 0
+    std::string modelPath;       // field 2 (string) e.g. "Creature\\Rabbit\\Rabbit.mdx"
+};
+
+struct CreatureDisplayInfoEntry {
+    uint32_t id      = 0;        // field 0 (Displayid)
+    uint32_t modelId = 0;        // field 1 -> CreatureModelData.id
+    float    scale   = 1.0f;     // field 4 (CreatureModelScale) -- VERIFY-FLAGGED
+};
+
+struct GameObjectDisplayInfoEntry {
+    uint32_t    id = 0;          // field 0 (Displayid)
+    std::string modelName;       // field 1 (string) -- .mdx (M2) or .wmo path
+};
+
 // Typed accessors. `rec` is a 0-based record index in `[0, dbc.recordCount())`.
 MapEntry        mapEntry(const Dbc& dbc, uint32_t rec);
 AreaEntry       areaEntry(const Dbc& dbc, uint32_t rec);
 LiquidTypeEntry liquidTypeEntry(const Dbc& dbc, uint32_t rec);
 LightEntry      lightEntry(const Dbc& dbc, uint32_t rec);
+CreatureModelDataEntry     creatureModelDataEntry(const Dbc& dbc, uint32_t rec);
+CreatureDisplayInfoEntry   creatureDisplayInfoEntry(const Dbc& dbc, uint32_t rec);
+GameObjectDisplayInfoEntry gameObjectDisplayInfoEntry(const Dbc& dbc, uint32_t rec);
+
+// Normalise a DBC model path to the on-disk file: vanilla DBCs reference models
+// with a .mdx (or .mdl) extension but the archive stores .m2 (MD20). Replaces a
+// trailing .mdx/.mdl with .m2 (case-insensitive); leaves .wmo and others as-is.
+std::string normalizeModelPath(const std::string& dbcPath);
 
 } // namespace wf
