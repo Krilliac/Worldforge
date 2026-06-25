@@ -162,6 +162,31 @@ void test_render() {
         CHECK(green);
     }
 
+    // --- MCSH baked shadow darkens the terrain splat ----------------------
+    {
+        MapChunk mc;
+        mc.position = {0,0,0};
+        for (int i = 0; i < 145; ++i) mc.heights[i] = 0.0f;
+        for (auto& n : mc.normals) n = {0,0,1};
+        TexMesh tm = buildChunkTexMesh(mc, 32, 32);
+        Image base(1,1); base.at(0,0) = Rgba{200,200,200,255};
+        std::vector<TerrainLayer> layers = { { &base, nullptr } };
+        Mat4 view = Mat4::lookAt({16,16,40}, {16,16,0}, {0,1,0});
+        Mat4 proj = Mat4::perspective(60.0, 1.0, 0.5, 500.0);
+
+        auto litSum = [&](const std::vector<uint8_t>* sh) {
+            Framebuffer fb(64,64); fb.clear(Rgba{0,0,0,255});
+            rasterTerrainSplat(fb, tm, proj*view, layers, 4.0f, ShadeLight{}, sh);
+            long s = 0; for (const Rgba& p : fb.color.pixels) s += p.g; return s;
+        };
+        std::vector<uint8_t> allShadow(512, 0xFF);   // every texel shadowed
+        long lit = litSum(nullptr);
+        long shd = litSum(&allShadow);
+        CHECK(lit > 0);
+        CHECK(shd < lit);                            // shadow darkens the terrain
+        CHECK(shd * 100 < lit * 70 && shd * 100 > lit * 40);   // ~0.55x, allow rounding
+    }
+
     // --- WMO group -> textured mesh preserves UVs -------------------------
     {
         WmoGroup g;

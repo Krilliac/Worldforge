@@ -36,8 +36,11 @@ Vec3 wmoInteriorTint(const std::vector<WmoLight>& lights, float strength) {
 }
 
 void TileRender::renderTerrain(Framebuffer& fb, const Mat4& mvp, Vec3 lightDir) const {
-    for (size_t c = 0; c < chunkMeshes.size(); ++c)
-        rasterTerrainSplat(fb, chunkMeshes[c], mvp, chunkLayers[c], tiling, lightDir);
+    for (size_t c = 0; c < chunkMeshes.size(); ++c) {
+        const std::vector<uint8_t>* sh =
+            (c < chunkShadows.size() && !chunkShadows[c].empty()) ? &chunkShadows[c] : nullptr;
+        rasterTerrainSplat(fb, chunkMeshes[c], mvp, chunkLayers[c], tiling, lightDir, sh);
+    }
 }
 
 void TileRender::renderLiquid(Framebuffer& fb, const Mat4& mvp, Vec3 lightDir) const {
@@ -46,8 +49,11 @@ void TileRender::renderLiquid(Framebuffer& fb, const Mat4& mvp, Vec3 lightDir) c
 }
 
 void TileRender::renderTerrain(Framebuffer& fb, const Mat4& mvp, const ShadeLight& light) const {
-    for (size_t c = 0; c < chunkMeshes.size(); ++c)
-        rasterTerrainSplat(fb, chunkMeshes[c], mvp, chunkLayers[c], tiling, light);
+    for (size_t c = 0; c < chunkMeshes.size(); ++c) {
+        const std::vector<uint8_t>* sh =
+            (c < chunkShadows.size() && !chunkShadows[c].empty()) ? &chunkShadows[c] : nullptr;
+        rasterTerrainSplat(fb, chunkMeshes[c], mvp, chunkLayers[c], tiling, light, sh);
+    }
 }
 
 void TileRender::renderLiquid(Framebuffer& fb, const Mat4& mvp, const ShadeLight& light) const {
@@ -302,10 +308,12 @@ TileRender AssetLoader::buildTerrain(const Adt& adt, const std::vector<MapChunk>
     tile.chunkMeshes.reserve(chunks.size());
     tile.chunkAlphas.resize(chunks.size());
     tile.chunkLayers.resize(chunks.size());
+    tile.chunkShadows.resize(chunks.size());
 
     for (size_t c = 0; c < chunks.size(); ++c) {
         const MapChunk& mc = chunks[c];
         tile.chunkMeshes.push_back(buildChunkTexMesh(mc, x, y));
+        tile.chunkShadows[c] = mc.shadow;   // MCSH baked shadow (empty if absent)
 
         // Translucent liquid (MCLQ) surface: only chunks that carry water/ocean/
         // magma/slime emit a mesh, and only the wet 8x8 cells become triangles

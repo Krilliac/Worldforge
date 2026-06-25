@@ -28,11 +28,15 @@ TexMesh buildChunkTexMesh(const MapChunk& mc, int blockX, int blockY);
 Rgba splatSample(const std::vector<TerrainLayer>& layers, float u, float v, float tiling);
 
 // Rasterise a terrain TexMesh (uv = chunk 0..1) with the layer splat + lighting.
+// `shadow`, when non-null, is the chunk's raw 64x64-bit MCSH map: texels whose
+// bit is set are darkened (baked terrain self-shadow). Pass null for no shadow.
 void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
-                        const std::vector<TerrainLayer>& layers, float tiling, Vec3 lightDir);
+                        const std::vector<TerrainLayer>& layers, float tiling, Vec3 lightDir,
+                        const std::vector<uint8_t>* shadow = nullptr);
 // Coloured-light overload: ambient/diffuse from zone lighting (Light.dbc).
 void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                         const std::vector<TerrainLayer>& layers, float tiling,
-                        const ShadeLight& light);
+                        const ShadeLight& light,
+                        const std::vector<uint8_t>* shadow = nullptr);
 
 } // namespace wf

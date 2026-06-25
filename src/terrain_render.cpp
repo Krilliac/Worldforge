@@ -55,16 +55,30 @@ inline float edge(float ax, float ay, float bx, float by, float px, float py) {
 inline uint8_t clamp8(float v) { return (uint8_t)std::clamp(v + 0.5f, 0.0f, 255.0f); }
 } // namespace
 
+// Sample the raw 64x64-bit MCSH map at chunk-uv (u,v): true == shadowed texel.
+namespace {
+inline bool shadowSample(const std::vector<uint8_t>* shadow, float u, float v) {
+    if (!shadow || shadow->empty()) return false;
+    int col = std::clamp((int)(u * (AlphaMap::DIM - 1)), 0, AlphaMap::DIM - 1);
+    int row = std::clamp((int)(v * (AlphaMap::DIM - 1)), 0, AlphaMap::DIM - 1);
+    size_t bit = (size_t)row * AlphaMap::DIM + col;
+    return bit < shadow->size() * 8 && (((*shadow)[bit >> 3] >> (bit & 7)) & 1u) != 0;
+}
+constexpr float kTerrainShadow = 0.55f;   // brightness multiplier for shadowed texels
+} // namespace
+
 void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
-                        const std::vector<TerrainLayer>& layers, float tiling, Vec3 lightDir) {
+                        const std::vector<TerrainLayer>& layers, float tiling, Vec3 lightDir,
+                        const std::vector<uint8_t>* shadow) {
     // Legacy grey terrain light (ambient 0.4, diffuse 0.6) -- the ShadeLight default.
     ShadeLight sl; sl.dir = lightDir;
-    rasterTerrainSplat(fb, mesh, mvp, layers, tiling, sl);
+    rasterTerrainSplat(fb, mesh, mvp, layers, tiling, sl, shadow);
 }
 
 void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                         const std::vector<TerrainLayer>& layers, float tiling,
-                        const ShadeLight& light) {
+                        const ShadeLight& light,
+                        const std::vector<uint8_t>* shadow) {
     int W = fb.color.width, H = fb.color.height;
     Vec3 Lr = normalize(light.dir);
 
@@ -119,8 +133,9 @@ void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                 n = normalize(n);
                 Vec3 lf = light.shade(n, Lr);
 
+                const float sh = shadowSample(shadow, u, v) ? kTerrainShadow : 1.0f;
                 Rgba c = splatSample(layers, u, v, tiling);
-                c.r = clamp8(c.r * lf.x); c.g = clamp8(c.g * lf.y); c.b = clamp8(c.b * lf.z);
+                c.r = clamp8(c.r * lf.x * sh); c.g = clamp8(c.g * lf.y * sh); c.b = clamp8(c.b * lf.z * sh);
                 c.a = 255;
                 dref = z;
                 fb.color.at(px, py) = c;

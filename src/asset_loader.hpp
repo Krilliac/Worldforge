@@ -61,6 +61,7 @@ struct TileRender {
     std::vector<TexMesh>                      chunkMeshes;   // per MCNK
     std::vector<std::vector<AlphaMap>>        chunkAlphas;   // [chunk][overlay layer]
     std::vector<std::vector<TerrainLayer>>    chunkLayers;   // [chunk] -> splat layers
+    std::vector<std::vector<uint8_t>>         chunkShadows;  // [chunk] raw MCSH (512B); empty = none
     std::vector<std::shared_ptr<const Image>> textures;      // MTEX, keep-alive
     std::vector<LiquidSurface>                liquids;        // translucent water surfaces
     float tiling = 8.0f;
