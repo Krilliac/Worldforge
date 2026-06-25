@@ -126,19 +126,91 @@ constexpr ClientProfile vanilla1121Profile() {
     return p;
 }
 
-// Returns the profile for `v`. Vanilla 1.12.1 is the ONLY implemented target;
-// every other version throws std::runtime_error("unsupported client version").
-// This is intentional: the seam fails loud until a later wave fills in the
-// TBC/WotLK/Cata profiles and the matching parser branches.
+// TBC 2.4.3 (build 8606) profile. Format-wise still very vanilla-like: MPQ
+// archives, monolithic ADTs, MCLQ liquid, embedded M2 views (.skin) and anims.
+// The M2 magic bumps to MD20 0x104 and tracks are still flat (no nested ranges).
+constexpr ClientProfile tbc243Profile() {
+    ClientProfile p{};
+    p.version          = ClientVersion::TBC_2_4_3;
+    p.build            = 8606;
+    p.archive          = ArchiveKind::Mpq;
+    p.adtLayout        = AdtLayout::Monolithic;
+    p.defaultBigAlpha  = false;
+    p.heightTexturing  = false;
+    p.liquid           = LiquidFormat::Mclq;
+    p.m2Version        = 0x104;
+    p.m2Skins          = M2SkinSource::Embedded;
+    p.m2Anims          = M2AnimSource::Embedded;
+    p.m2TrackNested    = false;
+    p.wmoVersion       = 17;
+    p.dbc              = DbcContainer::Wdbc;
+    p.dbcLocaleStrings = false;
+    return p;
+}
+
+// WotLK 3.3.5a (build 12340) profile. Introduces tile-level MH2O liquid and
+// external .skin view files; M2 magic is MD20 0x108 and animation tracks gain
+// nested per-anim range arrays. Archives/ADTs/DBCs are otherwise unchanged.
+constexpr ClientProfile wotlk335Profile() {
+    ClientProfile p{};
+    p.version          = ClientVersion::WotLK_3_3_5a;
+    p.build            = 12340;
+    p.archive          = ArchiveKind::Mpq;
+    p.adtLayout        = AdtLayout::Monolithic;
+    p.defaultBigAlpha  = false;
+    p.heightTexturing  = false;
+    p.liquid           = LiquidFormat::Mh2o;
+    p.m2Version        = 0x108;
+    p.m2Skins          = M2SkinSource::ExternalSkin;
+    p.m2Anims          = M2AnimSource::Embedded;
+    p.m2TrackNested    = true;
+    p.wmoVersion       = 17;
+    p.dbc              = DbcContainer::Wdbc;
+    p.dbcLocaleStrings = false;
+    return p;
+}
+
+// Cata 4.3.4 (build 15595) profile. The biggest format break of the three:
+// split ADTs (.adt/_tex0/_obj0), MTXP height texturing, big-alpha default,
+// external .anim files, WDB2 (.db2) high-volume tables with a single localized
+// string field. M2 magic stays MD20 0x108 with nested anim tracks.
+constexpr ClientProfile cata434Profile() {
+    ClientProfile p{};
+    p.version          = ClientVersion::Cata_4_3_4;
+    p.build            = 15595;
+    p.archive          = ArchiveKind::Mpq;
+    p.adtLayout        = AdtLayout::SplitTexObj;
+    p.defaultBigAlpha  = true;
+    p.heightTexturing  = true;
+    p.liquid           = LiquidFormat::Mh2o;
+    p.m2Version        = 0x108;
+    p.m2Skins          = M2SkinSource::ExternalSkin;
+    p.m2Anims          = M2AnimSource::ExternalAnim;
+    p.m2TrackNested    = true;
+    p.wmoVersion       = 17;
+    p.dbc              = DbcContainer::Wdb2;
+    p.dbcLocaleStrings = true;
+    return p;
+}
+
+// Returns the profile for `v`. Vanilla 1.12.1..Cata 4.3.4 profiles are all
+// populated here; an out-of-enum value throws
+// std::runtime_error("unsupported client version") so the seam still fails loud.
+//
+// NOTE: this only resolves the *profiles*. Threading each delta through the
+// parsers (the FIELD -> src/ FILE MAP above) remains a later wave -- e.g. the
+// M2/MH2O/split-ADT/WDB2 parser branches are not yet wired to these fields.
 inline ClientProfile profileFor(ClientVersion v) {
     switch (v) {
         case ClientVersion::Vanilla_1_12_1:
             return vanilla1121Profile();
         case ClientVersion::TBC_2_4_3:
+            return tbc243Profile();
         case ClientVersion::WotLK_3_3_5a:
+            return wotlk335Profile();
         case ClientVersion::Cata_4_3_4:
+            return cata434Profile();
         default:
-            // TODO(expansion): implement tbc/wotlk/cata profiles + parser branches.
             throw std::runtime_error("unsupported client version");
     }
 }
