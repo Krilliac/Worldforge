@@ -3,6 +3,7 @@
 #include "image.hpp"
 
 #include <cstring>
+#include <exception>
 #include <vector>
 
 using namespace wf;
@@ -112,6 +113,51 @@ void test_blp() {
         CHECK(img.at(0,0).g > 200);
         CHECK(img.at(0,0).a == 0);     // pixel 0 alpha index 0 -> a0 = 0
         CHECK(img.at(1,0).a == 255);   // pixel 1 alpha index 1 -> a1 = 255
+    }
+
+    // --- raw BGRA with two mips: level 0 = 4x2, level 1 = 2x1 ---
+    {
+        const uint32_t W = 4, H = 2;
+        const uint32_t off0 = 0x94 + 1024;          // mip 0 data
+        const uint32_t len0 = W * H * 4;            // 32 bytes
+        const uint32_t off1 = off0 + len0;          // mip 1 data
+        const uint32_t mw1 = W >> 1, mh1 = H >> 1;  // 2 x 1
+        const uint32_t len1 = mw1 * mh1 * 4;        // 8 bytes
+        // Header carries two populated mips; blpHeader only emits one, so build by hand.
+        std::vector<uint8_t> b;
+        b.insert(b.end(), {'B','L','P','2'});
+        put32(b, 1);              // type
+        b.push_back(3);           // compression: raw BGRA
+        b.push_back(8);           // alphaDepth
+        b.push_back(0);           // alphaEncoding
+        b.push_back(1);           // hasMips
+        put32(b, W);
+        put32(b, H);
+        put32(b, off0); put32(b, off1);            // mipOffsets[0..1]
+        for (int i = 2; i < 16; ++i) put32(b, 0);
+        put32(b, len0); put32(b, len1);            // mipSizes[0..1]
+        for (int i = 2; i < 16; ++i) put32(b, 0);
+        b.insert(b.end(), 1024, 0);                // palette region (unused by raw)
+        // mip 0: 8 red BGRA pixels
+        for (uint32_t i = 0; i < W * H; ++i) { b.push_back(0); b.push_back(0); b.push_back(255); b.push_back(255); }
+        // mip 1: 2 green BGRA pixels
+        for (uint32_t i = 0; i < mw1 * mh1; ++i) { b.push_back(0); b.push_back(255); b.push_back(0); b.push_back(255); }
+
+        BlpInfo info;
+        Image m0 = decodeBlpMip(b, 0, &info);
+        CHECK(info.mipCount == 2);
+        CHECK(m0.width == 4 && m0.height == 2);     // mip 0 full resolution
+        CHECK(m0.at(0,0).r == 255 && m0.at(0,0).g == 0);
+        Image m1 = decodeBlpMip(b, 1);
+        CHECK(m1.width == 2 && m1.height == 1);     // dimensions halved (max(1,...))
+        CHECK(m1.at(0,0).g == 255 && m1.at(0,0).r == 0);
+        // decodeBlp delegates to mip 0 -> byte-identical to decodeBlpMip(b,0)
+        Image base = decodeBlp(b);
+        CHECK(base.width == 4 && base.height == 2);
+        // out-of-range mip level throws
+        bool threw = false;
+        try { decodeBlpMip(b, 2); } catch (const std::exception&) { threw = true; }
+        CHECK(threw);
     }
 
     // --- PNG round-trips through our writer (structural sanity) ---

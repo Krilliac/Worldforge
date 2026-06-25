@@ -151,7 +151,7 @@ void decodePalettized(const std::vector<uint8_t>& buf, const uint8_t* palette,
 
 } // namespace
 
-Image decodeBlp(const std::vector<uint8_t>& buf, BlpInfo* outInfo) {
+Image decodeBlpMip(const std::vector<uint8_t>& buf, int mipLevel, BlpInfo* outInfo) {
     ByteReader r(buf);
     if (r.fourccRaw() != "BLP2") throw std::runtime_error("not a BLP2 file");
 
@@ -172,8 +172,20 @@ Image decodeBlp(const std::vector<uint8_t>& buf, BlpInfo* outInfo) {
     if (info.width == 0 || info.height == 0)
         throw std::runtime_error("BLP has zero dimensions");
 
-    Image img(static_cast<int>(info.width), static_cast<int>(info.height));
-    size_t dataOff = mipOffsets[0] ? mipOffsets[0] : (kHeaderSize + kPaletteSize);
+    if (mipLevel < 0 || mipLevel >= 16 || mipLevel >= info.mipCount)
+        throw std::runtime_error("BLP mip level out of range");
+
+    // Mip 0 falls back to the canonical post-palette offset; deeper mips must
+    // carry an explicit, in-range offset/size in the tables.
+    size_t dataOff = mipOffsets[mipLevel]
+                         ? mipOffsets[mipLevel]
+                         : (mipLevel == 0 ? (kHeaderSize + kPaletteSize) : 0);
+    if (dataOff == 0 || mipSizes[mipLevel] == 0 || dataOff > buf.size())
+        throw std::runtime_error("BLP mip offset/size out of range");
+
+    uint32_t mw = info.width  >> mipLevel; if (mw == 0) mw = 1;
+    uint32_t mh = info.height >> mipLevel; if (mh == 0) mh = 1;
+    Image img(static_cast<int>(mw), static_cast<int>(mh));
 
     if (info.compression == 1) {
         if (buf.size() < kHeaderSize + kPaletteSize)
@@ -195,6 +207,10 @@ Image decodeBlp(const std::vector<uint8_t>& buf, BlpInfo* outInfo) {
 
     if (outInfo) *outInfo = info;
     return img;
+}
+
+Image decodeBlp(const std::vector<uint8_t>& buf, BlpInfo* outInfo) {
+    return decodeBlpMip(buf, 0, outInfo);
 }
 
 } // namespace wf

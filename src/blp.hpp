@@ -27,4 +27,8 @@ struct BlpInfo {
 // Throws std::runtime_error on an unsupported/!BLP2 input.
 Image decodeBlp(const std::vector<uint8_t>& buf, BlpInfo* outInfo = nullptr);
 
+// Decode a specific mip level (0 = full resolution) to an RGBA Image;
+// throws on an out-of-range/empty level or unsupported input.
+Image decodeBlpMip(const std::vector<uint8_t>& buf, int mipLevel, BlpInfo* outInfo = nullptr);
+
 } // namespace wf
