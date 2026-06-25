@@ -8,6 +8,7 @@
 // build uses) and uploaded to a GL texture each frame, so the desktop and
 // headless editors are pixel-identical in the viewport.
 #include "imgui.h"
+#include "imgui_internal.h"   // DockBuilder* API for the default layout
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 
@@ -28,9 +29,17 @@
 #include "world_view.hpp"
 #include "scene_pick.hpp"
 #include "asset_loader.hpp"   // TileScene
-#include "raster.hpp"         // TexMesh
+#include "raster.hpp"         // TexMesh / ShadeLight
 #include "debugdraw.hpp"
 #include "math.hpp"
+#include "mpq.hpp"            // MpqManager
+#include "client_data.hpp"   // findDataDir / detectLocale / mountWowClient
+#include "lighting.hpp"      // LightDatabase / LightingSample / kNoonTick
+#include "wow_files.hpp"     // Dbc
+
+#include <filesystem>
+#include <cstdlib>           // std::getenv
+#include <string>
 
 using namespace wf;
 
@@ -39,7 +48,49 @@ static float heightAt(float x, float y) {
          + 10.0f * std::sin((x + y) * 0.04f);
 }
 
-int main() {
+namespace {
+// Parse DBFilesClient\<name>.dbc from the mounted chain; empty Dbc if absent.
+Dbc loadDbc(const MpqManager& mpq, const std::string& name) {
+    std::vector<uint8_t> buf; Dbc d;
+    if (mpq.readFile("DBFilesClient\\" + name + ".dbc", buf)) {
+        try { d = Dbc::parse(buf); } catch (...) {}
+    }
+    return d;
+}
+
+// LightingSample -> ShadeLight: adopt the zone ambient/diffuse, keep the standard
+// sun direction. An invalid sample leaves the legacy grey defaults untouched.
+ShadeLight shadeFromSample(const LightingSample& s) {
+    ShadeLight sl;
+    if (s.valid) { sl.ambient = s.ambient; sl.diffuse = s.diffuse; }
+    return sl;
+}
+
+// Resolve the client Data dir: explicit argv[1] or $WFORGE_CLIENT first, then
+// auto-discovery walking up from there (or the cwd).
+std::filesystem::path resolveDataDir(int argc, char** argv) {
+    std::string hint;
+    if (argc > 1) hint = argv[1];
+    else if (const char* e = std::getenv("WFORGE_CLIENT")) hint = e;
+    std::filesystem::path d = findDataDir(hint);
+    if (d.empty() && !hint.empty()) d = hint;  // accept an explicit Data dir verbatim
+    return d;
+}
+
+// Optional real-tile selector: argv "<DataDir> <Map> <x> <y>" (coords after the
+// map name) or the WFORGE_TILE_MAP / WFORGE_TILE_X / WFORGE_TILE_Y env vars.
+// Returns true only when a map and both block indices are present, so the editor
+// falls back to procedural terrain whenever a tile wasn't requested.
+bool resolveTile(int argc, char** argv, std::string& map, int& x, int& y) {
+    if (argc > 4) { map = argv[2]; x = std::atoi(argv[3]); y = std::atoi(argv[4]); }
+    if (const char* e = std::getenv("WFORGE_TILE_MAP")) map = e;
+    if (const char* e = std::getenv("WFORGE_TILE_X"))   x = std::atoi(e);
+    if (const char* e = std::getenv("WFORGE_TILE_Y"))   y = std::atoi(e);
+    return !map.empty() && x >= 0 && y >= 0;
+}
+} // namespace
+
+int main(int argc, char** argv) {
     if (!glfwInit()) { std::fprintf(stderr, "glfw init failed\n"); return 1; }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -110,6 +161,59 @@ int main() {
     editor::BridgeClient bridge;
     bridge.connect("127.0.0.1", 7878);
 
+    // Mount the vanilla client (optional) and build the Light.dbc database so the
+    // viewport shades with real zone lighting. If the client isn't found the
+    // ShadeLight keeps its legacy grey defaults and nothing else changes.
+    MpqManager mpq;
+    LightDatabase lights;
+    {
+        std::filesystem::path dataDir = resolveDataDir(argc, argv);
+        if (!dataDir.empty()) {
+            std::string locale = detectLocale(dataDir);
+            if (locale.empty()) locale = "enUS";
+            mountWowClient(mpq, dataDir, locale);
+            if (mpq.archiveCount() > 0) {
+                Dbc light = loadDbc(mpq, "Light"),         lparams = loadDbc(mpq, "LightParams");
+                Dbc lint  = loadDbc(mpq, "LightIntBand"),  lfloat  = loadDbc(mpq, "LightFloatBand");
+                lights.build(&light, &lparams, &lint, &lfloat);
+                std::printf("[editor] client mounted: %zu archives, Light.dbc %s\n",
+                            mpq.archiveCount(), lights.empty() ? "absent" : "loaded");
+            }
+        }
+        if (lights.empty())
+            std::printf("[editor] no client/Light.dbc -- using legacy grey light\n");
+    }
+    // Live day-tick (T1.2): the viewport's lighting is resolved every frame from
+    // the global sky at `dayTick` (0..2880, one WoW day), so dragging the Sky
+    // slider re-shades the scene and the optional auto-advance animates dawn->dusk.
+    // An empty LightDatabase yields the legacy grey ShadeLight regardless of tick.
+    const uint32_t mapId    = 0;                          // Azeroth global sky
+    const Vec3     lightPos { 150.0f, 150.0f, 0.0f };     // sample point for the zone sky
+    float          dayTick  = kNoonTick;                  // current time-of-day tick
+    bool           dayAuto  = false;                      // animate the day over real time
+    float          dayRate  = 120.0f;                     // ticks/sec when auto (2880 = 24s/day)
+    ShadeLight     sceneLight;                            // recomputed each frame, below
+
+    // Optional: load a real ADT tile from the mounted client and show it in the
+    // viewport instead of the procedural mesh (E.3's read-only-viewport milestone).
+    // Requested via argv "<DataDir> <Map> <x> <y>" or WFORGE_TILE_*; absent or
+    // unresolvable -> useTile stays false and the procedural terrain renders.
+    TileScene   realTile;
+    bool        useTile = false;
+    std::string tileMap; int tileX = 0, tileY = 0;
+    if (mpq.archiveCount() > 0 && resolveTile(argc, argv, tileMap, tileX, tileY)) {
+        AssetLoader loader(mpq);
+        realTile = loader.buildTileScene(tileMap, tileX, tileY);
+        useTile  = !realTile.terrain.empty();
+        if (useTile)
+            std::printf("[editor] tile %s %d,%d: %zu chunks, %zu doodads, %zu wmos\n",
+                        tileMap.c_str(), tileX, tileY, realTile.terrain.chunkMeshes.size(),
+                        realTile.doodadCount(), realTile.wmoCount());
+        else
+            std::printf("[editor] tile %s %d,%d absent -- procedural terrain\n",
+                        tileMap.c_str(), tileX, tileY);
+    }
+
     GLuint sceneTex = 0;
     glGenTextures(1, &sceneTex);
 
@@ -170,8 +274,20 @@ int main() {
         else if (sceneSel.isScene())
             selected = Mat4::translate(sceneSel.point);
 
-        // Render the scene on the CPU and upload it to the GL texture.
-        viewport.render(mesh, debug);
+        // Advance the day-tick (when animating) and re-resolve the scene light so
+        // the viewport tracks the time of day. Empty Light.dbc -> grey default.
+        if (dayAuto) { dayTick += dayRate * dt; dayTick = std::fmod(dayTick, kDayTicks); }
+        sceneLight = shadeFromSample(lights.lightingAt(lightPos, mapId, dayTick));
+
+        // Render the scene on the CPU and upload it to the GL texture. A loaded
+        // real tile renders textured terrain + doodads + WMOs + liquid with its
+        // zone light re-resolved at the current tick; otherwise the procedural mesh.
+        if (useTile) {
+            AssetLoader::applyLighting(realTile, lights, mapId, tileX, tileY, dayTick);
+            viewport.render(realTile, debug, sceneLight);
+        } else {
+            viewport.render(mesh, debug, sceneLight);
+        }
         glBindTexture(GL_TEXTURE_2D, sceneTex);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, viewport.width(), viewport.height(),
                      0, GL_RGBA, GL_UNSIGNED_BYTE, viewport.scene().pixels.data());
@@ -181,15 +297,70 @@ int main() {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+        // Default editor layout, built once when no saved layout exists in
+        // imgui.ini: a scene/entity column on the left, the 3D viewport filling
+        // the centre, and an authoring/inspector column on the right (Atmosphere
+        // over Debug Visualisation). It is docked into the main viewport's
+        // dockspace, so the whole layout tracks the OS window on resize / maximise
+        // / restore. User rearrangements are persisted to imgui.ini and take
+        // precedence on the next launch (delete imgui.ini to get this default back).
+        ImGuiViewport* mainVp = ImGui::GetMainViewport();
+        ImGuiID dockspace_id = ImGui::GetID("WorldForgeDockspace");
+        if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr) {
+            ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+            ImGui::DockBuilderSetNodeSize(dockspace_id, mainVp->Size);
+
+            ImGuiID center = dockspace_id;
+            ImGuiID left   = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left,  0.20f, nullptr, &center);
+            ImGuiID right  = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.28f, nullptr, &center);
+            ImGuiID rightB = ImGui::DockBuilderSplitNode(right,  ImGuiDir_Down,  0.45f, nullptr, &right);
+
+            ImGui::DockBuilderDockWindow("Entities",            left);
+            ImGui::DockBuilderDockWindow("Viewport",            center);
+            ImGui::DockBuilderDockWindow("Sky",                 right);
+            ImGui::DockBuilderDockWindow("Atmosphere",          right);
+            ImGui::DockBuilderDockWindow("Debug Visualisation", rightB);
+            ImGui::DockBuilderFinish(dockspace_id);
+        }
+        ImGui::DockSpaceOverViewport(dockspace_id, mainVp);
+
+        // Sky panel: drive the live day-tick that shades the viewport (T1.2).
+        // The tick is a WoW half-minute clock (2880/day); show it as HH:MM and
+        // let the user scrub or auto-advance it. With no Light.dbc mounted the
+        // light stays grey, so flag that the slider has no visible effect.
+        {
+            ImGui::Begin("Sky");
+            const int totalMin = int(dayTick * 0.5f);        // 2 ticks == 1 minute
+            ImGui::Text("Time of day: %02d:%02d", (totalMin / 60) % 24, totalMin % 60);
+            ImGui::SliderFloat("Day tick", &dayTick, 0.0f, kDayTicks, "%.0f / 2880");
+            ImGui::Checkbox("Auto-advance", &dayAuto);
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(120.0f);
+            ImGui::SliderFloat("ticks/s", &dayRate, 10.0f, 600.0f, "%.0f");
+            if (ImGui::Button("Dawn"))  dayTick = 0.25f * kDayTicks;
+            ImGui::SameLine(); if (ImGui::Button("Noon"))  dayTick = kNoonTick;
+            ImGui::SameLine(); if (ImGui::Button("Dusk"))  dayTick = 0.75f * kDayTicks;
+            ImGui::SameLine(); if (ImGui::Button("Night")) dayTick = 0.0f;
+            ImGui::Separator();
+            if (lights.empty()) {
+                ImGui::TextDisabled("No Light.dbc mounted - grey light, tick has no effect.");
+            } else {
+                ImGui::Text("ambient %.2f %.2f %.2f", sceneLight.ambient.x, sceneLight.ambient.y, sceneLight.ambient.z);
+                ImGui::Text("diffuse %.2f %.2f %.2f", sceneLight.diffuse.x, sceneLight.diffuse.y, sceneLight.diffuse.z);
+            }
+            ImGui::End();
+        }
 
         std::vector<std::vector<uint8_t>> outgoing;
         atmosphere.draw(outgoing);
         // Unified click-to-select: a left-click picks the nearest of the live
         // entities and the loaded tile -- an entity sets the WorldView
         // selection, a static object (terrain/doodad/WMO) goes to sceneSel.
+        // Pick against the real tile when one is loaded (so doodads/WMOs are
+        // selectable), else the procedural one-chunk scene.
+        const TileScene* activeScene = useTile ? &realTile : &tileScene;
         bool gizmoActive = viewport.draw((ImTextureID)(intptr_t)sceneTex, giz, &selected,
-                                         &view, &mesh, &tileScene, &sceneSel);
+                                         &view, &mesh, activeScene, &sceneSel);
         debugVis.draw(debug);
         // live entities + selected static object + spawn/despawn authoring ops
         inspector.draw(view, &sceneSel, &outgoing);

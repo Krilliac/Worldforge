@@ -33,3 +33,6 @@ build/
 .DS_Store
 *.swp
 compile_commands.json
+
+# Autonomous overnight build-loop working files (durable state, not source)
+.night/

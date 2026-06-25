@@ -8,6 +8,7 @@
 #include "world_view.hpp"
 #include "picking.hpp"
 #include "terrain.hpp"
+#include "terrain_render.hpp"   // TerrainLayer (TileScene render overload test)
 #include "debugdraw.hpp"
 #include "image.hpp"
 
@@ -113,4 +114,30 @@ void test_viewport() {
     WorldView none;
     WorldPick wt = pick.pickWorldAt(100, 100, none, scene);
     CHECK(wt.isScene() && wt.kind == WorldPick::Kind::Terrain);
+
+    // --- the TileScene render overload draws textured terrain ---------------
+    // One green-textured chunk (a base layer, full coverage) under a top-down
+    // camera must paint non-background pixels through the zone-lit tile path,
+    // proving the editor viewport can show a real ADT tile, not just a Mesh.
+    {
+        Image green(4, 4);
+        for (Rgba& p : green.pixels) p = Rgba{40, 160, 60, 255};
+        TileScene tile;
+        TexMesh chunk;
+        chunk.vertices = { { {-8,-8,0},{0,0,1},{0,0} },
+                           { { 8,-8,0},{0,0,1},{1,0} },
+                           { { 0, 8,0},{0,0,1},{0.5f,1} } };
+        chunk.indices = { 0, 1, 2 };
+        tile.terrain.chunkMeshes.push_back(chunk);
+        tile.terrain.chunkLayers.push_back({ TerrainLayer{ &green, nullptr } });
+
+        ViewportPanel tvp(160, 120);
+        tvp.camera.eye = {0, 0, 30}; tvp.camera.yaw = 0; tvp.camera.pitch = -1.55f;
+        DebugDraw noOverlay;
+        tvp.render(tile, noOverlay);
+        bool painted = false;
+        for (const Rgba& p : tvp.scene().pixels)
+            if (!(p.r == 18 && p.g == 20 && p.b == 28)) { painted = true; break; }
+        CHECK(painted);
+    }
 }

@@ -49,6 +49,14 @@ The ImGui editor panels build headlessly (`WFORGE_EDITOR`, ON). The runnable
 windowed editor needs a GL/GLFW toolchain + display and is opt-in:
 `-DWFORGE_EDITOR_APP=ON` (add GLFW: `git submodule add https://github.com/glfw/glfw external/glfw`).
 
+The windowed editor (`wforge-editor-app`) takes an optional client + tile:
+`wforge-editor-app <DataDir> [Map x y]` (or `$WFORGE_CLIENT` / `$WFORGE_TILE_MAP`,
+`$WFORGE_TILE_X`, `$WFORGE_TILE_Y`). With a client mounted it shades the viewport
+from the real `Light.dbc`; given a tile it renders that real ADT (textured terrain
++ doodads + WMOs + liquid) instead of the procedural placeholder. The **Sky** panel
+scrubs the live day-tick (or auto-advances dawn→dusk), re-lighting the scene. With
+no client found, it falls back to procedural terrain under the legacy grey light.
+
 Requires CMake ≥ 3.12 and a C++17 compiler (tested GCC 13; MSVC `/W4
 /permissive-` and GCC `-Wall -Wextra` both clean). StormLib is fetched
 automatically via CMake FetchContent.

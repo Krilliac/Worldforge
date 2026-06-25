@@ -29,7 +29,20 @@ public:
         : width_(w), height_(h), scene_(w, h), fb_(w, h) {}
 
     // Render terrain + overlay into the internal scene image at the camera.
-    void render(const Mesh& terrain, const DebugDraw& dd);
+    // `light` supplies coloured ambient/diffuse (e.g. resolved from Light.dbc);
+    // the default reproduces the legacy grey directional light exactly.
+    void render(const Mesh& terrain, const DebugDraw& dd, const ShadeLight& light = {});
+
+    // Render a real ADT tile instead of a bare mesh: textured terrain splat +
+    // placed doodads/WMOs + translucent liquid, shaded by the tile's resolved
+    // zone light (`scene.light`) with the sun direction taken from `light.dir`.
+    // Same internal target / resize / overlay path as the Mesh overload.
+    void render(const TileScene& scene, const DebugDraw& dd, const ShadeLight& light = {});
+
+    // Resize the internal render target so the scene re-renders at (w,h). Called
+    // when the docked Viewport panel changes size, so the 3D view fills its pane
+    // and keeps the correct aspect ratio instead of stretching a fixed image.
+    void resize(int w, int h);
 
     // ImGui panel: show the scene (sampled from `sceneTex`) and run the gizmo
     // over `selected` (may be null). Returns true while the gizmo is dragged.
@@ -60,7 +73,13 @@ public:
     int height() const { return height_; }
 
 private:
+    // Realise a pending resize() request: reallocate scene_/fb_ to the requested
+    // size so the image, width_/height_ and framebuffer stay consistent for the
+    // whole frame. Called at the top of each render() overload (see resize()).
+    void applyPendingResize();
+
     int width_, height_;
+    int pendingW_ = 0, pendingH_ = 0;   // requested size; applied at next render()
     Image       scene_;
     Framebuffer fb_;
     PickResult  lastPick_;
