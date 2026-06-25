@@ -16,6 +16,28 @@ constexpr size_t kVertexStride  = 48;    // M2Vertex
 constexpr size_t kTextureStride = 16;    // M2Texture (type, flags, M2Array name)
 constexpr size_t kSubmeshStride = 32;    // vanilla M2SkinSection (no sort centre)
 
+// --- attachments / cameras / lights (static fields only) -------------------
+// VERIFY-FLAGGED (vanilla 0x100): these M2Array header offsets sit AFTER the
+// bounding/collision block (~0x9C), whose exact size differs between sources, so
+// the precise hex is not safely constant. The values below follow the most-cited
+// vanilla ModelHeader layout (getMaNGOS / WMV: bounding tris/verts/normals @
+// 0x9C..0xB4, then attachments). Every read is range-guarded, so a model whose
+// real layout differs (or which lacks these arrays) parses as before rather than
+// mis-reading garbage. Confirm against a real 1.12 .m2 before trusting the data.
+constexpr size_t kOffAttachments = 0x0B4; // M2Array<ModelAttachmentDef>
+constexpr size_t kOffLights      = 0x0CC; // M2Array<ModelLightDef>
+constexpr size_t kOffCameras     = 0x0D4; // M2Array<ModelCameraDef>
+
+// On-disk record strides (embedded AnimationBlocks are 28 bytes each):
+//   Attachment = id(4)+bone(4)+pos(12)+M2Track<bool>(28)                     = 48
+//   Light      = type(2)+bone(2)+pos(12)+7*M2Track(28)                       = 212
+//   Camera     = type/fov/far/near(16)+M2Track(28)+pos(12)+M2Track(28)
+//                +target(12)+M2Track(28)                                     = 124
+constexpr size_t kAttachStride = 48;
+constexpr size_t kLightStride  = 212;
+constexpr size_t kCameraStride = 124;
+constexpr size_t kCameraPosOff = 16 + 28; // pos Vec3 follows the first M2Track
+
 struct Arr { uint32_t count; uint32_t offset; };
 
 Arr readArr(ByteReader& r, size_t at) {
@@ -129,6 +151,64 @@ M2Model parseM2(const std::vector<uint8_t>& buf, const ClientProfile& profile) {
                 s.indexStart  = sr.u16();
                 s.indexCount  = sr.u16();
                 m.submeshes.push_back(s);
+            }
+        }
+    }
+
+    // ---- attachments / cameras / lights (static leading fields only) -------
+    // Additive + guarded: each array header offset is VERIFY-FLAGGED (see the
+    // constants above). A count of 0, an out-of-range offset, or a record that
+    // would run past the buffer simply yields an empty vector -- models without
+    // these arrays parse exactly as before.
+
+    // attachments: id(u32) + bone(u32) + pos(Vec3), then a 28-byte M2Track skip.
+    if (kOffAttachments + 8 <= buf.size()) {
+        Arr a = readArr(r, kOffAttachments);
+        if (a.count && static_cast<size_t>(a.offset) +
+                       static_cast<size_t>(a.count) * kAttachStride <= buf.size()) {
+            for (uint32_t i = 0; i < a.count; ++i) {
+                ByteReader ar(buf.data() + a.offset + i * kAttachStride, kAttachStride);
+                M2Attachment at;
+                at.id   = ar.u32();
+                at.bone = ar.u32();
+                at.position = { ar.f32(), ar.f32(), ar.f32() };
+                m.attachments.push_back(at);
+            }
+        }
+    }
+
+    // lights: type(u16) + bone(i16) + pos(Vec3), then seven 28-byte M2Tracks.
+    if (kOffLights + 8 <= buf.size()) {
+        Arr a = readArr(r, kOffLights);
+        if (a.count && static_cast<size_t>(a.offset) +
+                       static_cast<size_t>(a.count) * kLightStride <= buf.size()) {
+            for (uint32_t i = 0; i < a.count; ++i) {
+                ByteReader lr(buf.data() + a.offset + i * kLightStride, kLightStride);
+                M2Light l;
+                l.type = lr.u16();
+                l.bone = static_cast<int16_t>(lr.u16());
+                l.position = { lr.f32(), lr.f32(), lr.f32() };
+                m.lights.push_back(l);
+            }
+        }
+    }
+
+    // cameras: type/fov/farClip/nearClip(4*4), then the static pos Vec3 sits
+    // after the first M2Track (kCameraPosOff); the rest of the stride is skipped.
+    if (kOffCameras + 8 <= buf.size()) {
+        Arr a = readArr(r, kOffCameras);
+        if (a.count && static_cast<size_t>(a.offset) +
+                       static_cast<size_t>(a.count) * kCameraStride <= buf.size()) {
+            for (uint32_t i = 0; i < a.count; ++i) {
+                ByteReader cr(buf.data() + a.offset + i * kCameraStride, kCameraStride);
+                M2Camera c;
+                c.type     = cr.u32();
+                c.fov      = cr.f32();
+                c.farClip  = cr.f32();
+                c.nearClip = cr.f32();
+                cr.seek(kCameraPosOff);
+                c.position = { cr.f32(), cr.f32(), cr.f32() };
+                m.cameras.push_back(c);
             }
         }
     }

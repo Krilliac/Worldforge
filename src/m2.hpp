@@ -34,6 +34,34 @@ struct M2Submesh {       // a draw range within view 0
     uint16_t indexCount  = 0;
 };
 
+// Static (bind-pose) attachment point: a hardpoint on a bone where items, weapon
+// trails, etc. are anchored. Only the leading id/bone/position fields are kept;
+// the per-record AnimationBlock (animate-attached flag) is skipped.
+struct M2Attachment {
+    uint32_t id   = 0;     // attachment slot id (ItemVisuals / hardcoded slots)
+    uint32_t bone = 0;     // bone index this attaches to
+    Vec3     position;     // offset from the bone, in model space
+};
+
+// Static camera definition (cinematics / portrait). Only the leading scalar
+// fields + the static position are kept; the per-record position/target/roll
+// AnimationBlocks are skipped.
+struct M2Camera {
+    uint32_t type     = 0; // 0 = portrait, 1 = characterInfo, -1 = unused
+    float    fov      = 0;  // vertical field of view (radians)
+    float    farClip  = 0;
+    float    nearClip = 0;
+    Vec3     position;     // static eye position
+};
+
+// Static light definition. Only the leading type/bone/position fields are kept;
+// the per-record colour/intensity/attenuation AnimationBlocks are skipped.
+struct M2Light {
+    uint32_t type = 0;     // 0 = directional, 1 = point (vanilla stores uint16)
+    int32_t  bone = -1;    // parent bone index, -1 if attached to the model root
+    Vec3     position;     // light position in bone space
+};
+
 struct M2Model {
     uint32_t version = 0;
     std::string name;
@@ -47,6 +75,12 @@ struct M2Model {
     std::vector<uint16_t>  vertexLookup;
     std::vector<uint16_t>  triangles;
     std::vector<M2Submesh> submeshes;
+
+    // Static fields of the attachment / camera / light arrays. Parsed additively
+    // and guarded: a model lacking these arrays leaves them empty.
+    std::vector<M2Attachment> attachments;
+    std::vector<M2Camera>     cameras;
+    std::vector<M2Light>      lights;
 
     // Resolve a triangle index to a global vertex index.
     uint32_t resolveVertex(uint16_t triIndex) const {

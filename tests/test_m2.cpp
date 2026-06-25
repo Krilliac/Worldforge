@@ -71,11 +71,38 @@ void test_m2() {
     put32(f,0); put32(f,0);                      // batches
     put32(f,0);                                  // boneCountMax
 
+    // attachment record (48 bytes): id, bone, pos, then a 28-byte M2Track (skipped)
+    uint32_t attachOff = (uint32_t)f.size();
+    put32(f, 7);                 // id
+    put32(f, 2);                 // bone
+    putf(f, 1.5f); putf(f, 2.5f); putf(f, 3.5f);   // position
+    for (int i=0;i<28;i++) f.push_back(0);         // animate-attached M2Track
+
+    // light record (212 bytes): type(u16), bone(i16), pos, then 7 M2Tracks (skipped)
+    uint32_t lightOff = (uint32_t)f.size();
+    put16(f, 1);                 // type = point
+    put16(f, (uint16_t)(int16_t)4);   // bone = 4
+    putf(f, -1.0f); putf(f, 0.0f); putf(f, 9.0f);  // position
+    for (int i=0;i<7*28;i++) f.push_back(0);       // colour/intensity/atten M2Tracks
+
+    // camera record (124 bytes): type,fov,far,near, M2Track, pos, then the rest (skipped)
+    uint32_t cameraOff = (uint32_t)f.size();
+    put32(f, 0);                 // type = portrait
+    putf(f, 0.95f);              // fov
+    putf(f, 1000.0f);            // farClip
+    putf(f, 0.1f);               // nearClip
+    for (int i=0;i<28;i++) f.push_back(0);         // positions M2Track
+    putf(f, 4.0f); putf(f, 5.0f); putf(f, 6.0f);   // static position
+    for (int i=0;i<(124-16-28-12);i++) f.push_back(0); // target/roll tail (skipped)
+
     // patch header arrays
     patch32(f, 0x008, 10);        patch32(f, 0x00C, nameOff);   // name
     patch32(f, 0x044, 3);         patch32(f, 0x048, vtxOff);    // vertices
     patch32(f, 0x04C, 1);         patch32(f, 0x050, viewOff);   // views
     patch32(f, 0x05C, 1);         patch32(f, 0x060, texOff);    // textures
+    patch32(f, 0x0B4, 1);         patch32(f, 0x0B8, attachOff); // attachments
+    patch32(f, 0x0CC, 1);         patch32(f, 0x0D0, lightOff);  // lights
+    patch32(f, 0x0D4, 1);         patch32(f, 0x0D8, cameraOff); // cameras
 
     // --- parse and verify ---
     M2Model m = parseM2(f);
@@ -97,6 +124,42 @@ void test_m2() {
 
     // The resolve chain (triangle -> lookup -> global vertex) is consistent.
     CHECK(m.resolveVertex(m.triangles[2]) == 2);
+
+    // ---- attachments / cameras / lights (static leading fields) --------------
+    CHECK(m.attachments.size() == 1);
+    CHECK(m.attachments[0].id == 7);
+    CHECK(m.attachments[0].bone == 2);
+    CHECK_APPROX(m.attachments[0].position.x, 1.5f);
+    CHECK_APPROX(m.attachments[0].position.z, 3.5f);
+
+    CHECK(m.lights.size() == 1);
+    CHECK(m.lights[0].type == 1);
+    CHECK(m.lights[0].bone == 4);
+    CHECK_APPROX(m.lights[0].position.x, -1.0f);
+    CHECK_APPROX(m.lights[0].position.z, 9.0f);
+
+    CHECK(m.cameras.size() == 1);
+    CHECK(m.cameras[0].type == 0);
+    CHECK_APPROX(m.cameras[0].fov, 0.95f);
+    CHECK_APPROX(m.cameras[0].farClip, 1000.0f);
+    CHECK_APPROX(m.cameras[0].nearClip, 0.1f);
+    CHECK_APPROX(m.cameras[0].position.x, 4.0f);
+    CHECK_APPROX(m.cameras[0].position.z, 6.0f);
+
+    // The additive path must no-op on a model lacking these arrays: a copy with
+    // the attachment/light/camera header counts cleared parses with empty vectors
+    // and is otherwise identical to the full model.
+    {
+        std::vector<uint8_t> noExtras = f;
+        patch32(noExtras, 0x0B4, 0);   // attachments count = 0
+        patch32(noExtras, 0x0CC, 0);   // lights count = 0
+        patch32(noExtras, 0x0D4, 0);   // cameras count = 0
+        M2Model m2 = parseM2(noExtras);
+        CHECK(m2.attachments.empty());
+        CHECK(m2.lights.empty());
+        CHECK(m2.cameras.empty());
+        CHECK(m2.vertices.size() == 3);   // the rest of the model is unaffected
+    }
 
     // Every submesh draw range must stay inside the view's lookup/triangle lists
     // (an out-of-range start/count is the classic "exploded mesh" symptom on a
