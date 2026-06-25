@@ -95,6 +95,20 @@ void test_m2() {
     putf(f, 4.0f); putf(f, 5.0f); putf(f, 6.0f);   // static position
     for (int i=0;i<(124-16-28-12);i++) f.push_back(0); // target/roll tail (skipped)
 
+    // ribbon-emitter record (0xB0 bytes): id, bone, pos, then AnimationBlocks (skipped)
+    uint32_t ribbonOff = (uint32_t)f.size();
+    put32(f, 11);                // id
+    put32(f, (uint32_t)(int32_t)3);   // bone = 3
+    putf(f, 0.5f); putf(f, 1.0f); putf(f, 2.0f);   // position
+    for (int i=0;i<(0xB0-20);i++) f.push_back(0);  // embedded AnimationBlocks
+
+    // particle-emitter record (0x1D8 bytes): id, bone, pos, then AnimationBlocks (skipped)
+    uint32_t particleOff = (uint32_t)f.size();
+    put32(f, 22);                // id
+    put32(f, (uint32_t)(int32_t)6);   // bone = 6
+    putf(f, 7.0f); putf(f, 8.0f); putf(f, 9.0f);   // position
+    for (int i=0;i<(0x1D8-20);i++) f.push_back(0); // embedded AnimationBlocks
+
     // patch header arrays
     patch32(f, 0x008, 10);        patch32(f, 0x00C, nameOff);   // name
     patch32(f, 0x044, 3);         patch32(f, 0x048, vtxOff);    // vertices
@@ -103,6 +117,8 @@ void test_m2() {
     patch32(f, 0x0B4, 1);         patch32(f, 0x0B8, attachOff); // attachments
     patch32(f, 0x0CC, 1);         patch32(f, 0x0D0, lightOff);  // lights
     patch32(f, 0x0D4, 1);         patch32(f, 0x0D8, cameraOff); // cameras
+    patch32(f, 0x0E4, 1);         patch32(f, 0x0E8, ribbonOff);   // ribbon emitters
+    patch32(f, 0x0EC, 1);         patch32(f, 0x0F0, particleOff); // particle emitters
 
     // --- parse and verify ---
     M2Model m = parseM2(f);
@@ -146,6 +162,19 @@ void test_m2() {
     CHECK_APPROX(m.cameras[0].position.x, 4.0f);
     CHECK_APPROX(m.cameras[0].position.z, 6.0f);
 
+    // ---- ribbon / particle emitters (static leading fields) ------------------
+    CHECK(m.ribbonEmitters.size() == 1);
+    CHECK(m.ribbonEmitters[0].id == 11);
+    CHECK(m.ribbonEmitters[0].bone == 3);
+    CHECK_APPROX(m.ribbonEmitters[0].position.x, 0.5f);
+    CHECK_APPROX(m.ribbonEmitters[0].position.z, 2.0f);
+
+    CHECK(m.particleEmitters.size() == 1);
+    CHECK(m.particleEmitters[0].id == 22);
+    CHECK(m.particleEmitters[0].bone == 6);
+    CHECK_APPROX(m.particleEmitters[0].position.x, 7.0f);
+    CHECK_APPROX(m.particleEmitters[0].position.z, 9.0f);
+
     // The additive path must no-op on a model lacking these arrays: a copy with
     // the attachment/light/camera header counts cleared parses with empty vectors
     // and is otherwise identical to the full model.
@@ -154,10 +183,14 @@ void test_m2() {
         patch32(noExtras, 0x0B4, 0);   // attachments count = 0
         patch32(noExtras, 0x0CC, 0);   // lights count = 0
         patch32(noExtras, 0x0D4, 0);   // cameras count = 0
+        patch32(noExtras, 0x0E4, 0);   // ribbon emitters count = 0
+        patch32(noExtras, 0x0EC, 0);   // particle emitters count = 0
         M2Model m2 = parseM2(noExtras);
         CHECK(m2.attachments.empty());
         CHECK(m2.lights.empty());
         CHECK(m2.cameras.empty());
+        CHECK(m2.ribbonEmitters.empty());
+        CHECK(m2.particleEmitters.empty());
         CHECK(m2.vertices.size() == 3);   // the rest of the model is unaffected
     }
 

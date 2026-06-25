@@ -28,6 +28,15 @@ constexpr size_t kOffAttachments = 0x0B4; // M2Array<ModelAttachmentDef>
 constexpr size_t kOffLights      = 0x0CC; // M2Array<ModelLightDef>
 constexpr size_t kOffCameras     = 0x0D4; // M2Array<ModelCameraDef>
 
+// VERIFY-FLAGGED (vanilla 0x100): the emitter arrays follow the camera block.
+// Counting the 8-byte M2Array fields forward from cameras @ 0xD4:
+//   cameras @ 0xD4, camera_lookup @ 0xDC, ribbon_emitters @ 0xE4,
+//   particle_emitters @ 0xEC. This matches the most-cited vanilla ModelHeader
+//   layout (getMaNGOS / WMV). Every read below is range-guarded, so a model
+//   whose real layout differs (or which lacks these arrays) parses as before.
+constexpr size_t kOffRibbonEmitters   = 0x0E4; // M2Array<RibbonEmitterDef>
+constexpr size_t kOffParticleEmitters = 0x0EC; // M2Array<ParticleEmitterDef>
+
 // On-disk record strides (embedded AnimationBlocks are 28 bytes each):
 //   Attachment = id(4)+bone(4)+pos(12)+M2Track<bool>(28)                     = 48
 //   Light      = type(2)+bone(2)+pos(12)+7*M2Track(28)                       = 212
@@ -37,6 +46,16 @@ constexpr size_t kAttachStride = 48;
 constexpr size_t kLightStride  = 212;
 constexpr size_t kCameraStride = 124;
 constexpr size_t kCameraPosOff = 16 + 28; // pos Vec3 follows the first M2Track
+
+// VERIFY-FLAGGED (vanilla 0x100) emitter record strides. Both records begin with
+// id(4)+bone(4)+pos(12) = 20 leading static bytes, then a long run of embedded
+// AnimationBlocks (28 bytes each) we skip. The full strides differ across sources;
+// the documented vanilla sizes are ~0xB0 (ribbon) and ~0x1D8 (particle). We only
+// read the leading 20 bytes, then advance by the full stride. Reads are guarded,
+// so a mis-derived stride yields a no-op (fewer/zero records) rather than a crash.
+constexpr size_t kRibbonStride   = 0x0B0;  // RibbonEmitterDef
+constexpr size_t kParticleStride = 0x1D8;  // ParticleEmitterDef
+constexpr size_t kEmitterLeadBytes = 20;   // id(4)+bone(4)+pos(12)
 
 struct Arr { uint32_t count; uint32_t offset; };
 
@@ -209,6 +228,43 @@ M2Model parseM2(const std::vector<uint8_t>& buf, const ClientProfile& profile) {
                 cr.seek(kCameraPosOff);
                 c.position = { cr.f32(), cr.f32(), cr.f32() };
                 m.cameras.push_back(c);
+            }
+        }
+    }
+
+    // ---- ribbon / particle emitters (static leading fields only) -----------
+    // Additive + guarded exactly like the attachment/camera/light blocks above.
+    // Each record's leading id(u32)+bone(i32)+pos(Vec3) is read; the embedded
+    // AnimationBlocks that follow are skipped by advancing the full stride.
+
+    // ribbon emitters: id(u32) + bone(i32) + pos(Vec3), then ~0xB0-byte stride.
+    if (kOffRibbonEmitters + 8 <= buf.size()) {
+        Arr a = readArr(r, kOffRibbonEmitters);
+        if (a.count && static_cast<size_t>(a.offset) +
+                       static_cast<size_t>(a.count) * kRibbonStride <= buf.size()) {
+            for (uint32_t i = 0; i < a.count; ++i) {
+                ByteReader er(buf.data() + a.offset + i * kRibbonStride, kEmitterLeadBytes);
+                M2RibbonEmitter e;
+                e.id   = er.u32();
+                e.bone = static_cast<int32_t>(er.u32());
+                e.position = { er.f32(), er.f32(), er.f32() };
+                m.ribbonEmitters.push_back(e);
+            }
+        }
+    }
+
+    // particle emitters: id(u32) + bone(i32) + pos(Vec3), then ~0x1D8-byte stride.
+    if (kOffParticleEmitters + 8 <= buf.size()) {
+        Arr a = readArr(r, kOffParticleEmitters);
+        if (a.count && static_cast<size_t>(a.offset) +
+                       static_cast<size_t>(a.count) * kParticleStride <= buf.size()) {
+            for (uint32_t i = 0; i < a.count; ++i) {
+                ByteReader er(buf.data() + a.offset + i * kParticleStride, kEmitterLeadBytes);
+                M2ParticleEmitter e;
+                e.id   = er.u32();
+                e.bone = static_cast<int32_t>(er.u32());
+                e.position = { er.f32(), er.f32(), er.f32() };
+                m.particleEmitters.push_back(e);
             }
         }
     }

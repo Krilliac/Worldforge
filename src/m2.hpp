@@ -62,6 +62,24 @@ struct M2Light {
     Vec3     position;     // light position in bone space
 };
 
+// Static ribbon-emitter definition (weapon trails, etc.). Only the leading
+// id/bone/position fields are kept; the embedded colour/alpha/height
+// AnimationBlocks that follow are skipped via the record stride.
+struct M2RibbonEmitter {
+    uint32_t id   = 0;     // emitter id (-1 in many files)
+    int32_t  bone = 0;     // bone the emitter rides
+    Vec3     position;     // offset from the bone, in model space
+};
+
+// Static particle-emitter definition. Only the leading id/bone/position fields
+// are kept; the large block of emission AnimationBlocks that follow are skipped
+// via the record stride.
+struct M2ParticleEmitter {
+    uint32_t id   = 0;     // emitter id (-1 in many files)
+    int32_t  bone = 0;     // bone the emitter rides
+    Vec3     position;     // offset from the bone, in model space
+};
+
 struct M2Model {
     uint32_t version = 0;
     std::string name;
@@ -81,6 +99,11 @@ struct M2Model {
     std::vector<M2Attachment> attachments;
     std::vector<M2Camera>     cameras;
     std::vector<M2Light>      lights;
+
+    // Static fields of the ribbon / particle emitter arrays. Parsed additively
+    // and guarded: a model lacking these arrays leaves them empty.
+    std::vector<M2RibbonEmitter>   ribbonEmitters;
+    std::vector<M2ParticleEmitter> particleEmitters;
 
     // Resolve a triangle index to a global vertex index.
     uint32_t resolveVertex(uint16_t triIndex) const {
