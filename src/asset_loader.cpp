@@ -73,6 +73,22 @@ Mat4 wmoMatrix(const WmoDef& w) {
     return Mat4::translate(world) * rot;
 }
 
+// Append a WMO's interior liquid surfaces (MLIQ) to a tile's translucent liquid
+// pass, transformed from WMO-local space into the world by the placement matrix.
+static void addWmoLiquids(TileScene& ts, const WmoModel& wm, const Mat4& xform) {
+    for (const WmoGroup& g : wm.groups) {
+        if (!g.liquid.present) continue;
+        Mesh lm = buildWmoLiquidMesh(g.liquid);
+        if (lm.indices.empty()) continue;
+        for (Vertex& v : lm.vertices) {
+            Vec4 p = xform * Vec4(v.position, 1.0f);
+            v.position = { p.x, p.y, p.z };
+        }
+        ts.terrain.liquids.push_back({ std::move(lm), liquidTint(LiquidType::River),
+                                       false, LiquidType::River });
+    }
+}
+
 void TileScene::render(Framebuffer& fb, const Mat4& viewProj, Vec3 lightDir) const {
     terrain.renderTerrain(fb, viewProj, lightDir);
     for (const Inst& in : instances)
@@ -407,6 +423,7 @@ TileScene AssetLoader::buildTileScene(const std::string& map, int x, int y,
                 ts.wmoRenderInstances.push_back(
                     { ts.meshes.size() - 1, ts.textures.size() - 1, xform, blended, boost });
             }
+            addWmoLiquids(ts, *wm, xform);   // interior water/lava (MLIQ)
         }
     }
 
@@ -452,6 +469,7 @@ size_t AssetLoader::placeWmo(TileScene& ts, const std::string& wmoPath, Vec3 wor
         ts.wmoRenderInstances.push_back(
             { ts.meshes.size() - 1, ts.textures.size() - 1, xform, blended, boost });
     }
+    addWmoLiquids(ts, *wm, xform);   // interior water/lava (MLIQ)
     return instIdx;
 }
 
