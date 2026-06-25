@@ -152,6 +152,38 @@ void test_dbc_defs() {
         CHECK(normalizeModelPath(e.modelName) == "World\\wmo\\Azeroth\\Buildings\\Tower.wmo");
     }
 
+    // --- GroundEffectDoodad.dbc: id, modelPath@1(str) ---
+    {
+        std::string ds;
+        ds.push_back('\0');
+        size_t offDoodad = ds.size(); ds += "Detail\\Grass01.mdx"; ds.push_back('\0');
+        std::vector<uint32_t> rec(2, 0);
+        rec[0] = 777;                                 // id
+        rec[1] = (uint32_t)offDoodad;                 // modelPath
+        Dbc dbc = Dbc::parse(makeDbc(2, { rec }, ds));
+        GroundEffectDoodadEntry e = groundEffectDoodadEntry(dbc, 0);
+        CHECK(e.id == 777);
+        CHECK(e.modelPath == "Detail\\Grass01.mdx");
+        CHECK(normalizeModelPath(e.modelPath) == "Detail\\Grass01.m2");
+    }
+
+    // --- GroundEffectTexture.dbc: id, doodadIds@1..4, ... density@9 (VERIFY) ---
+    {
+        std::vector<uint32_t> rec(11, 0);
+        rec[0] = 300;                                 // id
+        rec[1] = 777;                                 // doodadIds[0] -> GroundEffectDoodad.id
+        rec[2] = 778;
+        rec[3] = 0;
+        rec[4] = 779;
+        rec[9] = 32;                                  // density (VERIFY-FLAGGED)
+        Dbc dbc = Dbc::parse(makeDbc(11, { rec }, std::string(1, '\0')));
+        GroundEffectTextureEntry e = groundEffectTextureEntry(dbc, 0);
+        CHECK(e.id == 300);
+        CHECK(e.doodadIds[0] == 777 && e.doodadIds[1] == 778);
+        CHECK(e.doodadIds[2] == 0 && e.doodadIds[3] == 779);
+        CHECK(e.density == 32);
+    }
+
     // --- normalizeModelPath: .mdx/.mdl -> .m2 (case-insensitive); others unchanged ---
     CHECK(normalizeModelPath("X\\Y.mdx") == "X\\Y.m2");
     CHECK(normalizeModelPath("a.MDL") == "a.m2");

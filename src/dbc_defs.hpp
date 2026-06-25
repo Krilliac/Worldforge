@@ -89,6 +89,17 @@ struct GameObjectDisplayInfoEntry {
     std::string modelName;       // field 1 (string) -- .mdx (M2) or .wmo path
 };
 
+struct GroundEffectDoodadEntry {
+    uint32_t    id = 0;          // field 0
+    std::string modelPath;       // field 1 (string) -- doodad .mdx/.m2
+};
+
+struct GroundEffectTextureEntry {
+    uint32_t id = 0;                    // field 0
+    std::array<uint32_t, 4> doodadIds{};// fields 1..4 -> GroundEffectDoodad ids
+    uint32_t density = 0;               // field 9 (VERIFY-FLAGGED)
+};
+
 // Typed accessors. `rec` is a 0-based record index in `[0, dbc.recordCount())`.
 MapEntry        mapEntry(const Dbc& dbc, uint32_t rec);
 AreaEntry       areaEntry(const Dbc& dbc, uint32_t rec);
@@ -97,6 +108,8 @@ LightEntry      lightEntry(const Dbc& dbc, uint32_t rec);
 CreatureModelDataEntry     creatureModelDataEntry(const Dbc& dbc, uint32_t rec);
 CreatureDisplayInfoEntry   creatureDisplayInfoEntry(const Dbc& dbc, uint32_t rec);
 GameObjectDisplayInfoEntry gameObjectDisplayInfoEntry(const Dbc& dbc, uint32_t rec);
+GroundEffectDoodadEntry    groundEffectDoodadEntry(const Dbc& dbc, uint32_t rec);
+GroundEffectTextureEntry   groundEffectTextureEntry(const Dbc& dbc, uint32_t rec);
 
 // Normalise a DBC model path to the on-disk file: vanilla DBCs reference models
 // with a .mdx (or .mdl) extension but the archive stores .m2 (MD20). Replaces a

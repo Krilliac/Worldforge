@@ -124,6 +124,21 @@ GameObjectDisplayInfoEntry gameObjectDisplayInfoEntry(const Dbc& dbc, uint32_t r
     return e;
 }
 
+GroundEffectDoodadEntry groundEffectDoodadEntry(const Dbc& dbc, uint32_t rec) {
+    GroundEffectDoodadEntry e;
+    e.id        = dbc.getU32(rec, 0);
+    e.modelPath = dbc.getString(rec, 1);
+    return e;
+}
+
+GroundEffectTextureEntry groundEffectTextureEntry(const Dbc& dbc, uint32_t rec) {
+    GroundEffectTextureEntry e;
+    e.id = dbc.getU32(rec, 0);
+    for (uint32_t i = 0; i < e.doodadIds.size(); ++i) e.doodadIds[i] = dbc.getU32(rec, 1 + i);
+    e.density = dbc.getU32(rec, 9);   // VERIFY-FLAGGED: field index less certain
+    return e;
+}
+
 std::string normalizeModelPath(const std::string& dbcPath) {
     if (endsWithCI(dbcPath, ".mdx") || endsWithCI(dbcPath, ".mdl"))
         return dbcPath.substr(0, dbcPath.size() - 4) + ".m2";
