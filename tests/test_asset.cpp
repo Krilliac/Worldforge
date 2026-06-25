@@ -284,6 +284,22 @@ std::vector<uint8_t> makeAdt2Layer(const std::vector<uint8_t>& mcal) {
 void test_asset() {
     std::printf("[asset]\n");
 
+    // --- wmoInteriorTint: bounded ambient lift from MOLT interior lights ----
+    {
+        CHECK(wmoInteriorTint({}, 0.5f).x == 0.0f);    // no lights -> no boost
+        WmoLight a; a.color = {1.0f, 0.5f, 0.25f}; a.intensity = 2.0f;
+        Vec3 one = wmoInteriorTint({a}, 0.5f);         // single light -> colour * strength
+        CHECK_APPROX(one.x, 0.5f);
+        CHECK_APPROX(one.y, 0.25f);
+        CHECK_APPROX(one.z, 0.125f);
+        WmoLight b; b.color = {0.0f, 0.0f, 1.0f}; b.intensity = 6.0f;
+        Vec3 mix = wmoInteriorTint({a, b}, 1.0f);      // intensity-weighted: (a*2 + b*6)/8
+        CHECK_APPROX(mix.x, (1.0f * 2 + 0.0f * 6) / 8.0f);   // 0.25
+        CHECK_APPROX(mix.z, (0.25f * 2 + 1.0f * 6) / 8.0f);  // 0.8125
+        WmoLight c; c.color = {1, 1, 1}; c.intensity = 1.0f;
+        CHECK(wmoInteriorTint({c}, 4.0f).x == 1.0f);   // clamped to 1.0
+    }
+
     const char* mpqPath = "wforge_asset_test.mpq";
     std::vector<std::pair<std::string, std::vector<uint8_t>>> files = {
         { "test.blp", makeRawBlp(2, 2, Rgba{40, 200, 60, 255}) },

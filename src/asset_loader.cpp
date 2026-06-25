@@ -10,7 +10,30 @@
 #include "m2_render.hpp"
 #include "wmo_render.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 namespace wf {
+
+Vec3 wmoInteriorTint(const std::vector<WmoLight>& lights, float strength) {
+    if (lights.empty()) return Vec3{ 0, 0, 0 };
+    Vec3 acc{ 0, 0, 0 };
+    float wsum = 0.0f;
+    for (const WmoLight& L : lights) {
+        const float w = std::max(L.intensity, 0.0f);
+        acc = acc + L.color * w;
+        wsum += w;
+    }
+    Vec3 avg{ 0, 0, 0 };
+    if (wsum > 1e-6f) {
+        avg = acc * (1.0f / wsum);                 // intensity-weighted average hue
+    } else {                                       // all intensities ~0: plain average
+        for (const WmoLight& L : lights) avg = avg + L.color;
+        avg = avg * (1.0f / static_cast<float>(lights.size()));
+    }
+    auto sat = [&](float c) { return std::min(1.0f, std::max(0.0f, c * strength)); };
+    return Vec3{ sat(avg.x), sat(avg.y), sat(avg.z) };
+}
 
 void TileRender::renderTerrain(Framebuffer& fb, const Mat4& mvp, Vec3 lightDir) const {
     for (size_t c = 0; c < chunkMeshes.size(); ++c)
@@ -61,15 +84,22 @@ void TileScene::render(Framebuffer& fb, const Mat4& viewProj, Vec3 lightDir) con
 void TileScene::renderLit(Framebuffer& fb, const Mat4& viewProj, Vec3 lightDir) const {
     // Same composition as render(), but terrain + liquid use this tile's resolved
     // zone lighting (ShadeLight ambient/diffuse) with the sun direction overridden.
-    // Object instances keep the directional shade (no per-instance colour grading).
+    // Doodads keep the plain directional shade; WMO parts additionally pick up
+    // their MOLT interior lift (in.ambientBoost) on top of the zone ambient, so
+    // lit interiors aren't black -- a WMO with no MOLT keeps the boost at 0.
     ShadeLight tl = light;        tl.dir = lightDir;
     ShadeLight ll = liquidLight;  ll.dir = lightDir;
     terrain.renderTerrain(fb, viewProj, tl);
     for (const Inst& in : instances)
         rasterTexMesh(fb, meshes[in.mesh], viewProj * in.transform, *textures[in.tex], lightDir);
-    for (const Inst& in : wmoRenderInstances)
+    for (const Inst& in : wmoRenderInstances) {
+        ShadeLight wl = tl;
+        wl.ambient = Vec3{ std::min(1.0f, tl.ambient.x + in.ambientBoost.x),
+                           std::min(1.0f, tl.ambient.y + in.ambientBoost.y),
+                           std::min(1.0f, tl.ambient.z + in.ambientBoost.z) };
         rasterTexMesh(fb, meshes[in.mesh], viewProj * in.transform, *textures[in.tex],
-                      lightDir, in.blend);
+                      wl, in.blend);
+    }
     terrain.renderLiquid(fb, viewProj, ll);
     DebugDrawOptions opt; opt.depthTest = true;
     rasterDebug(fb, markers, viewProj, opt);
@@ -357,6 +387,8 @@ TileScene AssetLoader::buildTileScene(const std::string& map, int x, int y,
             Mesh pm = wmoPickMesh(*wm);
             if (!pm.indices.empty())
                 ts.wmoInstances.push_back({ std::move(pm), xform, w.uniqueId });
+            // Interior lift from this WMO's MOLT lights, shared by all its parts.
+            const Vec3 boost = wmoInteriorTint(wm->root.lights);
             // Textured render parts (one per material) -> the shared mesh/texture
             // pools, drawn like doodads.
             for (WmoRenderPart& part : wmoRenderParts(*wm)) {
@@ -365,7 +397,7 @@ TileScene AssetLoader::buildTileScene(const std::string& map, int x, int y,
                 ts.meshes.push_back(std::move(part.mesh));
                 ts.textures.push_back(part.texture.empty() ? fallback() : texture(part.texture));
                 ts.wmoRenderInstances.push_back(
-                    { ts.meshes.size() - 1, ts.textures.size() - 1, xform, blended });
+                    { ts.meshes.size() - 1, ts.textures.size() - 1, xform, blended, boost });
             }
         }
     }

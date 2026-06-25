@@ -22,12 +22,21 @@
 #include "raster.hpp"
 #include "image.hpp"
 #include "m2.hpp"
+#include "wmo.hpp"
 #include "bounds.hpp"
 #include "debugdraw.hpp"
 #include "audio.hpp"
 #include "lighting.hpp"
 
 namespace wf {
+
+// A bounded ambient lift from a WMO's MOLT interior lights: the intensity-weighted
+// average light colour, scaled by `strength` and clamped to [0,1] per channel.
+// Empty -> {0,0,0} (no change). Uses the light *colours* (a hue), not their
+// absolute intensity magnitude, so it is robust to the uncertain MOLT intensity
+// scale while still tinting interiors toward their lamps. Added on top of the
+// zone light at render time, so a WMO with no MOLT renders exactly as before.
+Vec3 wmoInteriorTint(const std::vector<WmoLight>& lights, float strength = 0.5f);
 
 // MDDF doodad / MODF WMO placement -> world transform (translate * rotate *
 // scale). Rotation is the stored Euler (degrees); the axis/order is the one
@@ -72,7 +81,8 @@ struct TileScene {
     TileRender terrain;
     std::vector<TexMesh>                      meshes;     // doodad/WMO meshes (owned)
     std::vector<std::shared_ptr<const Image>> textures;   // their textures (keep-alive)
-    struct Inst { size_t mesh; size_t tex; Mat4 transform; bool blend = false; };
+    struct Inst { size_t mesh; size_t tex; Mat4 transform; bool blend = false;
+                  Vec3 ambientBoost{0,0,0}; };   // WMO MOLT interior lift (0 = none)
     std::vector<Inst> instances;            // placed M2 doodads
     std::vector<Inst> wmoRenderInstances;   // textured WMO parts (index into meshes/textures)
 
