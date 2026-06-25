@@ -44,6 +44,7 @@
 #include <filesystem>
 #include <cstdlib>           // std::getenv
 #include <string>
+#include <algorithm>         // std::transform (Spawn-browser filter)
 
 using namespace wf;
 
@@ -190,6 +191,19 @@ int main(int argc, char** argv) {
         }
         if (lights.empty())
             std::printf("[editor] no client/Light.dbc -- using legacy grey light\n");
+    }
+
+    // Spawn catalog: resolve the client's creature/gameobject display ids to real
+    // models (the engine's object->model pipeline) so the editor can place them.
+    std::vector<DisplayModel> creatureModels, gameObjectModels;
+    if (mpq.archiveCount() > 0) {
+        Dbc cdi  = loadDbc(mpq, "CreatureDisplayInfo");
+        Dbc cmd  = loadDbc(mpq, "CreatureModelData");
+        Dbc godi = loadDbc(mpq, "GameObjectDisplayInfo");
+        creatureModels   = listCreatureModels(cdi, cmd);
+        gameObjectModels = listGameObjectModels(godi);
+        std::printf("[editor] spawn catalog: %zu creature, %zu gameobject models\n",
+                    creatureModels.size(), gameObjectModels.size());
     }
     // Live day-tick (T1.2): the viewport's lighting is resolved every frame from
     // the global sky at `dayTick` (0..2880, one WoW day), so dragging the Sky
@@ -381,6 +395,7 @@ int main(int argc, char** argv) {
             ImGui::DockBuilderDockWindow("Entities",            left);
             ImGui::DockBuilderDockWindow("Map Browser",         leftB);
             ImGui::DockBuilderDockWindow("Assets",              leftB);
+            ImGui::DockBuilderDockWindow("Spawn",               leftB);
             ImGui::DockBuilderDockWindow("Placement",           leftB);
             ImGui::DockBuilderDockWindow("Viewport",            center);
             ImGui::DockBuilderDockWindow("Sky",                 right);
@@ -433,6 +448,40 @@ int main(int argc, char** argv) {
         // Asset browser: choose the active placement model.
         assetBrowser.draw();
 
+        // Spawn browser: place creatures/objects by display id -- selecting one
+        // sets the active asset to its resolved real model (.m2 / .wmo).
+        {
+            ImGui::Begin("Spawn");
+            static char spawnFilter[128] = {0};
+            ImGui::InputText("Filter##spawn", spawnFilter, sizeof spawnFilter);
+            auto matches = [&](const std::string& label) {
+                if (spawnFilter[0] == 0) return true;
+                std::string l = label, f = spawnFilter;
+                std::transform(l.begin(), l.end(), l.begin(), [](unsigned char c){ return (char)std::tolower(c); });
+                std::transform(f.begin(), f.end(), f.begin(), [](unsigned char c){ return (char)std::tolower(c); });
+                return l.find(f) != std::string::npos;
+            };
+            auto listTab = [&](const char* name, const std::vector<DisplayModel>& models) {
+                if (!ImGui::BeginTabItem(name)) return;
+                ImGui::BeginChild(name, ImVec2(0, 0));
+                for (const DisplayModel& dm : models) {
+                    if (!matches(dm.label)) continue;
+                    if (ImGui::Selectable(dm.label.c_str(), assetBrowser.selectedPath() == dm.model))
+                        assetBrowser.select(dm.model);
+                }
+                ImGui::EndChild();
+                ImGui::EndTabItem();
+            };
+            if (creatureModels.empty() && gameObjectModels.empty()) {
+                ImGui::TextDisabled("No display DBCs (mount a client).");
+            } else if (ImGui::BeginTabBar("spawnTabs")) {
+                listTab("Creatures", creatureModels);
+                listTab("Objects",   gameObjectModels);
+                ImGui::EndTabBar();
+            }
+            ImGui::End();
+        }
+
         // Outliner: clicking an item selects that entity / scene object.
         if (auto sel = outliner.draw(view, activeScene);
             sel.kind != editor::OutlinerSelection::Kind::None) {
@@ -478,10 +527,15 @@ int main(int argc, char** argv) {
             else if (!terrainSel)  ImGui::TextDisabled("Click the ground to choose a spot.");
             if ((placeBtn || placeKey) && canPlace) {
                 const Vec3 at = sceneSel.point;
-                if (assetBrowser.selectedKind() == ModelKind::M2)
-                    loader.placeDoodad(realTile, assetBrowser.selectedPath(), at);
-                else
-                    loader.placeWmo(realTile, assetBrowser.selectedPath(), at, 0.0f, nextPlaceId++);
+                const std::string& path = assetBrowser.selectedPath();
+                // Infer the placement kind from the file (a creature is .m2, a
+                // gameobject may be .wmo) rather than the browser tab, so the
+                // Spawn browser's selections place correctly too.
+                const bool isWmo = path.size() > 4 &&
+                    (path.compare(path.size() - 4, 4, ".wmo") == 0 ||
+                     path.compare(path.size() - 4, 4, ".WMO") == 0);
+                if (isWmo) loader.placeWmo(realTile, path, at, 0.0f, nextPlaceId++);
+                else       loader.placeDoodad(realTile, path, at);
                 ++placedCount;
             }
             ImGui::Text("Placed this session: %d", placedCount);
