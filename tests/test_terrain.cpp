@@ -379,4 +379,37 @@ void test_terrain() {
         CHECK(r.alpha.size() == 2048);                   // MCAL survived
         CHECK(decodeAlphaMap(r, 1, false).at(10, 10) == 255);
     }
+
+    // --- MCRF doodad/object refs + MCSH shadow bitmap -----------------------
+    {
+        std::vector<uint8_t> hdr(128, 0);
+        auto h32 = [&](size_t off, uint32_t v){ for(int i=0;i<4;i++) hdr[off+i]=(v>>(8*i))&0xFF; };
+        h32(0x00, MCNK_HAS_MCSH);   // flags: shadow map present
+        h32(0x10, 2);               // nDoodadRefs
+        h32(0x38, 1);               // nMapObjRefs
+
+        std::vector<uint8_t> mcrf;
+        put32(mcrf, 11); put32(mcrf, 22);   // doodad (MDDF) indices
+        put32(mcrf, 33);                     // map-object (MODF) index
+
+        std::vector<uint8_t> mcsh(512, 0);
+        mcsh[0] = 0x01;             // texel (0,0): bit 0
+        mcsh[8] = 0x04;             // texel (1,2): bit index 66 -> byte 8, bit 2
+
+        std::vector<uint8_t> body = hdr;
+        chunk(body, "MCRF", mcrf);
+        chunk(body, "MCSH", mcsh);
+        std::vector<uint8_t> adtS;
+        chunk(adtS, "MCNK", body);
+
+        MapChunk mc = parseChunks(adtS)[0];
+        CHECK(mc.doodadRefs.size() == 2 && mc.doodadRefs[0] == 11 && mc.doodadRefs[1] == 22);
+        CHECK(mc.wmoRefs.size() == 1 && mc.wmoRefs[0] == 33);
+        CHECK(mc.shadow.size() == 512);
+        CHECK(shadowAt(mc, 0, 0));
+        CHECK(shadowAt(mc, 1, 2));
+        CHECK(!shadowAt(mc, 0, 1));
+        CHECK(!shadowAt(mc, 63, 63));
+        CHECK(!shadowAt(mc, 100, 0));   // out of range -> false
+    }
 }

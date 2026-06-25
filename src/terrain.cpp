@@ -6,7 +6,11 @@
 #include <algorithm>
 #include <stdexcept>
 
-namespace wf { static void parseMclq(MapChunk&, const uint8_t*, uint32_t); }
+namespace wf {
+static void parseMclq(MapChunk&, const uint8_t*, uint32_t);
+static void parseMcrf(MapChunk&, const uint8_t*, uint32_t, uint32_t nDoodad, uint32_t nWmo);
+static void parseMcsh(MapChunk&, const uint8_t*, uint32_t);
+}
 
 namespace wf {
 
@@ -17,12 +21,17 @@ constexpr size_t kOffFlags      = 0x00;
 constexpr size_t kOffIndexX     = 0x04;
 constexpr size_t kOffIndexY     = 0x08;
 constexpr size_t kOffNLayers    = 0x0C;
+constexpr size_t kOffNDoodadRefs= 0x10;   // count of MCRF doodad (MDDF) indices
 constexpr size_t kOffOfsMCVT    = 0x14;   // height map sub-chunk offset
 constexpr size_t kOffOfsMCNR    = 0x18;   // normal map sub-chunk offset
 constexpr size_t kOffOfsMCLY    = 0x1C;   // texture layer sub-chunk offset
+constexpr size_t kOffOfsMCRF    = 0x20;   // doodad/object reference sub-chunk offset
 constexpr size_t kOffOfsMCAL    = 0x24;   // alpha map sub-chunk offset
 constexpr size_t kOffSizeMCAL   = 0x28;   // alpha map sub-chunk size
+constexpr size_t kOffOfsMCSH    = 0x2C;   // shadow map sub-chunk offset
+constexpr size_t kOffSizeMCSH   = 0x30;   // shadow map sub-chunk size
 constexpr size_t kOffAreaId     = 0x34;
+constexpr size_t kOffNMapObjRefs= 0x38;   // count of MCRF map-object (MODF) indices
 constexpr size_t kOffHoles      = 0x3C;
 constexpr size_t kOffOfsMCLQ    = 0x60;   // liquid sub-chunk offset
 constexpr size_t kOffPosition   = 0x68;
@@ -46,6 +55,12 @@ bool cellIsHole(uint16_t holes, int cellRow, int cellCol) {
     return (holes & (1u << holeBit)) != 0;
 }
 
+bool shadowAt(const MapChunk& mc, int row, int col) {
+    if (mc.shadow.empty() || row < 0 || col < 0 || row >= 64 || col >= 64) return false;
+    const size_t bit = static_cast<size_t>(row) * 64 + static_cast<size_t>(col);
+    return ((mc.shadow[bit >> 3] >> (bit & 7)) & 1u) != 0;
+}
+
 static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
     if (size < kHdrSize)
         throw std::runtime_error("MCNK smaller than its 128-byte header");
@@ -61,12 +76,16 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
     mc.position = { h.f32(), h.f32(), h.f32() };
 
     auto u32At = [&](size_t off) -> uint32_t { ByteReader t(data, kHdrSize); t.seek(off); return t.u32(); };
-    const uint32_t nLayers = u32At(kOffNLayers);
+    const uint32_t nLayers     = u32At(kOffNLayers);
+    const uint32_t nDoodadRefs = u32At(kOffNDoodadRefs);
+    const uint32_t nMapObjRefs = u32At(kOffNMapObjRefs);
     const uint32_t ofsMCVT = u32At(kOffOfsMCVT);
     const uint32_t ofsMCNR = u32At(kOffOfsMCNR);
     const uint32_t ofsMCLY = u32At(kOffOfsMCLY);
+    const uint32_t ofsMCRF = u32At(kOffOfsMCRF);
     const uint32_t ofsMCAL = u32At(kOffOfsMCAL);
     const uint32_t szMCAL  = u32At(kOffSizeMCAL);
+    const uint32_t ofsMCSH = u32At(kOffOfsMCSH);
     const uint32_t ofsMCLQ = u32At(kOffOfsMCLQ);
 
     // Two ways to find the MCVT/MCNR/MCLY/MCAL/MCLQ sub-chunks:
@@ -137,6 +156,10 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
             uint32_t n = std::min(sz, szMCAL ? szMCAL : sz);
             mc.alpha.assign(p, p + n);
         }
+        if (auto [p, sz] = sub(ofsMCRF, "MCRF"); p)
+            parseMcrf(mc, p, sz, nDoodadRefs, nMapObjRefs);
+        if (auto [p, sz] = sub(ofsMCSH, "MCSH"); p)
+            parseMcsh(mc, p, sz);
         if (auto [p, sz] = sub(ofsMCLQ, "MCLQ"); p)
             parseMclq(mc, p, sz);
 
@@ -170,6 +193,10 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
             }
         } else if (c.magic == "MCAL") {
             mc.alpha.assign(c.data, c.data + c.size);
+        } else if (c.magic == "MCRF") {
+            parseMcrf(mc, c.data, c.size, nDoodadRefs, nMapObjRefs);
+        } else if (c.magic == "MCSH") {
+            parseMcsh(mc, c.data, c.size);
         } else if (c.magic == "MCLQ") {
             parseMclq(mc, c.data, c.size);
         }
@@ -282,6 +309,24 @@ void packAlphaLayers(MapChunk& mc, const std::vector<AlphaMap>& maps, bool bigAl
         std::vector<uint8_t> enc = encodeAlphaMap(maps[i], bigAlpha);
         mc.alpha.insert(mc.alpha.end(), enc.begin(), enc.end());
     }
+}
+
+// Parse MCRF: nDoodad uint32 indices into the ADT's MDDF list, then nWmo indices
+// into its MODF list (the doodads/objects placed within this chunk's footprint).
+static void parseMcrf(MapChunk& mc, const uint8_t* data, uint32_t size,
+                      uint32_t nDoodad, uint32_t nWmo) {
+    ByteReader r(data, size);
+    for (uint32_t i = 0; i < nDoodad && r.remaining() >= 4; ++i) mc.doodadRefs.push_back(r.u32());
+    for (uint32_t i = 0; i < nWmo    && r.remaining() >= 4; ++i) mc.wmoRefs.push_back(r.u32());
+}
+
+// Parse MCSH: a 64x64-bit (512-byte) baked shadow bitmap. Truncated maps are
+// zero-padded so shadowAt() can index any texel safely.
+static void parseMcsh(MapChunk& mc, const uint8_t* data, uint32_t size) {
+    constexpr uint32_t kBytes = 64u * 64u / 8u;   // 512
+    uint32_t n = std::min(size, kBytes);
+    mc.shadow.assign(data, data + n);
+    if (mc.shadow.size() < kBytes) mc.shadow.resize(kBytes, 0);
 }
 
 // Parse one MCLQ liquid layer (min/max height, 9x9 vertex grid, 8x8 flags).

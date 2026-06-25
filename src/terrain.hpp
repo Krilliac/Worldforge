@@ -76,11 +76,19 @@ struct MapChunk {
     std::array<Vec3,  145> normals{};   // MCNR, unpacked to unit-ish vectors
     std::vector<TexLayer> layers;       // MCLY
     std::vector<uint8_t>  alpha;        // raw MCAL blob (decode via decodeAlphaMap)
+    std::vector<uint8_t>  shadow;       // raw MCSH 64x64 shadow bitmap (512 B); empty if absent
+    std::vector<uint32_t> doodadRefs;   // MCRF: indices into the ADT's MDDF doodad list
+    std::vector<uint32_t> wmoRefs;      // MCRF: indices into the ADT's MODF map-object list
 
     bool       hasLiquid  = false;      // MCLQ present
     LiquidType liquidType = LiquidType::None;
     MclqLayer  liquid;                  // valid when hasLiquid
 };
+
+// Sample the MCSH shadow bitmap at (row, col) in [0,64): true == the texel is in
+// baked terrain shadow. The 64x64 bits are row-major, LSB-first within each byte.
+// Returns false when the chunk carries no shadow map (out-of-range too).
+bool shadowAt(const MapChunk& mc, int row, int col);
 
 struct Vertex {
     Vec3 position;   // world space
