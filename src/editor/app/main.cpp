@@ -24,6 +24,7 @@
 #include "editor/MapBrowserPanel.hpp"
 #include "editor/AssetBrowserPanel.hpp"
 #include "editor/OutlinerPanel.hpp"
+#include "editor/TerrainToolPanel.hpp"
 #include "editor/MoveEmitter.hpp"
 #include "editor/PlacementEditor.hpp"
 #include "editor/Camera.hpp"
@@ -33,6 +34,10 @@
 #include "scene_pick.hpp"
 #include "asset_loader.hpp"   // TileScene
 #include "asset_catalog.hpp"  // listMaps / listModels
+#include "placement_io.hpp"   // ScenePlacement / saveScene / loadScene
+
+#include <fstream>
+#include <sstream>
 #include "raster.hpp"         // TexMesh / ShadeLight
 #include "debugdraw.hpp"
 #include "math.hpp"
@@ -133,14 +138,18 @@ int main(int argc, char** argv) {
     // Wrap the terrain as a one-chunk TileScene so the viewport's unified click
     // path can pick terrain (and, once a real ADT is loaded, doodads/WMOs too).
     TileScene tileScene;
-    {
+    // Rebuild the one-chunk pick scene from the current `mesh` (after a sculpt the
+    // heights change, so the pick geometry must follow).
+    auto rewrapProcedural = [&]() {
+        tileScene.terrain.chunkMeshes.clear();
         TexMesh chunk;
         chunk.vertices.reserve(mesh.vertices.size());
         for (const Vertex& v : mesh.vertices)
             chunk.vertices.push_back(TexVertex{ v.position, v.normal, Vec2{0,0} });
         chunk.indices = mesh.indices;
         tileScene.terrain.chunkMeshes.push_back(std::move(chunk));
-    }
+    };
+    rewrapProcedural();
     WorldPick sceneSel;   // the currently-selected static object (if any)
     editor::MoveEmitter     mover;       // gizmo drag on a selected entity -> MoveObject
     editor::PlacementEditor placeEditor;  // gizmo drag on a static object -> PlacementEdit
@@ -154,6 +163,7 @@ int main(int argc, char** argv) {
     editor::MapBrowserPanel      mapBrowser;
     editor::AssetBrowserPanel    assetBrowser;
     editor::OutlinerPanel        outliner;
+    editor::TerrainToolPanel     terrainTool;
     bool placeMode = false;          // when on, "Place" / the P key drops the active asset
     Mat4 selected = Mat4::translate(Vec3{150, 150, heightAt(150,150) + 4});
 
@@ -195,15 +205,18 @@ int main(int argc, char** argv) {
 
     // Spawn catalog: resolve the client's creature/gameobject display ids to real
     // models (the engine's object->model pipeline) so the editor can place them.
-    std::vector<DisplayModel> creatureModels, gameObjectModels;
+    std::vector<DisplayModel> creatureModels, gameObjectModels, detailModels;
     if (mpq.archiveCount() > 0) {
         Dbc cdi  = loadDbc(mpq, "CreatureDisplayInfo");
         Dbc cmd  = loadDbc(mpq, "CreatureModelData");
         Dbc godi = loadDbc(mpq, "GameObjectDisplayInfo");
+        Dbc get  = loadDbc(mpq, "GroundEffectTexture");
+        Dbc ged  = loadDbc(mpq, "GroundEffectDoodad");
         creatureModels   = listCreatureModels(cdi, cmd);
         gameObjectModels = listGameObjectModels(godi);
-        std::printf("[editor] spawn catalog: %zu creature, %zu gameobject models\n",
-                    creatureModels.size(), gameObjectModels.size());
+        detailModels     = listGroundEffectModels(get, ged);
+        std::printf("[editor] spawn catalog: %zu creature, %zu gameobject, %zu detail models\n",
+                    creatureModels.size(), gameObjectModels.size(), detailModels.size());
     }
     // Live day-tick (T1.2): the viewport's lighting is resolved every frame from
     // the global sky at `dayTick` (0..2880, one WoW day), so dragging the Sky
@@ -234,6 +247,7 @@ int main(int argc, char** argv) {
     std::string browseMap;                 // the map whose tiles the browser shows
     uint32_t    nextPlaceId = 0xF0000000u; // synthetic uniqueIds for placed WMOs
     int         placedCount = 0;
+    std::vector<ScenePlacement> placements; // recorded placements (Save/Load Scene)
 
     // Load map tile (x,y) into realTile, lit at the current day-tick. Shared by
     // the argv bootstrap and the Map browser's tile-grid clicks.
@@ -242,6 +256,7 @@ int main(int argc, char** argv) {
         if (ts.terrain.empty()) { std::printf("[editor] tile %s %d,%d absent\n", map.c_str(), x, y); return false; }
         AssetLoader::applyLighting(ts, lights, mapId, x, y, dayTick);
         realTile = std::move(ts); useTile = true; tileMap = map; tileX = x; tileY = y;
+        placements.clear();   // a fresh tile carries no ad-hoc placements
         std::printf("[editor] loaded tile %s %d,%d: %zu chunks, %zu doodads, %zu wmos\n",
                     map.c_str(), x, y, realTile.terrain.chunkMeshes.size(),
                     realTile.doodadCount(), realTile.wmoCount());
@@ -250,6 +265,20 @@ int main(int argc, char** argv) {
     // Load a map's WDT so the Map browser's tile grid shows which tiles exist.
     auto showMapTiles = [&](const std::string& map) {
         Wdt wdt; if (loader.loadWdt(map, wdt)) mapBrowser.setWdt(wdt);
+    };
+
+    // Place a model (.m2 doodad / .wmo) into the loaded tile at `world`, recording
+    // it for Save Scene. No-op without a loaded tile. Kind is inferred from the
+    // extension so Asset and Spawn selections both work.
+    auto placeModel = [&](const std::string& path, Vec3 world) {
+        if (!useTile || path.empty()) return;
+        const bool isWmo = path.size() > 4 &&
+            (path.compare(path.size() - 4, 4, ".wmo") == 0 ||
+             path.compare(path.size() - 4, 4, ".WMO") == 0);
+        if (isWmo) loader.placeWmo(realTile, path, world, 0.0f, nextPlaceId++);
+        else       loader.placeDoodad(realTile, path, world);
+        placements.push_back({ path, world, 0.0f, 1.0f, isWmo });
+        ++placedCount;
     };
 
     // Bootstrap from argv "<DataDir> <Map> <x> <y>" / WFORGE_TILE_* if provided.
@@ -353,6 +382,19 @@ int main(int argc, char** argv) {
         bool resetLayout = false;
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("File")) {
+                if (ImGui::MenuItem("Save Scene", nullptr, false, !placements.empty())) {
+                    std::ofstream f("scene.wfscene");
+                    f << saveScene(placements);
+                    std::printf("[editor] saved %zu placements -> scene.wfscene\n", placements.size());
+                }
+                if (ImGui::MenuItem("Load Scene", nullptr, false, useTile)) {
+                    std::ifstream f("scene.wfscene");
+                    std::ostringstream ss; ss << f.rdbuf();
+                    auto loaded = loadScene(ss.str());
+                    for (const ScenePlacement& sp : loaded) placeModel(sp.model, sp.pos);
+                    std::printf("[editor] loaded %zu placements from scene.wfscene\n", loaded.size());
+                }
+                ImGui::Separator();
                 if (ImGui::MenuItem("Quit", "Esc")) glfwSetWindowShouldClose(win, 1);
                 ImGui::EndMenu();
             }
@@ -400,6 +442,7 @@ int main(int argc, char** argv) {
             ImGui::DockBuilderDockWindow("Viewport",            center);
             ImGui::DockBuilderDockWindow("Sky",                 right);
             ImGui::DockBuilderDockWindow("Atmosphere",          right);
+            ImGui::DockBuilderDockWindow("Terrain Tool",        right);
             ImGui::DockBuilderDockWindow("Debug Visualisation", rightB);
             ImGui::DockBuilderFinish(dockspace_id);
         }
@@ -472,11 +515,12 @@ int main(int argc, char** argv) {
                 ImGui::EndChild();
                 ImGui::EndTabItem();
             };
-            if (creatureModels.empty() && gameObjectModels.empty()) {
+            if (creatureModels.empty() && gameObjectModels.empty() && detailModels.empty()) {
                 ImGui::TextDisabled("No display DBCs (mount a client).");
             } else if (ImGui::BeginTabBar("spawnTabs")) {
                 listTab("Creatures", creatureModels);
                 listTab("Objects",   gameObjectModels);
+                listTab("Detail",    detailModels);
                 ImGui::EndTabBar();
             }
             ImGui::End();
@@ -499,11 +543,24 @@ int main(int argc, char** argv) {
             }
         }
 
+        terrainTool.draw();
+
         // Unified click-to-select in the viewport: a left-click picks the nearest
         // of the live entities and the loaded tile -- an entity sets the WorldView
         // selection, a static object (terrain/doodad/WMO) goes to sceneSel.
         bool gizmoActive = viewport.draw((ImTextureID)(intptr_t)sceneTex, giz, &selected,
                                          &view, &mesh, activeScene, &sceneSel);
+
+        // Terrain sculpt: while the Terrain Tool is enabled, holding the left mouse
+        // over picked terrain raises/lowers/flattens the procedural mesh under the
+        // last pick, then re-wraps it so picking stays in sync. (Real-tile chunk
+        // editing is a follow-up; this sculpts the default terrain.)
+        if (terrainTool.enabled() && !useTile &&
+            ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+            sceneSel.kind == WorldPick::Kind::Terrain) {
+            if (terrainTool.apply(mesh, sceneSel.point) > 0) rewrapProcedural();
+        }
+
         debugVis.draw(debug);
         // live entities + selected static object + spawn/despawn authoring ops
         inspector.draw(view, &sceneSel, &outgoing);
@@ -525,20 +582,9 @@ int main(int argc, char** argv) {
             if (!placeMode)        ImGui::TextDisabled("Enable 'Place mode' in the menu bar.");
             else if (!useTile)     ImGui::TextDisabled("Load a tile (Map Browser) first.");
             else if (!terrainSel)  ImGui::TextDisabled("Click the ground to choose a spot.");
-            if ((placeBtn || placeKey) && canPlace) {
-                const Vec3 at = sceneSel.point;
-                const std::string& path = assetBrowser.selectedPath();
-                // Infer the placement kind from the file (a creature is .m2, a
-                // gameobject may be .wmo) rather than the browser tab, so the
-                // Spawn browser's selections place correctly too.
-                const bool isWmo = path.size() > 4 &&
-                    (path.compare(path.size() - 4, 4, ".wmo") == 0 ||
-                     path.compare(path.size() - 4, 4, ".WMO") == 0);
-                if (isWmo) loader.placeWmo(realTile, path, at, 0.0f, nextPlaceId++);
-                else       loader.placeDoodad(realTile, path, at);
-                ++placedCount;
-            }
-            ImGui::Text("Placed this session: %d", placedCount);
+            if ((placeBtn || placeKey) && canPlace)
+                placeModel(assetBrowser.selectedPath(), sceneSel.point);
+            ImGui::Text("Placed: %d (%zu saved)", placedCount, placements.size());
             ImGui::End();
         }
 
