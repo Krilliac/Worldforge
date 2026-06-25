@@ -30,6 +30,7 @@ void test_world_sim();
 void test_net();
 void test_render();
 void test_asset();
+void test_placement_io();
 void test_client_data();
 void test_audio();
 void test_world_view();
@@ -69,6 +70,7 @@ int main() {
     test_net();
     test_render();
     test_asset();
+    test_placement_io();
     test_client_data();
     test_audio();
     test_world_view();

@@ -59,6 +59,7 @@ add_library(wforge STATIC
   src/terrain_render.cpp
   src/asset_loader.cpp
   src/asset_catalog.cpp
+  src/placement_io.cpp
   src/lighting.cpp
   src/client_data.cpp
   src/wav.cpp
@@ -134,6 +135,7 @@ add_executable(wforge-tests
   tests/test_net.cpp
   tests/test_render.cpp
   tests/test_asset.cpp
+  tests/test_placement_io.cpp
   tests/test_client_data.cpp
   tests/test_audio.cpp
   tests/test_world_view.cpp
@@ -253,6 +255,7 @@ if(WFORGE_EDITOR)
     src/editor/MapBrowserPanel.cpp
     src/editor/AssetBrowserPanel.cpp
     src/editor/OutlinerPanel.cpp
+    src/editor/TerrainToolPanel.cpp
   )
   target_include_directories(wforge-editor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(wforge-editor PUBLIC wforge imgui)
@@ -280,6 +283,7 @@ if(WFORGE_EDITOR)
     tests/editor/test_map_browser.cpp
     tests/editor/test_asset_browser.cpp
     tests/editor/test_outliner.cpp
+    tests/editor/test_terrain_tool.cpp
   )
   target_link_libraries(wforge-editor-tests PRIVATE wforge-editor wforge-server)
   target_include_directories(wforge-editor-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
