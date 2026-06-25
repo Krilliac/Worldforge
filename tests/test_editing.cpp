@@ -1,10 +1,21 @@
 #include "test.hpp"
 #include "editing.hpp"
 #include "gizmo.hpp"
+#include "coords.hpp"
 
 #include <vector>
 
 using namespace wf;
+
+// A flat chunk at tile-local grid (ix,iy) with all heights 0 and base z 0.
+static MapChunk flatChunk(uint32_t ix, uint32_t iy) {
+    MapChunk mc;
+    mc.indexX   = ix;        // west-east column
+    mc.indexY   = iy;        // north-south row
+    mc.position = {0, 0, 0};
+    mc.heights.fill(0.0f);
+    return mc;
+}
 
 void test_editing() {
     std::printf("[editing]\n");
@@ -46,6 +57,44 @@ void test_editing() {
     CHECK_APPROX(hill[0].position.z, 5.0f);           // halfway to target
     brushFlatten(hill, fb, 0.0f);
     CHECK_APPROX(hill[0].position.z, 2.5f);           // halfway again
+
+    // --- raise/lower directly on the source MCNK height grids ---------------
+    // Tile 32,32 chunk Index(0,0) places its outer corner at world (0,0), so a
+    // brush there edits MCVT[0] (the chunk's NW-most height sample) in place.
+    {
+        std::vector<MapChunk> chunks = { flatChunk(0, 0) };
+        Brush cb; cb.center = {0, 0, 0}; cb.radius = 2.0f; cb.strength = 5.0f;
+        cb.falloff = Falloff::Flat;
+        int h = brushRaiseLowerChunks(chunks, 32, 32, cb, +1.0f);
+        CHECK(h == 1);                                  // only the corner sample
+        CHECK_APPROX(chunks[0].heights[0], 5.0f);       // MCVT[0] raised
+        CHECK_APPROX(chunks[0].heights[1], 0.0f);       // neighbour out of radius
+        // Lower undoes the raise.
+        brushRaiseLowerChunks(chunks, 32, 32, cb, -1.0f);
+        CHECK_APPROX(chunks[0].heights[0], 0.0f);
+    }
+
+    // --- flatten source heights toward a world target Z ---------------------
+    {
+        std::vector<MapChunk> chunks = { flatChunk(0, 0) };
+        chunks[0].heights[0] = 10.0f;                   // a spike at the corner
+        Brush fbc; fbc.center = {0, 0, 0}; fbc.radius = 2.0f; fbc.strength = 0.5f;
+        fbc.falloff = Falloff::Flat;
+        brushFlattenChunks(chunks, 32, 32, fbc, 0.0f);
+        CHECK_APPROX(chunks[0].heights[0], 5.0f);       // halfway to world Z 0
+    }
+
+    // --- shared chunk edge stays seamless -----------------------------------
+    // Chunk0 col-8 outer vertices coincide with chunk1 col-0 ones; a brush on
+    // that edge must move both chunks' MCVT identically (no crack at the border).
+    {
+        std::vector<MapChunk> chunks = { flatChunk(0, 0), flatChunk(1, 0) };
+        Brush eb; eb.center = {0.0f, -static_cast<float>(CHUNK_SIZE), 0.0f};
+        eb.radius = 1.0f; eb.strength = 3.0f; eb.falloff = Falloff::Flat;
+        brushRaiseLowerChunks(chunks, 32, 32, eb, +1.0f);
+        CHECK_APPROX(chunks[0].heights[8], 3.0f);       // chunk0 outer(0,8)
+        CHECK_APPROX(chunks[1].heights[0], 3.0f);       // chunk1 outer(0,0)
+    }
 
     // --- paint alpha coverage -----------------------------------------------
     AlphaMap am;                                       // starts all-zero

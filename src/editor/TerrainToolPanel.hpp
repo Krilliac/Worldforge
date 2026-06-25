@@ -12,6 +12,7 @@
 // ---------------------------------------------------------------------------
 #include "math.hpp"
 #include "terrain.hpp"
+#include "editing.hpp"   // Brush
 
 namespace wf::editor {
 
@@ -27,6 +28,14 @@ public:
     // (nearest vertex). Returns the number of vertices affected.
     int apply(Mesh& mesh, Vec3 center) const;
 
+    // Apply the current brush to a real tile's source MCNK height grids (MCVT)
+    // in place -- the sculpt path for a loaded ADT tile, vs. apply() which edits
+    // the procedural render mesh. blockX/blockY are the tile's WDT indices. For
+    // Flatten, level toward `center.z` (the picked surface point). Returns the
+    // number of height samples affected. Re-mesh the tile afterwards to see it.
+    int applyChunks(std::vector<MapChunk>& chunks, int blockX, int blockY,
+                    Vec3 center) const;
+
     bool enabled() const { return enabled_; }
 
     // --- UI state (public for tests) ---
@@ -35,6 +44,10 @@ public:
     float radius_   = 20.0f;
     float strength_ = 2.0f;
     int   falloff_  = 0;       // index into the editing Falloff profiles
+
+private:
+    // Build the brush from the current UI state, centred at `center`.
+    Brush makeBrush(Vec3 center) const;
 };
 
 } // namespace wf::editor

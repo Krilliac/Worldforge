@@ -25,6 +25,7 @@
 #include "editor/AssetBrowserPanel.hpp"
 #include "editor/OutlinerPanel.hpp"
 #include "editor/TerrainToolPanel.hpp"
+#include "editor/TexturePaintPanel.hpp"
 #include "editor/MoveEmitter.hpp"
 #include "editor/PlacementEditor.hpp"
 #include "editor/Camera.hpp"
@@ -33,6 +34,12 @@
 #include "world_view.hpp"
 #include "scene_pick.hpp"
 #include "asset_loader.hpp"   // TileScene
+#include "world_types.hpp"    // TileCoord, tile<->world, worldToTile
+#include "tile_streamer.hpp"  // streaming ring policy
+#include "wdl_mesh.hpp"       // buildWdlWorldMesh (distant LOD)
+#include "frustum.hpp"        // makeFrustum / aabbVisible (tile culling)
+#include "bounds.hpp"         // Aabb
+#include <map>
 #include "asset_catalog.hpp"  // listMaps / listModels
 #include "placement_io.hpp"   // ScenePlacement / saveScene / loadScene
 
@@ -164,6 +171,7 @@ int main(int argc, char** argv) {
     editor::AssetBrowserPanel    assetBrowser;
     editor::OutlinerPanel        outliner;
     editor::TerrainToolPanel     terrainTool;
+    editor::TexturePaintPanel    texturePaint;
     bool placeMode = false;          // when on, "Place" / the P key drops the active asset
     Mat4 selected = Mat4::translate(Vec3{150, 150, heightAt(150,150) + 4});
 
@@ -249,6 +257,17 @@ int main(int argc, char** argv) {
     int         placedCount = 0;
     std::vector<ScenePlacement> placements; // recorded placements (Save/Load Scene)
 
+    // --- streaming multi-tile world ----------------------------------------
+    // A low-res WDL horizon for the browse map + a cache of full-res neighbour
+    // tiles streamed around the camera (read-only context; the active EDITABLE
+    // tile stays `realTile`, so sculpt/paint/pick/export are unaffected).
+    Wdl          worldWdl;                 // browse map's low-res heightfield
+    Mesh         worldWdlMesh;             // its merged far mesh (built on map change)
+    bool         haveWdl = false;
+    TileStreamer streamer(1);              // ring radius in tiles (3x3 around the camera)
+    std::map<int, TileScene> nearCache;    // streamed neighbours, keyed by tileKey(coord)
+    bool         streamWorld = true;       // render neighbours + WDL horizon around the camera
+
     // Load map tile (x,y) into realTile, lit at the current day-tick. Shared by
     // the argv bootstrap and the Map browser's tile-grid clicks.
     auto loadTile = [&](const std::string& map, int x, int y) -> bool {
@@ -262,9 +281,14 @@ int main(int argc, char** argv) {
                     realTile.doodadCount(), realTile.wmoCount());
         return true;
     };
-    // Load a map's WDT so the Map browser's tile grid shows which tiles exist.
+    // Load a map's WDT (tile-grid presence for the browser) and its WDL (the
+    // distant-terrain horizon). Resets the neighbour cache for the new map.
     auto showMapTiles = [&](const std::string& map) {
         Wdt wdt; if (loader.loadWdt(map, wdt)) mapBrowser.setWdt(wdt);
+        haveWdl = loader.loadWdl(map, worldWdl);
+        worldWdlMesh = haveWdl ? buildWdlWorldMesh(worldWdl) : Mesh{};
+        nearCache.clear();
+        streamer = TileStreamer(streamer.radius());   // fresh resident set
     };
 
     // Place a model (.m2 doodad / .wmo) into the loaded tile at `world`, recording
@@ -361,8 +385,46 @@ int main(int argc, char** argv) {
         // Render the scene on the CPU and upload it to the GL texture. A loaded
         // real tile renders textured terrain + doodads + WMOs + liquid with its
         // zone light re-resolved at the current tick; otherwise the procedural mesh.
-        if (useTile) {
+        if (useTile)
             AssetLoader::applyLighting(realTile, lights, mapId, tileX, tileY, dayTick);
+
+        if (streamWorld && haveWdl && !browseMap.empty()) {
+            // Drive the resident ring from the camera's tile. worldToTile is the
+            // documented inverse of tileCornerWorld (VERIFY-FLAGGED axis mapping).
+            TileCoord focus = worldToTile(viewport.camera.eye);
+            focus.x = std::clamp(focus.x, 0, 63);
+            focus.y = std::clamp(focus.y, 0, 63);
+            TileStreamer::Plan plan = streamer.plan(focus);
+            for (TileCoord c : plan.toEvict) { nearCache.erase(tileKey(c)); streamer.markEvicted(c); }
+            for (TileCoord c : plan.toLoad) {
+                TileScene ts = loader.buildTileScene(browseMap, c.x, c.y);
+                if (!ts.terrain.empty()) {
+                    AssetLoader::applyLighting(ts, lights, mapId, c.x, c.y, dayTick);
+                    nearCache.emplace(tileKey(c), std::move(ts));
+                }
+                streamer.markLoaded(c);   // mark even if absent so we don't retry every frame
+            }
+
+            // Frustum-cull the resident neighbours into the draw list. The active
+            // editable tile is always drawn from realTile (it carries live edits).
+            const float aspect = float(viewport.width()) / float(viewport.height());
+            const Frustum fr = makeFrustum(viewport.camera.proj(aspect) * viewport.camera.view());
+            auto tileBox = [](TileCoord c) {
+                const Vec3 nw = tileCornerWorld(c.x, c.y);
+                return Aabb{ Vec3{ nw.x - float(TILE_SIZE), nw.y - float(TILE_SIZE), -2000.0f },
+                            Vec3{ nw.x, nw.y, 2000.0f } };
+            };
+            std::vector<const TileScene*> nearTiles;
+            if (useTile) nearTiles.push_back(&realTile);
+            const int activeKey = useTile ? tileKey({ tileX, tileY }) : -1;
+            for (auto& kv : nearCache) {
+                if (kv.first == activeKey) continue;        // already added via realTile
+                const TileCoord c{ kv.first % 64, kv.first / 64 };
+                if (!aabbVisible(fr, tileBox(c))) continue;
+                nearTiles.push_back(&kv.second);
+            }
+            viewport.render(nearTiles, worldWdlMesh, debug, sceneLight);
+        } else if (useTile) {
             viewport.render(realTile, debug, sceneLight);
         } else {
             viewport.render(mesh, debug, sceneLight);
@@ -394,12 +456,38 @@ int main(int argc, char** argv) {
                     for (const ScenePlacement& sp : loaded) placeModel(sp.model, sp.pos);
                     std::printf("[editor] loaded %zu placements from scene.wfscene\n", loaded.size());
                 }
+                // Export the sculpted tile as a patched ADT (heights only): the
+                // original bytes with just the edited MCVT data overwritten.
+                if (ImGui::MenuItem("Export Tile ADT", nullptr, false,
+                                    useTile && realTile.hasSource)) {
+                    try {
+                        std::vector<uint8_t> bytes = loader.exportTileAdt(realTile);
+                        if (bytes.empty()) {
+                            std::printf("[editor] export failed: no source bytes for %s %d,%d\n",
+                                        tileMap.c_str(), tileX, tileY);
+                        } else {
+                            char name[64];
+                            std::snprintf(name, sizeof(name), "export_%d_%d.adt", tileX, tileY);
+                            std::ofstream f(name, std::ios::binary);
+                            f.write(reinterpret_cast<const char*>(bytes.data()),
+                                    static_cast<std::streamsize>(bytes.size()));
+                            std::printf("[editor] exported tile %s %d,%d -> %s (%zu bytes)\n",
+                                        tileMap.c_str(), tileX, tileY, name, bytes.size());
+                        }
+                    } catch (const std::exception& e) {
+                        std::printf("[editor] export error: %s\n", e.what());
+                    }
+                }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Quit", "Esc")) glfwSetWindowShouldClose(win, 1);
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("View")) {
                 if (ImGui::MenuItem("Reset Layout")) resetLayout = true;
+                ImGui::Separator();
+                ImGui::MenuItem("Stream World (LOD)", nullptr, &streamWorld);
+                int ring = streamer.radius();
+                if (ImGui::SliderInt("Ring radius", &ring, 0, 4)) streamer.setRadius(ring);
                 ImGui::EndMenu();
             }
             ImGui::Separator();
@@ -544,6 +632,7 @@ int main(int argc, char** argv) {
         }
 
         terrainTool.draw();
+        texturePaint.draw();
 
         // Unified click-to-select in the viewport: a left-click picks the nearest
         // of the live entities and the loaded tile -- an entity sets the WorldView
@@ -552,13 +641,39 @@ int main(int argc, char** argv) {
                                          &view, &mesh, activeScene, &sceneSel);
 
         // Terrain sculpt: while the Terrain Tool is enabled, holding the left mouse
-        // over picked terrain raises/lowers/flattens the procedural mesh under the
-        // last pick, then re-wraps it so picking stays in sync. (Real-tile chunk
-        // editing is a follow-up; this sculpts the default terrain.)
-        if (terrainTool.enabled() && !useTile &&
+        // over picked terrain raises/lowers/flattens under the last pick. On a real
+        // loaded tile the brush edits the source MCNK height grids (MCVT) and
+        // re-meshes the tile, so the edit lives in the export-ready data model; on
+        // the procedural fallback it edits the in-memory mesh and re-wraps it. Both
+        // keep the pick geometry in sync with the new heights.
+        if (terrainTool.enabled() &&
             ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
             sceneSel.kind == WorldPick::Kind::Terrain) {
-            if (terrainTool.apply(mesh, sceneSel.point) > 0) rewrapProcedural();
+            if (useTile) {
+                if (realTile.hasSource &&
+                    terrainTool.applyChunks(realTile.sourceChunks, tileX, tileY,
+                                            sceneSel.point) > 0) {
+                    // Refresh MCNR normals from the new heights so shading tracks
+                    // the sculpt (seamless across chunk borders), then re-mesh.
+                    recomputeTileNormals(realTile.sourceChunks);
+                    loader.rebuildTileTerrain(realTile);
+                }
+            } else if (terrainTool.apply(mesh, sceneSel.point) > 0) {
+                rewrapProcedural();
+            }
+        }
+
+        // Texture paint: holding the left mouse over picked terrain paints/erases
+        // the selected blend layer's coverage under the cursor, straight into the
+        // loaded tile's render AlphaMaps (the splat rasteriser samples them, so it
+        // shows next frame without a re-mesh). Real tiles only -- the procedural
+        // scene has no blend layers. Suppressed while the sculpt tool is active so
+        // a drag does one thing at a time.
+        if (texturePaint.enabled() && !terrainTool.enabled() && useTile &&
+            ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+            sceneSel.kind == WorldPick::Kind::Terrain) {
+            texturePaint.paint(realTile.terrain.chunkAlphas, realTile.sourceChunks,
+                               tileX, tileY, sceneSel.point);
         }
 
         debugVis.draw(debug);

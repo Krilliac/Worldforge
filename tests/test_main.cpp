@@ -38,6 +38,13 @@ void test_picking();
 void test_bounds();
 void test_wmo_pick();
 void test_client_version();
+void test_dbc_index();
+void test_wdl_mesh();
+void test_frustum();
+void test_liquid_color();
+void test_tile_streamer();
+void test_world_lod();
+void test_world_pick();
 
 int main() {
     test_math();
@@ -78,6 +85,13 @@ int main() {
     test_bounds();
     test_wmo_pick();
     test_client_version();
+    test_dbc_index();
+    test_wdl_mesh();
+    test_frustum();
+    test_liquid_color();
+    test_tile_streamer();
+    test_world_lod();
+    test_world_pick();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;

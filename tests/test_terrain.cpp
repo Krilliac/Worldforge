@@ -2,6 +2,7 @@
 #include "terrain.hpp"
 #include "coords.hpp"
 
+#include <cmath>
 #include <cstring>
 #include <vector>
 
@@ -425,5 +426,104 @@ void test_terrain() {
         CHECK(mc.soundEmitters[0].position.x == 10.0f);
         CHECK(mc.soundEmitters[0].position.y == 20.0f);
         CHECK(mc.soundEmitters[0].position.z == 30.0f);
+    }
+
+    // --- writeAdtHeights: surgical height patch round-trips -----------------
+    {
+        std::vector<uint8_t> src = makeMCNK(/*holes*/0, /*baseZ*/500.0f, /*idxX*/2, /*idxY*/4);
+        std::vector<MapChunk> cs = parseChunks(src);
+        CHECK(cs.size() == 1);
+        CHECK(cs[0].mcvtOffset != 0);                    // located the in-file MCVT
+
+        cs[0].heights[0]   = -12.5f;                     // edit two heights
+        cs[0].heights[144] =  77.25f;
+        std::vector<uint8_t> patched = writeAdtHeights(src, cs);
+        CHECK(patched.size() == src.size());             // patched in place, same length
+
+        // Re-parse: edited heights present, an untouched interior one intact.
+        std::vector<MapChunk> rc = parseChunks(patched);
+        CHECK_APPROX(rc[0].heights[0],   -12.5f);
+        CHECK_APPROX(rc[0].heights[144],  77.25f);
+        CHECK_APPROX(rc[0].heights[72],   72.0f);        // makeMCNK seeds height==index
+
+        // Only the 145-float MCVT span changed; every other byte is identical.
+        const size_t base = cs[0].mcvtOffset;
+        bool outsideIdentical = true;
+        for (size_t i = 0; i < src.size(); ++i) {
+            if (i >= base && i < base + 145u * 4u) continue;
+            if (patched[i] != src[i]) { outsideIdentical = false; break; }
+        }
+        CHECK(outsideIdentical);
+
+        // A no-edit write reproduces the original byte-for-byte.
+        CHECK(writeAdtHeights(src, parseChunks(src)) == src);
+    }
+
+    // --- writeAdtNormals: surgical normal patch round-trips -----------------
+    {
+        std::vector<uint8_t> src = makeMCNK(/*holes*/0, /*baseZ*/0.0f, /*idxX*/1, /*idxY*/1);
+        std::vector<MapChunk> cs = parseChunks(src);
+        CHECK(cs[0].mcnrOffset != 0);                    // located the in-file MCNR
+        // makeMCNK seeds straight-up normals (0,0,127) -> (0,0,1).
+        CHECK_APPROX(cs[0].normals[0].z, 1.0f);
+
+        // Tilt one normal; the rest stay up. Re-encode + re-parse.
+        cs[0].normals[5] = normalize(Vec3{1.0f, 0.0f, 1.0f});
+        std::vector<uint8_t> patched = writeAdtNormals(src, cs);
+        CHECK(patched.size() == src.size());
+        std::vector<MapChunk> rc = parseChunks(patched);
+        // Within int8 quantisation (~1/127) of the written direction.
+        CHECK(std::fabs(rc[0].normals[5].x - cs[0].normals[5].x) < 0.02f);
+        CHECK(std::fabs(rc[0].normals[5].z - cs[0].normals[5].z) < 0.02f);
+        CHECK_APPROX(rc[0].normals[0].z, 1.0f);          // untouched normal intact
+
+        // Only the 145*3-byte MCNR span changed.
+        const size_t base = cs[0].mcnrOffset;
+        bool outsideIdentical = true;
+        for (size_t i = 0; i < src.size(); ++i) {
+            if (i >= base && i < base + 145u * 3u) continue;
+            if (patched[i] != src[i]) { outsideIdentical = false; break; }
+        }
+        CHECK(outsideIdentical);
+
+        // No-op write reproduces the original (straight-up normals re-encode exactly).
+        CHECK(writeAdtNormals(src, parseChunks(src)) == src);
+    }
+
+    // --- recomputeTileNormals: flat stays up, slopes tilt, seams stay closed -
+    {
+        // Flat single chunk -> every normal points straight up.
+        MapChunk flat; flat.indexX = 0; flat.indexY = 0; flat.position = {0, 0, 0};
+        flat.heights.fill(5.0f);
+        std::vector<MapChunk> one = { flat };
+        recomputeTileNormals(one);
+        CHECK_APPROX(one[0].normals[0].z, 1.0f);
+        CHECK_APPROX(one[0].normals[0].x, 0.0f);
+        CHECK_APPROX(one[0].normals[0].y, 0.0f);
+        CHECK_APPROX(one[0].normals[72].z, 1.0f);     // an interior vertex too
+
+        // Two side-by-side chunks with a continuous west-east height ramp: the
+        // normals on their shared edge must be identical (no lighting seam).
+        auto ramp = [](uint32_t col) {
+            MapChunk mc; mc.indexX = col; mc.indexY = 0; mc.position = {0, 0, 0};
+            for (int i = 0; i < 9; ++i)
+                for (int j = 0; j < 9; ++j)
+                    mc.heights[i * 17 + j] = (static_cast<int>(col) * 8 + j) * 2.0f;
+            return mc;
+        };
+        std::vector<MapChunk> two = { ramp(0), ramp(1) };
+        recomputeTileNormals(two);
+        for (int i = 0; i < 9; ++i) {
+            CHECK_APPROX(two[0].normals[i * 17 + 8].x, two[1].normals[i * 17 + 0].x);
+            CHECK_APPROX(two[0].normals[i * 17 + 8].y, two[1].normals[i * 17 + 0].y);
+            CHECK_APPROX(two[0].normals[i * 17 + 8].z, two[1].normals[i * 17 + 0].z);
+        }
+        // The ramp tilts the normal off vertical along the west-east (Y) axis.
+        CHECK(std::fabs(two[0].normals[4 * 17 + 4].y) > 0.01f);
+        // Every recomputed normal is unit length.
+        for (int k = 0; k < 145; ++k) {
+            const Vec3& n = two[0].normals[k];
+            CHECK(std::fabs(std::sqrt(n.x*n.x + n.y*n.y + n.z*n.z) - 1.0f) < 1e-3f);
+        }
     }
 }

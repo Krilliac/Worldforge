@@ -14,7 +14,9 @@ struct Camera {
     Vec3   eye{ 150.0f, -120.0f, 130.0f };
     float  yaw   = 0.9f;     // radians about +Z
     float  pitch = -0.5f;    // radians, + looks up
-    double fovY  = 55.0, nearZ = 1.0, farZ = 3000.0;
+    // farZ spans many ADT tiles (533 yd each) so the low-res WDL horizon stays
+    // inside the frustum; the software rasteriser has no depth-precision cost.
+    double fovY  = 55.0, nearZ = 1.0, farZ = 40000.0;
 
     Vec3 forward() const {
         float cp = std::cos(pitch), sp = std::sin(pitch);

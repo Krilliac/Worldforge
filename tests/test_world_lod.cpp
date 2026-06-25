@@ -1,0 +1,79 @@
+#include "test.hpp"
+#include "world_lod.hpp"
+#include "world_types.hpp"
+#include "coords.hpp"
+
+#include <cmath>
+#include <vector>
+
+using namespace wf;
+
+void test_world_lod() {
+    std::printf("[world_lod]\n");
+
+    // Camera sitting exactly on the centre of tile (32,32): zero distance -> Full.
+    const TileCoord home{32, 32};
+    Vec3 cam = tileCenterWorld(home.x, home.y);
+    CHECK_APPROX(tileDistance(cam, home), 0.0f);
+    CHECK(selectLod(cam, home) == TileLod::Full);
+
+    // tileDistance must match the coords formula directly (full 3D length).
+    {
+        TileCoord t{40, 18};
+        Vec3 c{ 1234.0f, -567.0f, 89.0f };
+        Vec3 ctr = tileCenterWorld(t.x, t.y);
+        float dx = c.x - ctr.x, dy = c.y - ctr.y, dz = c.z - ctr.z;
+        CHECK_APPROX(tileDistance(c, t), std::sqrt(dx*dx + dy*dy + dz*dz));
+    }
+
+    // Stepping tile.x by N moves the tile centre by N*TILE_SIZE along world Y,
+    // so distance from (32,32) is a clean multiple of the tile size.
+    // ~2 tiles (1066.67 < 1100) -> Full; ~3 tiles (1600) -> Far.
+    const TileCoord near2{34, 32};   // 2 * 533.33 = 1066.67 yds
+    const TileCoord near3{35, 32};   // 3 * 533.33 = 1600.00 yds
+    CHECK_APPROX(tileDistance(cam, near2), static_cast<float>(2.0 * TILE_SIZE));
+    CHECK(tileDistance(cam, near2) < 1100.0f);
+    CHECK(selectLod(cam, near2) == TileLod::Full);
+    CHECK_APPROX(tileDistance(cam, near3), static_cast<float>(3.0 * TILE_SIZE));
+    CHECK(selectLod(cam, near3) == TileLod::Far);
+
+    // Very far tile (well past farDist) -> Culled.
+    const TileCoord faraway{50, 10};  // tens of tiles away
+    CHECK(tileDistance(cam, faraway) > 6000.0f);
+    CHECK(selectLod(cam, faraway) == TileLod::Culled);
+
+    // Band boundaries are inclusive (<=): a tile sitting exactly on fullDist is
+    // still Full, and one exactly on farDist is still Far.
+    {
+        // Place the camera so the centre is at the tile centre but offset purely
+        // in Z by the threshold distance -- distance == threshold exactly.
+        Vec3 onFull = tileCenterWorld(home.x, home.y) + Vec3{0, 0, 1100.0f};
+        Vec3 onFar  = tileCenterWorld(home.x, home.y) + Vec3{0, 0, 6000.0f};
+        CHECK(selectLod(onFull, home) == TileLod::Full);
+        CHECK(selectLod(onFar,  home) == TileLod::Far);
+    }
+
+    // Custom thresholds are honoured: shrink the full band so the 2-tile
+    // neighbour drops to Far.
+    {
+        LodThresholds tight{ 500.0f, 6000.0f };
+        CHECK(selectLod(cam, near2, tight) == TileLod::Far);
+    }
+
+    // classify(): one result per input, in order, with matching lod/dist.
+    std::vector<TileCoord> tiles = { home, near2, near3, faraway };
+    auto results = classify(cam, tiles);
+    CHECK(results.size() == tiles.size());
+    for (size_t i = 0; i < tiles.size(); ++i) {
+        CHECK(results[i].tile == tiles[i]);
+        CHECK_APPROX(results[i].dist, tileDistance(cam, tiles[i]));
+        CHECK(results[i].lod == selectLod(cam, tiles[i]));
+    }
+    CHECK(results[0].lod == TileLod::Full);
+    CHECK(results[1].lod == TileLod::Full);
+    CHECK(results[2].lod == TileLod::Far);
+    CHECK(results[3].lod == TileLod::Culled);
+
+    // Empty input -> empty output (no crash, exact one-per-input contract).
+    CHECK(classify(cam, {}).empty());
+}

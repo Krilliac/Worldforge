@@ -8,6 +8,8 @@
 // ---------------------------------------------------------------------------
 #include "imgui.h"
 
+#include <vector>
+
 #include "image.hpp"
 #include "math.hpp"
 #include "terrain.hpp"     // Mesh
@@ -38,6 +40,13 @@ public:
     // zone light (`scene.light`) with the sun direction taken from `light.dir`.
     // Same internal target / resize / overlay path as the Mesh overload.
     void render(const TileScene& scene, const DebugDraw& dd, const ShadeLight& light = {});
+
+    // Render a streaming multi-tile world: a coarse WDL "far" mesh for the horizon
+    // drawn first, then every full-resolution near tile (depth-tested, so real
+    // terrain overwrites the coarse horizon where they overlap). Caller passes the
+    // already-culled near tiles + the already-built (and culled) far mesh.
+    void render(const std::vector<const TileScene*>& nearTiles, const Mesh& wdlFar,
+                const DebugDraw& dd, const ShadeLight& light = {});
 
     // Resize the internal render target so the scene re-renders at (w,h). Called
     // when the docked Viewport panel changes size, so the 3D view fills its pane

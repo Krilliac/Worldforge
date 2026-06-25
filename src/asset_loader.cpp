@@ -145,6 +145,9 @@ void AssetLoader::applyLighting(TileScene& ts, const LightDatabase& lights,
 std::string AssetLoader::wdtPath(const std::string& map) {
     return "World\\Maps\\" + map + "\\" + map + ".wdt";
 }
+std::string AssetLoader::wdlPath(const std::string& map) {
+    return "World\\Maps\\" + map + "\\" + map + ".wdl";
+}
 std::string AssetLoader::adtPath(const std::string& map, int x, int y) {
     return "World\\Maps\\" + map + "\\" + map + "_" +
            std::to_string(x) + "_" + std::to_string(y) + ".adt";
@@ -184,6 +187,13 @@ bool AssetLoader::loadWdt(const std::string& map, Wdt& out) {
     std::vector<uint8_t> buf;
     if (!mpq_.readFile(wdtPath(map), buf)) return false;
     out = parseWdt(buf);
+    return true;
+}
+
+bool AssetLoader::loadWdl(const std::string& map, Wdl& out) {
+    std::vector<uint8_t> buf;
+    if (!mpq_.readFile(wdlPath(map), buf)) return false;
+    out = parseWdl(buf);
     return true;
 }
 
@@ -367,6 +377,24 @@ TileRender AssetLoader::buildTerrain(const Adt& adt, const std::vector<MapChunk>
     return tile;
 }
 
+bool AssetLoader::rebuildTileTerrain(TileScene& ts) {
+    if (!ts.hasSource) return false;
+    ts.terrain = buildTerrain(ts.sourceAdt, ts.sourceChunks, ts.sourceX, ts.sourceY,
+                              resolveBigAlpha(ts.sourceMap, std::nullopt));
+    return true;
+}
+
+std::vector<uint8_t> AssetLoader::exportTileAdt(const TileScene& ts) {
+    if (!ts.hasSource) return {};
+    std::vector<uint8_t> buf;
+    if (!mpq_.readFile(adtPath(ts.sourceMap, ts.sourceX, ts.sourceY), buf)) return {};
+    // The retained chunks' offsets index into exactly these (re-read) bytes, so
+    // patch heights then the matching normals over the original ADT.
+    buf = writeAdtHeights(buf, ts.sourceChunks);
+    buf = writeAdtNormals(buf, ts.sourceChunks);
+    return buf;
+}
+
 TileScene AssetLoader::buildTileScene(const std::string& map, int x, int y,
                                       std::optional<bool> bigAlpha) {
     TileScene ts;
@@ -375,6 +403,14 @@ TileScene AssetLoader::buildTileScene(const std::string& map, int x, int y,
     if (!loadAdt(map, x, y, adt, chunks)) return ts;   // empty
 
     ts.terrain = buildTerrain(adt, chunks, x, y, resolveBigAlpha(map, bigAlpha));
+
+    // Retain the parsed source so the editor can edit + export this tile.
+    ts.sourceAdt    = adt;
+    ts.sourceChunks = chunks;
+    ts.sourceMap    = map;
+    ts.sourceX      = x;
+    ts.sourceY      = y;
+    ts.hasSource    = true;
 
     // Each resolvable M2 doodad becomes a skinned (bind-pose) mesh instance,
     // transformed into world space by its MDDF placement. A missing or malformed

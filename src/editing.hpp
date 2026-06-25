@@ -41,6 +41,21 @@ int brushRaiseLower(std::vector<Vertex>& verts, const Brush& b, float sign);
 // Pull vertex heights toward targetZ by strength*weight (flatten/level tool).
 int brushFlatten(std::vector<Vertex>& verts, const Brush& b, float targetZ);
 
+// Source-model variants of the height brushes: instead of editing a derived
+// world-space render mesh, these edit a tile's parsed MCNK height grids (MCVT)
+// in place, so the edit lives in the authoritative data model and survives a
+// re-mesh / export. blockX/blockY are the tile's WDT indices (same world-XY
+// placement convention as buildChunkMesh). Each of a chunk's 145 height samples
+// is treated as a world-space point and displaced like its mesh counterpart.
+// Vertices shared along a chunk border exist in both chunks' grids and, sharing
+// the same world XY, receive the same edit -- so the seam stays closed.
+// Returns the number of height samples affected (shared-edge samples count once
+// per chunk). Re-mesh the affected tile afterwards to see the change.
+int brushRaiseLowerChunks(std::vector<MapChunk>& chunks, int blockX, int blockY,
+                          const Brush& b, float sign);
+int brushFlattenChunks(std::vector<MapChunk>& chunks, int blockX, int blockY,
+                       const Brush& b, float targetZ);
+
 // Paint coverage into a 64x64 AlphaMap. (u,v) and `radius` are in normalised
 // chunk space [0,1]; each covered texel's value is moved toward `target`
 // (0..255) by strength*weight. Returns the number of texels affected.

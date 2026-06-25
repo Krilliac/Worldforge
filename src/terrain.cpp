@@ -4,6 +4,8 @@
 #include "coords.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <stdexcept>
 
 namespace wf {
@@ -134,10 +136,12 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
         };
 
         if (auto [p, sz] = sub(ofsMCVT, "MCVT"); p) {
+            mc.mcvtOffset = static_cast<uint32_t>(p - data);   // chunk-relative; made absolute by parseChunks
             ByteReader r(p, sz);
             for (int i = 0; i < 145 && r.remaining() >= 4; ++i) mc.heights[i] = r.f32();
         }
         if (auto [p, sz] = sub(ofsMCNR, "MCNR"); p) {
+            mc.mcnrOffset = static_cast<uint32_t>(p - data);   // chunk-relative; made absolute by parseChunks
             ByteReader r(p, sz);
             for (int i = 0; i < 145 && r.remaining() >= 3; ++i) {
                 int8_t a  = static_cast<int8_t>(r.u8());
@@ -178,9 +182,11 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
     size_t subLen = size - kHdrSize;
     forEachChunk(subData, subLen, [&](const Chunk& c) {
         if (c.magic == "MCVT") {
+            mc.mcvtOffset = static_cast<uint32_t>(c.data - data);   // chunk-relative; made absolute by parseChunks
             ByteReader r(c.data, c.size);
             for (int i = 0; i < 145 && r.remaining() >= 4; ++i) mc.heights[i] = r.f32();
         } else if (c.magic == "MCNR") {
+            mc.mcnrOffset = static_cast<uint32_t>(c.data - data);   // chunk-relative; made absolute by parseChunks
             ByteReader r(c.data, c.size);
             for (int i = 0; i < 145 && r.remaining() >= 3; ++i) {
                 int8_t a  = static_cast<int8_t>(r.u8());
@@ -391,10 +397,122 @@ std::vector<MapChunk> parseChunks(const std::vector<uint8_t>& adtBuf) {
     std::vector<MapChunk> out;
     out.reserve(256);
     forEachChunk(adtBuf.data(), adtBuf.size(), [&](const Chunk& c) {
-        if (c.magic == "MCNK") out.push_back(parseOneChunk(c.data, c.size));
+        if (c.magic == "MCNK") {
+            MapChunk mc = parseOneChunk(c.data, c.size);
+            // parseOneChunk recorded the sub-chunk offsets relative to the chunk's
+            // data start; lift them to absolute offsets into adtBuf so the writers
+            // can patch in place.
+            const uint32_t base = static_cast<uint32_t>(c.data - adtBuf.data());
+            if (mc.mcvtOffset) mc.mcvtOffset += base;
+            if (mc.mcnrOffset) mc.mcnrOffset += base;
+            out.push_back(std::move(mc));
+        }
         return true;
     });
     return out;
+}
+
+std::vector<uint8_t> writeAdtHeights(const std::vector<uint8_t>& adtBuf,
+                                     const std::vector<MapChunk>& chunks) {
+    std::vector<uint8_t> out = adtBuf;   // start byte-identical to the original
+    for (const MapChunk& mc : chunks) {
+        if (mc.mcvtOffset == 0) continue;            // no in-file MCVT to patch
+        const size_t base = mc.mcvtOffset;
+        if (base + 145u * 4u > out.size())
+            throw std::runtime_error("writeAdtHeights: MCVT offset past end of ADT "
+                                     "(chunks do not match this buffer)");
+        for (int i = 0; i < 145; ++i) {
+            uint32_t bits;
+            std::memcpy(&bits, &mc.heights[i], sizeof(bits));
+            for (int b = 0; b < 4; ++b)              // little-endian, like ByteReader::f32
+                out[base + static_cast<size_t>(i) * 4 + b] =
+                    static_cast<uint8_t>((bits >> (8 * b)) & 0xFF);
+        }
+    }
+    return out;
+}
+
+std::vector<uint8_t> writeAdtNormals(const std::vector<uint8_t>& adtBuf,
+                                     const std::vector<MapChunk>& chunks) {
+    std::vector<uint8_t> out = adtBuf;
+    auto toI8 = [](float c) -> uint8_t {
+        long q = std::lround(std::clamp(c, -1.0f, 1.0f) * 127.0f);
+        return static_cast<uint8_t>(static_cast<int8_t>(std::clamp(q, -127L, 127L)));
+    };
+    for (const MapChunk& mc : chunks) {
+        if (mc.mcnrOffset == 0) continue;
+        const size_t base = mc.mcnrOffset;
+        if (base + 145u * 3u > out.size())
+            throw std::runtime_error("writeAdtNormals: MCNR offset past end of ADT "
+                                     "(chunks do not match this buffer)");
+        for (int i = 0; i < 145; ++i) {
+            const Vec3& n = mc.normals[i];
+            out[base + static_cast<size_t>(i) * 3 + 0] = toI8(n.x);   // file order x,y,z
+            out[base + static_cast<size_t>(i) * 3 + 1] = toI8(n.y);
+            out[base + static_cast<size_t>(i) * 3 + 2] = toI8(n.z);
+        }
+    }
+    return out;
+}
+
+void recomputeTileNormals(std::vector<MapChunk>& chunks) {
+    // Locate chunks by their grid position (row = IndexY, col = IndexX).
+    int grid[16][16];
+    for (auto& r : grid) for (int& v : r) v = -1;
+    for (size_t c = 0; c < chunks.size(); ++c) {
+        const int r = static_cast<int>(chunks[c].indexY);
+        const int co = static_cast<int>(chunks[c].indexX);
+        if (r >= 0 && r < 16 && co >= 0 && co < 16) grid[r][co] = static_cast<int>(c);
+    }
+    const float U = static_cast<float>(UNIT_SIZE);
+
+    // Absolute surface height at a global outer-grid node (gr,gc) in [0,128].
+    // Multiples of 8 land on a shared chunk edge; either neighbour stores the
+    // same height there, so capping the chunk index is safe. Returns false off
+    // the tile or where the covering chunk is absent.
+    auto sampleH = [&](int gr, int gc, float& out) -> bool {
+        if (gr < 0 || gr > 128 || gc < 0 || gc > 128) return false;
+        const int cr = std::min(gr / 8, 15), i = gr - cr * 8;
+        const int cc = std::min(gc / 8, 15), j = gc - cc * 8;
+        const int ci = grid[cr][cc];
+        if (ci < 0) return false;
+        out = chunks[ci].position.z + chunks[ci].heights[i * 17 + j];
+        return true;
+    };
+    // Heightfield normal at global node (gr,gc): for z=f(worldX,worldY) the normal
+    // is normalize(-df/dx, -df/dy, 1). gr advances south (-worldX), gc advances
+    // east (-worldY), so the signs fold into the central differences below.
+    auto normalAt = [&](int gr, int gc) -> Vec3 {
+        float h = 0, hN = 0, hS = 0, hW = 0, hE = 0;
+        sampleH(gr, gc, h);
+        const bool okN = sampleH(gr - 1, gc, hN), okS = sampleH(gr + 1, gc, hS);
+        const bool okW = sampleH(gr, gc - 1, hW), okE = sampleH(gr, gc + 1, hE);
+        if (!okN) hN = h;  if (!okS) hS = h;
+        if (!okW) hW = h;  if (!okE) hE = h;
+        int spanR = (okN ? 1 : 0) + (okS ? 1 : 0); if (spanR == 0) spanR = 1;
+        int spanC = (okW ? 1 : 0) + (okE ? 1 : 0); if (spanC == 0) spanC = 1;
+        const float nx = (hS - hN) / (spanR * U);
+        const float ny = (hE - hW) / (spanC * U);
+        return normalize(Vec3{ nx, ny, 1.0f });
+    };
+
+    for (MapChunk& mc : chunks) {
+        const int row = static_cast<int>(mc.indexY);
+        const int col = static_cast<int>(mc.indexX);
+        // Outer 9x9 normals, straight from the shared global grid (seamless).
+        for (int i = 0; i < 9; ++i)
+            for (int j = 0; j < 9; ++j)
+                mc.normals[i * 17 + j] = normalAt(row * 8 + i, col * 8 + j);
+        // Inner 8x8: mean of the four surrounding outer normals.
+        for (int i = 0; i < 8; ++i)
+            for (int j = 0; j < 8; ++j) {
+                Vec3 n = normalAt(row * 8 + i,     col * 8 + j)
+                       + normalAt(row * 8 + i,     col * 8 + j + 1)
+                       + normalAt(row * 8 + i + 1, col * 8 + j)
+                       + normalAt(row * 8 + i + 1, col * 8 + j + 1);
+                mc.normals[i * 17 + 9 + j] = normalize(n);
+            }
+    }
 }
 
 Mesh buildChunkMesh(const MapChunk& mc, int blockX, int blockY) {

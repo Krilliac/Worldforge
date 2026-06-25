@@ -92,6 +92,13 @@ struct MapChunk {
     bool       hasLiquid  = false;      // MCLQ present
     LiquidType liquidType = LiquidType::None;
     MclqLayer  liquid;                  // valid when hasLiquid
+
+    // Absolute byte offsets of this chunk's MCVT height floats / MCNR normal
+    // bytes within the source ADT buffer parseChunks() read (0 if absent). Let
+    // writeAdtHeights() / writeAdtNormals() patch edits back in place without
+    // rewriting the rest of the file. Not part of the rendered model.
+    uint32_t   mcvtOffset = 0;
+    uint32_t   mcnrOffset = 0;
 };
 
 // Sample the MCSH shadow bitmap at (row, col) in [0,64): true == the texel is in
@@ -155,6 +162,39 @@ void packAlphaLayers(MapChunk& mc, const std::vector<AlphaMap>& maps, bool bigAl
 // Parse all 256 MCNK chunks from a full ADT buffer.
 // blockX/blockY are the tile's WDT indices, needed for world placement.
 std::vector<MapChunk> parseChunks(const std::vector<uint8_t>& adtBuf);
+
+// Patch a tile's terrain heights back into its ADT bytes. `chunks` must come
+// from parseChunks(adtBuf) (same buffer, so their mcvtOffset values index into
+// it); each chunk's 145 heights are written as little-endian floats over the
+// original MCVT data. Returns a new buffer that is byte-identical to `adtBuf`
+// except for the patched heights -- the surgical, verifiable inverse of the
+// height read path (every other sub-chunk, header and offset is untouched, so
+// the output is a valid ADT). Chunks with mcvtOffset == 0 are skipped. Throws if
+// an offset + 580 bytes runs past the buffer (a sign `chunks` and `adtBuf` don't
+// match). This intentionally exports ONLY height edits; placements/textures are
+// authored through other paths.
+std::vector<uint8_t> writeAdtHeights(const std::vector<uint8_t>& adtBuf,
+                                     const std::vector<MapChunk>& chunks);
+
+// Patch a tile's vertex normals back into its ADT bytes, the MCNR counterpart of
+// writeAdtHeights. Each chunk's 145 unit normals are quantised to the file's
+// int8 triples (component * 127, file order x,y,z) and written over the original
+// MCNR data; the 13 trailing pad bytes vanilla appends are left untouched. All
+// other bytes are byte-identical. Chunks with mcnrOffset == 0 are skipped.
+// Throws if an offset + 435 bytes runs past the buffer.
+std::vector<uint8_t> writeAdtNormals(const std::vector<uint8_t>& adtBuf,
+                                     const std::vector<MapChunk>& chunks);
+
+// Recompute every chunk's MCNR vertex normals from the (possibly edited) MCVT
+// height field of the whole tile. Used after a terrain sculpt so lighting tracks
+// the new slopes. Normals come from central differences over the tile's shared
+// 129x129 outer-vertex grid -- sampling neighbouring chunks across their common
+// edge -- so a vertex shared by two chunks gets one identical normal in both and
+// the lighting stays seamless. Inner (half-cell) normals are the mean of their
+// four surrounding outer normals. Tile-boundary vertices fall back to one-sided
+// differences. `chunks` are located by their MCNK IndexX/IndexY, so the order in
+// the vector doesn't matter. UNIT_SIZE spacing; no allocation of the source.
+void recomputeTileNormals(std::vector<MapChunk>& chunks);
 
 // Build a single chunk's world-space mesh (hole-aware).
 Mesh buildChunkMesh(const MapChunk& mc, int blockX, int blockY);

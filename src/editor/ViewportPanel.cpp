@@ -38,6 +38,22 @@ void ViewportPanel::render(const TileScene& scene, const DebugDraw& dd, const Sh
     scene_ = fb_.color;
 }
 
+void ViewportPanel::render(const std::vector<const TileScene*>& nearTiles, const Mesh& wdlFar,
+                           const DebugDraw& dd, const ShadeLight& light) {
+    applyPendingResize();
+    fb_.clear(Rgba{ 18, 20, 28, 255 });
+    const float aspect = float(width_) / float(height_);
+    const Mat4 mvp = camera.proj(aspect) * camera.view();
+    // Coarse WDL horizon first; the depth-tested full-res near tiles then overwrite
+    // it wherever they coincide (same world footprint, the real surface wins).
+    if (!wdlFar.indices.empty()) rasterMesh(fb_, wdlFar, mvp, light);
+    for (const TileScene* ts : nearTiles)
+        if (ts) ts->renderLit(fb_, mvp, light.dir);
+    DebugDrawOptions opt; opt.depthTest = true;
+    rasterDebug(fb_, const_cast<DebugDraw&>(dd), mvp, opt);
+    scene_ = fb_.color;
+}
+
 void ViewportPanel::resize(int w, int h) {
     // Record the request only; render() reallocates on the next frame (see there).
     if (w < 1 || h < 1) return;

@@ -32,7 +32,14 @@ add_library(wforge STATIC
   src/mpq.cpp
   src/wow_files.cpp
   src/wdl.cpp
+  src/wdl_mesh.cpp
   src/terrain.cpp
+  src/dbc_index.cpp
+  src/frustum.cpp
+  src/liquid_color.cpp
+  src/tile_streamer.cpp
+  src/world_lod.cpp
+  src/world_pick.cpp
   src/image.cpp
   src/blp.cpp
   src/m2.cpp
@@ -113,6 +120,13 @@ add_executable(wforge-tests
   tests/test_main.cpp
   tests/test_math.cpp
   tests/test_coords.cpp
+  tests/test_dbc_index.cpp
+  tests/test_wdl_mesh.cpp
+  tests/test_frustum.cpp
+  tests/test_liquid_color.cpp
+  tests/test_tile_streamer.cpp
+  tests/test_world_lod.cpp
+  tests/test_world_pick.cpp
   tests/test_terrain.cpp
   tests/test_wdl.cpp
   tests/test_blp.cpp
@@ -256,6 +270,7 @@ if(WFORGE_EDITOR)
     src/editor/AssetBrowserPanel.cpp
     src/editor/OutlinerPanel.cpp
     src/editor/TerrainToolPanel.cpp
+    src/editor/TexturePaintPanel.cpp
   )
   target_include_directories(wforge-editor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(wforge-editor PUBLIC wforge imgui)
@@ -284,6 +299,7 @@ if(WFORGE_EDITOR)
     tests/editor/test_asset_browser.cpp
     tests/editor/test_outliner.cpp
     tests/editor/test_terrain_tool.cpp
+    tests/editor/test_texture_paint.cpp
   )
   target_link_libraries(wforge-editor-tests PRIVATE wforge-editor wforge-server)
   target_include_directories(wforge-editor-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)

@@ -18,6 +18,7 @@
 #include "mpq.hpp"
 #include "wow_files.hpp"
 #include "terrain.hpp"
+#include "wdl.hpp"
 #include "terrain_render.hpp"
 #include "raster.hpp"
 #include "image.hpp"
@@ -94,6 +95,15 @@ struct TileScene {
 
     DebugDraw markers;                                    // WMO/doodad placement markers
 
+    // The parsed source tile, retained for editing + export. Edits (added
+    // placements, terrain) apply to these and the ADT writer serialises them back
+    // into a distributable patch. Empty for the procedural scene (hasSource=false).
+    Adt                   sourceAdt;
+    std::vector<MapChunk> sourceChunks;
+    std::string           sourceMap;
+    int                   sourceX = 0, sourceY = 0;
+    bool                  hasSource = false;
+
     // Zone lighting (Light.dbc) resolved for this tile. Defaults reproduce the
     // legacy fixed light; AssetLoader::applyLighting() populates it from the
     // client's Light/LightParams/LightIntBand/LightFloatBand tables.
@@ -119,6 +129,10 @@ public:
 
     // Parse a map's WDT. Returns false (and leaves `out` default) if absent.
     bool loadWdt(const std::string& map, Wdt& out);
+
+    // Parse a map's WDL low-res heightfield (one file per map, used to build the
+    // distant-terrain LOD ring). Returns false (and leaves `out` default) if absent.
+    bool loadWdl(const std::string& map, Wdl& out);
 
     // Parse one ADT tile: placements (Adt) + terrain chunks. False if absent.
     bool loadAdt(const std::string& map, int x, int y, Adt& adt, std::vector<MapChunk>& chunks);
@@ -166,6 +180,24 @@ public:
     static void applyLighting(TileScene& ts, const LightDatabase& lights,
                               uint32_t mapId, int x, int y, float dayTick = kNoonTick);
 
+    // Rebuild ts.terrain from its retained source ADT + (possibly edited) MCNK
+    // chunks. Used by the editor after a terrain sculpt mutates ts.sourceChunks:
+    // the height edits live in the authoritative data model, and this re-meshes
+    // the derived render/pick geometry to match. Returns false (no-op) for a
+    // scene with no retained source (hasSource == false, e.g. the procedural
+    // scene). Leaves doodads/WMOs/placements and ts.light untouched -- the caller
+    // re-applies applyLighting() as usual on the next frame.
+    bool rebuildTileTerrain(TileScene& ts);
+
+    // Export the edited tile as a patched ADT: re-reads the original tile bytes
+    // from the archive chain and overwrites only the MCVT terrain heights from
+    // ts.sourceChunks (the surgical writeAdtHeights path), so the result is a
+    // valid ADT identical to the original except for sculpted heights. Returns
+    // the bytes, or empty if the scene has no retained source / the original
+    // can't be re-read. Throws if the retained chunks don't match the re-read
+    // buffer (offset overrun) -- the caller should guard with try/catch.
+    std::vector<uint8_t> exportTileAdt(const TileScene& ts);
+
     // --- interactive placement (click-to-place into a live scene) ------------
     // Place an M2 doodad `m2Path` into `ts` at world position `world`, rotated
     // `rotZ` radians about Z and uniformly scaled. Appends the mesh/texture/
@@ -183,6 +215,7 @@ public:
 
 private:
     static std::string wdtPath(const std::string& map);
+    static std::string wdlPath(const std::string& map);
     static std::string adtPath(const std::string& map, int x, int y);
 
     TileRender buildTerrain(const Adt& adt, const std::vector<MapChunk>& chunks,

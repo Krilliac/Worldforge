@@ -16,7 +16,9 @@ static const Falloff kFalloffs[] = {
 static const char* kFalloffNames[] = { "Flat", "Linear", "Smooth", "Gaussian" };
 static constexpr int kFalloffCount = 4;
 
-int TerrainToolPanel::apply(Mesh& mesh, Vec3 center) const {
+// Build the editing.hpp Brush from the panel's current UI state, centred at
+// `center`. Shared by the procedural-mesh and source-chunk apply paths.
+Brush TerrainToolPanel::makeBrush(Vec3 center) const {
     Brush b;
     b.center     = center;
     b.radius     = radius_;
@@ -24,6 +26,11 @@ int TerrainToolPanel::apply(Mesh& mesh, Vec3 center) const {
     b.innerRatio = 0.0f;
     const int fi = (falloff_ >= 0 && falloff_ < kFalloffCount) ? falloff_ : 0;
     b.falloff    = kFalloffs[fi];
+    return b;
+}
+
+int TerrainToolPanel::apply(Mesh& mesh, Vec3 center) const {
+    Brush b = makeBrush(center);
 
     switch (static_cast<Mode>(mode_)) {
         case Mode::Raise:
@@ -42,6 +49,17 @@ int TerrainToolPanel::apply(Mesh& mesh, Vec3 center) const {
             }
             return brushFlatten(mesh.vertices, b, targetZ);
         }
+    }
+    return 0;
+}
+
+int TerrainToolPanel::applyChunks(std::vector<MapChunk>& chunks, int blockX,
+                                  int blockY, Vec3 center) const {
+    Brush b = makeBrush(center);
+    switch (static_cast<Mode>(mode_)) {
+        case Mode::Raise:   return brushRaiseLowerChunks(chunks, blockX, blockY, b, +1.0f);
+        case Mode::Lower:   return brushRaiseLowerChunks(chunks, blockX, blockY, b, -1.0f);
+        case Mode::Flatten: return brushFlattenChunks(chunks, blockX, blockY, b, center.z);
     }
     return 0;
 }
