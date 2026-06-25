@@ -250,6 +250,9 @@ if(WFORGE_EDITOR)
     src/editor/BridgeClient.cpp
     src/editor/ModelViewerPanel.cpp
     src/editor/EntityInspectorPanel.cpp
+    src/editor/MapBrowserPanel.cpp
+    src/editor/AssetBrowserPanel.cpp
+    src/editor/OutlinerPanel.cpp
   )
   target_include_directories(wforge-editor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(wforge-editor PUBLIC wforge imgui)
@@ -274,6 +277,9 @@ if(WFORGE_EDITOR)
     tests/editor/test_entity_inspector.cpp
     tests/editor/test_move_emitter.cpp
     tests/editor/test_placement_editor.cpp
+    tests/editor/test_map_browser.cpp
+    tests/editor/test_asset_browser.cpp
+    tests/editor/test_outliner.cpp
   )
   target_link_libraries(wforge-editor-tests PRIVATE wforge-editor wforge-server)
   target_include_directories(wforge-editor-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)

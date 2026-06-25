@@ -16,6 +16,9 @@ void test_model_viewer();
 void test_entity_inspector();
 void test_move_emitter();
 void test_placement_editor();
+void test_map_browser();
+void test_asset_browser();
+void test_outliner();
 
 static void setupHeadlessImGui() {
     IMGUI_CHECKVERSION();
@@ -46,6 +49,9 @@ int main() {
     test_entity_inspector();
     test_move_emitter();
     test_placement_editor();
+    test_map_browser();
+    test_asset_browser();
+    test_outliner();
     ImGui::DestroyContext();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
