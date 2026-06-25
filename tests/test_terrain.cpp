@@ -249,6 +249,35 @@ void test_terrain() {
         CHECK(decodeAlphaMap(a, 1, false).at(0, 0) == 255);
     }
 
+    // --- fixAlphaMapEdges: 63->64 draw-time edge duplication ----------------
+    {
+        // A map whose value == column index makes the column fix observable, and
+        // whose row 63 differs from row 62 makes the row fix observable too.
+        AlphaMap m;
+        for (int r = 0; r < 64; ++r)
+            for (int c = 0; c < 64; ++c)
+                m.texels[r * 64 + c] = static_cast<uint8_t>(r == 63 ? 7 : c);
+        fixAlphaMapEdges(m);
+        // Last column copied from the second-to-last (col 63 := col 62 == 62).
+        for (int r = 0; r < 62; ++r) CHECK(m.at(r, 63) == 62);
+        // Last row copied from the second-to-last (row 62: value == column).
+        for (int c = 0; c < 62; ++c) CHECK(m.at(63, c) == c);
+        // Corner inherits texel (62,62) via the column-then-row order.
+        CHECK(m.at(63, 63) == 62);
+        // Interior is untouched.
+        CHECK(m.at(10, 20) == 20);
+
+        // decodeAlphaMap itself stays a loss-less codec (no implicit fix): a
+        // chunk without DO_NOT_FIX still decodes raw edges; the fix is applied
+        // only by the renderer (asset_loader), proven by the round-trip above.
+        MapChunk c2; c2.layers.resize(2); c2.layers[1].flags = MCLY_USE_ALPHA;
+        AlphaMap edged; for (int k = 0; k < 64*64; ++k) edged.texels[k] = static_cast<uint8_t>(k & 0xFF);
+        c2.alpha = encodeAlphaMap(edged, true);
+        CHECK(!(c2.flags & MCNK_DO_NOT_FIX_ALPHA));
+        AlphaMap raw = decodeAlphaMap(c2, 1, true);
+        CHECK(raw.at(63, 0) != raw.at(62, 0));   // edges preserved, not fixed
+    }
+
     // --- packAlphaLayers: rebuild MCAL + MCLY offsets for 3 layers ----------
     {
         MapChunk a;

@@ -115,6 +115,14 @@ struct AlphaMap {
 // reading past the blob.
 AlphaMap decodeAlphaMap(const MapChunk& mc, size_t layerIndex, bool bigAlpha);
 
+// Apply the client's implicit 63->64 alpha edge fix: an uncompressed MCAL map
+// stores no real data in its last row/column, so the client duplicates the
+// previous one (row/col 63 := 62) to avoid a hard seam at the chunk border.
+// This is a DRAW-time fix, deliberately kept out of decodeAlphaMap (which stays
+// a loss-less codec for the editor write path); the renderer applies it when
+// building splat layers, and only when the chunk lacks MCNK_DO_NOT_FIX_ALPHA.
+void fixAlphaMapEdges(AlphaMap& map);
+
 // Encode a single coverage map back to its MCAL byte form (the inverse of
 // decodeAlphaMap, for an editor's texture-paint write path). bigAlpha selects
 // the 8-bit (4096 B) vs packed 4-bit (2048 B) form. The 4-bit form quantises

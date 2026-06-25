@@ -235,6 +235,19 @@ AlphaMap decodeAlphaMap(const MapChunk& mc, size_t layerIndex, bool bigAlpha) {
     return map;
 }
 
+void fixAlphaMapEdges(AlphaMap& map) {
+    constexpr int D = AlphaMap::DIM;
+    // Last column := previous column.
+    for (int r = 0; r < D; ++r)
+        map.texels[static_cast<size_t>(r) * D + (D - 1)] =
+            map.texels[static_cast<size_t>(r) * D + (D - 2)];
+    // Last row := previous row (done after the column pass, so the bottom-right
+    // corner inherits texel (62,62) -- matching the client's fixed-up map).
+    for (int c = 0; c < D; ++c)
+        map.texels[static_cast<size_t>(D - 1) * D + c] =
+            map.texels[static_cast<size_t>(D - 2) * D + c];
+}
+
 std::vector<uint8_t> encodeAlphaMap(const AlphaMap& map, bool bigAlpha) {
     constexpr int N = AlphaMap::DIM * AlphaMap::DIM;   // 4096 texels
     std::vector<uint8_t> out;

@@ -300,7 +300,11 @@ TileRender AssetLoader::buildTerrain(const Adt& adt, const std::vector<MapChunk>
         alphas.reserve(mc.layers.size());
         for (size_t i = 0; i < mc.layers.size(); ++i) {
             if (i == 0) { layers.push_back({ texFor(mc.layers[0].textureId), nullptr }); continue; }
-            alphas.push_back(decodeAlphaMap(mc, i, bigAlpha));
+            AlphaMap am = decodeAlphaMap(mc, i, bigAlpha);
+            // Draw-time 63->64 edge fix, unless the chunk opts out -- prevents a
+            // seam where this layer's coverage meets the next chunk's.
+            if (!(mc.flags & MCNK_DO_NOT_FIX_ALPHA)) fixAlphaMapEdges(am);
+            alphas.push_back(std::move(am));
         }
         // Second pass: alpha pointers are stable now that `alphas` is filled.
         for (size_t i = 1; i < mc.layers.size(); ++i)
