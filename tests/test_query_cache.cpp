@@ -53,6 +53,17 @@ void test_query_cache() {
     CHECK(cache.creature(entry) && cache.creature(entry)->name == "Kobold");
     CHECK(cache.creatureCount() == 1 && cache.pendingCount() == 0);
 
+    // --- gameobject: same lifecycle, keyed by entry -------------------------
+    const uint32_t goEntry = 1620;
+    CHECK(cache.gameObject(goEntry) == nullptr);
+    std::vector<uint8_t> gq = cache.buildGameObjectQuery(goEntry, 0xF11000000000BEEFull);
+    CHECK(!gq.empty());
+    CHECK(cache.buildGameObjectQuery(goEntry, 0).empty());   // in flight
+    GameObjectQueryResponse gr; gr.entry = goEntry; gr.name = "Battered Chest"; gr.type = 3;
+    cache.onGameObjectResponse(gr);
+    CHECK(cache.gameObject(goEntry) && cache.gameObject(goEntry)->name == "Battered Chest");
+    CHECK(cache.gameObjectCount() == 1 && cache.pendingCount() == 0);
+
     // Distinct keys are independent; clear() empties everything.
     CHECK(cache.name(g + 1) == nullptr && cache.creature(entry + 1) == nullptr);
     cache.clear();

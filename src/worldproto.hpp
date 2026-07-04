@@ -35,6 +35,8 @@ enum Opcode : uint32_t {
     SMSG_NAME_QUERY_RESPONSE      = 0x051,
     CMSG_CREATURE_QUERY           = 0x060,
     SMSG_CREATURE_QUERY_RESPONSE  = 0x061,
+    CMSG_GAMEOBJECT_QUERY         = 0x05E,
+    SMSG_GAMEOBJECT_QUERY_RESPONSE = 0x05F,
 
     // Player movement (MSG_* = same opcode both ways: client sends its own move,
     // server relays other players'). Vanilla 1.12.1 values, cross-checked vs

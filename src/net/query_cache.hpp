@@ -70,18 +70,44 @@ public:
         creatures_[r.entry] = r;
     }
 
+    // ---- gameobject template cache (by entry) ---------------------------
+    const GameObjectQueryResponse* gameObject(uint32_t entry) const {
+        auto it = gameObjects_.find(entry);
+        return it == gameObjects_.end() ? nullptr : &it->second;
+    }
+    bool wantGameObject(uint32_t entry) {
+        if (gameObjects_.count(entry) || goPending_.count(entry)) return false;
+        goPending_.insert(entry);
+        return true;
+    }
+    std::vector<uint8_t> buildGameObjectQuery(uint32_t entry, uint64_t guid) {
+        if (!wantGameObject(entry)) return {};
+        return encodeGameObjectQuery(entry, guid);
+    }
+    void onGameObjectResponse(const GameObjectQueryResponse& r) {
+        goPending_.erase(r.entry);
+        gameObjects_[r.entry] = r;
+    }
+
     // ---- diagnostics ----------------------------------------------------
     size_t nameCount() const { return names_.size(); }
     size_t creatureCount() const { return creatures_.size(); }
-    size_t pendingCount() const { return namePending_.size() + creaturePending_.size(); }
-    void   clear() { names_.clear(); creatures_.clear();
-                     namePending_.clear(); creaturePending_.clear(); }
+    size_t gameObjectCount() const { return gameObjects_.size(); }
+    size_t pendingCount() const {
+        return namePending_.size() + creaturePending_.size() + goPending_.size();
+    }
+    void clear() {
+        names_.clear(); creatures_.clear(); gameObjects_.clear();
+        namePending_.clear(); creaturePending_.clear(); goPending_.clear();
+    }
 
 private:
-    std::unordered_map<uint64_t, NameQueryResponse>     names_;
-    std::unordered_map<uint32_t, CreatureQueryResponse> creatures_;
+    std::unordered_map<uint64_t, NameQueryResponse>       names_;
+    std::unordered_map<uint32_t, CreatureQueryResponse>   creatures_;
+    std::unordered_map<uint32_t, GameObjectQueryResponse> gameObjects_;
     std::unordered_set<uint64_t> namePending_;
     std::unordered_set<uint32_t> creaturePending_;
+    std::unordered_set<uint32_t> goPending_;
 };
 
 }  // namespace wf

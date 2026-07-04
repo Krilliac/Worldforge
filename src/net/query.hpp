@@ -18,6 +18,7 @@
 // deterministically (tests/test_query.cpp). Cross-checked vs the GPL mangos-zero
 // vanilla source used as a fact reference; no code copied.
 // ---------------------------------------------------------------------------
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -154,6 +155,56 @@ inline CreatureQueryResponse decodeCreatureQueryResponse(ByteReader& r) {
     c.civilian     = r.u8() != 0;
     c.racialLeader = r.u8() != 0;
     return c;
+}
+
+// ---- CMSG_GAMEOBJECT_QUERY (client request) ---------------------------------
+inline std::vector<uint8_t> encodeGameObjectQuery(uint32_t entry, uint64_t guid) {
+    ByteWriter w;
+    w.u32(entry);
+    w.u64(guid);
+    return w.data();
+}
+inline CreatureQueryRequest decodeGameObjectQuery(ByteReader& r) {  // same {entry,guid} shape
+    CreatureQueryRequest q;
+    q.entry = r.u32();
+    q.guid  = r.u64();
+    return q;
+}
+
+// ---- SMSG_GAMEOBJECT_QUERY_RESPONSE -----------------------------------------
+// The GameObjectTemplate the client caches (doors, chests, signs, ...). Vanilla
+// layout (verified vs mangos-zero): type + displayId come BEFORE the name, then
+// FOUR empty name slots, then six int32 type-specific "data" fields. Vanilla
+// does NOT send the trailing float size that TBC+ adds.
+struct GameObjectQueryResponse {
+    uint32_t             entry     = 0;
+    uint32_t             type      = 0;   // GAMEOBJECT_TYPE (door, chest, ...)
+    uint32_t             displayId = 0;
+    std::string          name;
+    std::array<int32_t, 6> data{};        // type-specific params (lock id, etc.)
+};
+
+inline std::vector<uint8_t> encodeGameObjectQueryResponse(const GameObjectQueryResponse& g) {
+    ByteWriter w;
+    w.u32(g.entry);
+    w.u32(g.type);
+    w.u32(g.displayId);
+    writeCString(w, g.name);
+    w.u8(0); w.u8(0); w.u8(0); w.u8(0);   // name2/3/4 + one more, all empty
+    for (int i = 0; i < 6; ++i) w.i32(g.data[i]);
+    return w.data();
+}
+
+inline GameObjectQueryResponse decodeGameObjectQueryResponse(ByteReader& r) {
+    GameObjectQueryResponse g;
+    g.entry     = r.u32();
+    g.type      = r.u32();
+    g.displayId = r.u32();
+    g.name      = readCString(r);
+    (void)readCString(r); (void)readCString(r);
+    (void)readCString(r); (void)readCString(r);   // four empty name slots
+    for (int i = 0; i < 6; ++i) g.data[i] = r.i32();
+    return g;
 }
 
 }  // namespace wf

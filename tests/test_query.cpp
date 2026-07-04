@@ -91,11 +91,39 @@ void test_query() {
         CHECK(out.civilian && !out.racialLeader && r.remaining() == 0);
     }
 
+    // SMSG_GAMEOBJECT_QUERY_RESPONSE: type/displayId BEFORE name, 4 empty name
+    // slots, then six int32 data fields (no trailing float size in vanilla).
+    {
+        GameObjectQueryResponse in;
+        in.entry = 1620; in.type = 3; in.displayId = 259;   // a chest
+        in.name = "Battered Chest";
+        in.data = { 57, 0, -1, 100, 0, 0 };
+        std::vector<uint8_t> b = encodeGameObjectQueryResponse(in);
+        // 4(entry)+4(type)+4(disp) + 15("Battered Chest\0") + 4(empty slots) + 24(6xi32)
+        CHECK(b.size() == 12 + 15 + 4 + 24);
+        ByteReader r(b.data(), b.size());
+        GameObjectQueryResponse out = decodeGameObjectQueryResponse(r);
+        CHECK(r.remaining() == 0);
+        CHECK(out.entry == 1620 && out.type == 3 && out.displayId == 259);
+        CHECK(out.name == "Battered Chest");
+        CHECK(out.data[0] == 57 && out.data[2] == -1 && out.data[3] == 100);
+    }
+
+    // CMSG_GAMEOBJECT_QUERY request shape.
+    {
+        std::vector<uint8_t> req = encodeGameObjectQuery(1620, 0xF11000000000BEEFull);
+        ByteReader r(req.data(), req.size());
+        CreatureQueryRequest q = decodeGameObjectQuery(r);
+        CHECK(q.entry == 1620 && q.guid == 0xF11000000000BEEFull && r.remaining() == 0);
+    }
+
     // Opcode values match the vanilla table.
     CHECK(CMSG_NAME_QUERY == 0x050);
     CHECK(SMSG_NAME_QUERY_RESPONSE == 0x051);
     CHECK(CMSG_CREATURE_QUERY == 0x060);
     CHECK(SMSG_CREATURE_QUERY_RESPONSE == 0x061);
+    CHECK(CMSG_GAMEOBJECT_QUERY == 0x05E);
+    CHECK(SMSG_GAMEOBJECT_QUERY_RESPONSE == 0x05F);
 
     // CString helpers: write/read parity incl. embedded-free content.
     {
