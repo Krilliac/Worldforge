@@ -140,4 +140,73 @@ void test_viewport() {
             if (!(p.r == 18 && p.g == 20 && p.b == 28)) { painted = true; break; }
         CHECK(painted);
     }
+
+    // --- atmosphere backdrop (T1.3): sky gradient + distance fog -------------
+    {
+        DebugDraw noOverlay;
+        Mesh empty;
+
+        // Default (no atmosphere): the legacy flat clear everywhere, unchanged.
+        ViewportPanel flat(64, 48);
+        flat.render(empty, noOverlay);
+        const Rgba& f0 = flat.scene().at(32, 0);
+        const Rgba& f1 = flat.scene().at(32, 47);
+        CHECK(f0.r == 18 && f0.g == 20 && f0.b == 28);
+        CHECK(f1.r == 18 && f1.g == 20 && f1.b == 28);
+
+        // With a zone fog colour set: a vertical gradient -- the horizon (bottom)
+        // row is exactly the fog colour, the top row is the darker sky tint, and
+        // they differ (the backdrop is no longer flat).
+        ViewportPanel sky(64, 48);
+        sky.setAtmosphere(true, Vec3{ 0.6f, 0.7f, 0.8f });
+        sky.render(empty, noOverlay);
+        const Rgba& top = sky.scene().at(32, 0);
+        const Rgba& bot = sky.scene().at(32, 47);
+        CHECK(bot.r == 153 && bot.g == 179 && bot.b == 204);   // fog colour * 255
+        CHECK(top.r != bot.r || top.g != bot.g || top.b != bot.b);
+
+        // Invalidating the atmosphere restores the legacy clear.
+        sky.setAtmosphere(false, Vec3{});
+        sky.render(empty, noOverlay);
+        const Rgba& back = sky.scene().at(32, 0);
+        CHECK(back.r == 18 && back.g == 20 && back.b == 28);
+
+        // Distance fog: a flat white ground plane receding from the camera. In
+        // the rendered frame the bottom rows are near ground and rows toward the
+        // vertical centre are far ground (same column, same normal, same texel,
+        // same shading) -- after the fog pass the far row must sit strictly
+        // closer to the fog colour than the near row.
+        Image white(2, 2);
+        for (Rgba& p : white.pixels) p = Rgba{ 230, 230, 230, 255 };
+        TileScene tile;
+        TexMesh ground;
+        ground.vertices = { { {  1,-100,-5},{0,0,1},{0,0} }, { {200,-100,-5},{0,0,1},{1,0} },
+                            { {200, 100,-5},{0,0,1},{1,1} }, { {  1, 100,-5},{0,0,1},{0,1} } };
+        ground.indices = { 0,1,2, 0,2,3 };
+        tile.terrain.chunkMeshes.push_back(ground);
+        tile.terrain.chunkLayers.push_back({ TerrainLayer{ &white, nullptr } });
+
+        ViewportPanel fogged(160, 120);
+        fogged.camera.eye = { 0, 0, 0 }; fogged.camera.yaw = 0; fogged.camera.pitch = 0;
+
+        // Reference render (no atmosphere): identifies which pixels are ground
+        // (anything not the flat clear colour) before fog is in play.
+        fogged.render(tile, noOverlay);
+        const Image ref = fogged.scene();
+        auto isGround = [&](int x, int y) {
+            const Rgba& p = ref.at(x, y);
+            return !(p.r == 18 && p.g == 20 && p.b == 28);
+        };
+        // Same column: near the bottom edge = close ground; just below the
+        // vertical centre = distant ground (the plane recedes toward the horizon).
+        CHECK(isGround(80, 115) && isGround(80, 68));
+
+        fogged.setAtmosphere(true, Vec3{ 1.0f, 0.2f, 0.2f });  // red fog: easy to read
+        fogged.render(tile, noOverlay);
+        const Rgba nearPx = fogged.scene().at(80, 115);
+        const Rgba farPx  = fogged.scene().at(80, 68);
+        // The white ground loses green to the red fog with distance: the far row
+        // must have lost strictly more than the near row.
+        CHECK(farPx.g < nearPx.g);
+    }
 }

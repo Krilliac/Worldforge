@@ -420,4 +420,38 @@ void rasterDebug(Framebuffer& fb, const DebugDraw& dd, const Mat4& mvp,
     }
 }
 
+void fillSkyGradient(Framebuffer& fb, Rgba top, Rgba horizon) {
+    const int W = fb.color.width, H = fb.color.height;
+    for (float& d : fb.depth) d = std::numeric_limits<float>::infinity();
+    for (int py = 0; py < H; ++py) {
+        const float t = H > 1 ? float(py) / float(H - 1) : 1.0f;
+        auto mix = [&](uint8_t a, uint8_t b) { return (uint8_t)(a + (b - a) * t + 0.5f); };
+        const Rgba row{ mix(top.r, horizon.r), mix(top.g, horizon.g),
+                        mix(top.b, horizon.b), 255 };
+        for (int px = 0; px < W; ++px) fb.color.at(px, py) = row;
+    }
+}
+
+void applyDistanceFog(Framebuffer& fb, Rgba fog, float maxFog) {
+    const int W = fb.color.width, H = fb.color.height;
+    // Normalise fog over the depths actually drawn this frame, so the effect is
+    // stable across camera/scene scale without needing world-space distances.
+    float zmin = std::numeric_limits<float>::infinity();
+    float zmax = -std::numeric_limits<float>::infinity();
+    for (float d : fb.depth)
+        if (std::isfinite(d)) { zmin = std::min(zmin, d); zmax = std::max(zmax, d); }
+    if (!(zmax > zmin)) return;                     // empty scene or single depth
+    const float span = zmax - zmin;
+    for (int py = 0; py < H; ++py)
+        for (int px = 0; px < W; ++px) {
+            const float d = fb.depth[(size_t)py * W + px];
+            if (!std::isfinite(d)) continue;        // sky pixel: keep the gradient
+            const float f = std::clamp((d - zmin) / span, 0.0f, 1.0f) * maxFog;
+            Rgba& c = fb.color.at(px, py);
+            c.r = (uint8_t)(c.r + (fog.r - c.r) * f);
+            c.g = (uint8_t)(c.g + (fog.g - c.g) * f);
+            c.b = (uint8_t)(c.b + (fog.b - c.b) * f);
+        }
+}
+
 } // namespace wf

@@ -97,6 +97,19 @@ void rasterLiquidMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp,
 void rasterLiquidMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp,
                       Rgba tint, const ShadeLight& light, bool emissive = false);
 
+// Atmosphere passes (zone sky + distance haze), shared by the offline renders
+// and the interactive viewport so both produce the same backdrop.
+//
+// fillSkyGradient replaces Framebuffer::clear() when a zone sky is resolved:
+// a vertical top->horizon gradient with the depth buffer reset to +inf.
+void fillSkyGradient(Framebuffer& fb, Rgba top, Rgba horizon);
+// applyDistanceFog is a post-pass over the rendered geometry: opaque pixels are
+// blended toward `fog` by their normalised scene depth (nearest drawn pixel ->
+// 0, farthest -> maxFog). Sky pixels (depth == +inf) are untouched. Run it
+// after the geometry passes and before overlay drawing so debug lines stay
+// crisp. A frame with no depth range (empty scene) is a no-op.
+void applyDistanceFog(Framebuffer& fb, Rgba fog, float maxFog = 0.65f);
+
 struct DebugDrawOptions {
     bool depthTest  = true;    // overlay respects the z-buffer (hidden by terrain)
     bool writeDepth = false;   // overlay doesn't occlude later overlay primitives

@@ -14,12 +14,37 @@ void ViewportPanel::applyPendingResize() {
     }
 }
 
+void ViewportPanel::setAtmosphere(bool valid, const Vec3& fogColorLinear) {
+    skyValid_ = valid;
+    if (!valid) return;
+    // Horizon = the zone fog colour; top = the same colour darkened and shifted
+    // toward blue so the gradient reads as sky (same mapping as the offline
+    // flythrough render, so the viewport and stills match).
+    auto u8 = [](float v) {
+        return (uint8_t)std::clamp(v * 255.0f + 0.5f, 0.0f, 255.0f);
+    };
+    skyHorizon_ = Rgba{ u8(fogColorLinear.x), u8(fogColorLinear.y), u8(fogColorLinear.z), 255 };
+    skyTop_     = Rgba{ u8(fogColorLinear.x * 0.55f + 0.10f),
+                        u8(fogColorLinear.y * 0.55f + 0.16f),
+                        u8(fogColorLinear.z * 0.55f + 0.32f), 255 };
+}
+
+void ViewportPanel::clearBackdrop() {
+    if (skyValid_) fillSkyGradient(fb_, skyTop_, skyHorizon_);
+    else           fb_.clear(Rgba{ 18, 20, 28, 255 });
+}
+
+void ViewportPanel::fogPass() {
+    if (skyValid_) applyDistanceFog(fb_, skyHorizon_);
+}
+
 void ViewportPanel::render(const Mesh& terrain, const DebugDraw& dd, const ShadeLight& light) {
     applyPendingResize();
-    fb_.clear(Rgba{ 18, 20, 28, 255 });
+    clearBackdrop();
     const float aspect = float(width_) / float(height_);
     const Mat4 mvp = camera.proj(aspect) * camera.view();
     rasterMesh(fb_, terrain, mvp, light);
+    fogPass();                                   // fog geometry, not the overlay
     DebugDrawOptions opt; opt.depthTest = true;
     rasterDebug(fb_, const_cast<DebugDraw&>(dd), mvp, opt);
     scene_ = fb_.color;
@@ -27,12 +52,13 @@ void ViewportPanel::render(const Mesh& terrain, const DebugDraw& dd, const Shade
 
 void ViewportPanel::render(const TileScene& scene, const DebugDraw& dd, const ShadeLight& light) {
     applyPendingResize();
-    fb_.clear(Rgba{ 18, 20, 28, 255 });
+    clearBackdrop();
     const float aspect = float(width_) / float(height_);
     const Mat4 mvp = camera.proj(aspect) * camera.view();
     // Textured terrain + doodads + WMOs + liquid, lit by the tile's zone light;
     // renderLit() takes the sun direction and reads scene.light / liquidLight.
     scene.renderLit(fb_, mvp, light.dir);
+    fogPass();
     DebugDrawOptions opt; opt.depthTest = true;
     rasterDebug(fb_, const_cast<DebugDraw&>(dd), mvp, opt);
     scene_ = fb_.color;
@@ -41,7 +67,7 @@ void ViewportPanel::render(const TileScene& scene, const DebugDraw& dd, const Sh
 void ViewportPanel::render(const std::vector<const TileScene*>& nearTiles, const Mesh& wdlFar,
                            const DebugDraw& dd, const ShadeLight& light) {
     applyPendingResize();
-    fb_.clear(Rgba{ 18, 20, 28, 255 });
+    clearBackdrop();
     const float aspect = float(width_) / float(height_);
     const Mat4 mvp = camera.proj(aspect) * camera.view();
     // Coarse WDL horizon first; the depth-tested full-res near tiles then overwrite
@@ -49,6 +75,7 @@ void ViewportPanel::render(const std::vector<const TileScene*>& nearTiles, const
     if (!wdlFar.indices.empty()) rasterMesh(fb_, wdlFar, mvp, light);
     for (const TileScene* ts : nearTiles)
         if (ts) ts->renderLit(fb_, mvp, light.dir);
+    fogPass();
     DebugDrawOptions opt; opt.depthTest = true;
     rasterDebug(fb_, const_cast<DebugDraw&>(dd), mvp, opt);
     scene_ = fb_.color;

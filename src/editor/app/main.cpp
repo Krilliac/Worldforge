@@ -380,7 +380,11 @@ int main(int argc, char** argv) {
         // Advance the day-tick (when animating) and re-resolve the scene light so
         // the viewport tracks the time of day. Empty Light.dbc -> grey default.
         if (dayAuto) { dayTick += dayRate * dt; dayTick = std::fmod(dayTick, kDayTicks); }
-        sceneLight = shadeFromSample(lights.lightingAt(lightPos, mapId, dayTick));
+        const LightingSample zoneSample = lights.lightingAt(lightPos, mapId, dayTick);
+        sceneLight = shadeFromSample(zoneSample);
+        // Backdrop + haze from the same sample: sky gradient and distance fog in
+        // the zone fog colour (T1.3); invalid sample -> legacy flat clear.
+        viewport.setAtmosphere(zoneSample.valid, zoneSample.fog);
 
         // Render the scene on the CPU and upload it to the GL texture. A loaded
         // real tile renders textured terrain + doodads + WMOs + liquid with its

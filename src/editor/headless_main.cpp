@@ -126,6 +126,12 @@ int main() {
     // A selected doodad sitting on the terrain -> the gizmo draws over it.
     Mat4 selected = Mat4::translate(Vec3{ 150.0f, 150.0f, heightAt(150,150) + 4.0f });
 
+    // Zone atmosphere (T1.3): the sky-gradient backdrop + distance fog the
+    // editor viewport shows when Light.dbc lighting is resolved. Headless has
+    // no client mounted, so use a clear-day fog colour of the same shape a
+    // LightingSample would carry.
+    viewport.setAtmosphere(true, Vec3{ 0.55f, 0.66f, 0.78f });
+
     viewport.render(mesh, dd);
 
     ImGui::NewFrame();

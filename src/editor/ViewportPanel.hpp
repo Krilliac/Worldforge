@@ -48,6 +48,14 @@ public:
     void render(const std::vector<const TileScene*>& nearTiles, const Mesh& wdlFar,
                 const DebugDraw& dd, const ShadeLight& light = {});
 
+    // Zone atmosphere for the viewport backdrop. When valid, render() clears to
+    // a sky gradient derived from the zone fog colour (linear 0..1, e.g.
+    // LightingSample::fog) and runs a distance-fog post-pass over the geometry;
+    // when invalid (the default) the legacy flat clear is used and no fog is
+    // applied, so existing callers/tests are unchanged. The editor re-sets this
+    // every frame alongside the ShadeLight so it tracks the day tick.
+    void setAtmosphere(bool valid, const Vec3& fogColorLinear);
+
     // Resize the internal render target so the scene re-renders at (w,h). Called
     // when the docked Viewport panel changes size, so the 3D view fills its pane
     // and keeps the correct aspect ratio instead of stretching a fixed image.
@@ -87,8 +95,17 @@ private:
     // whole frame. Called at the top of each render() overload (see resize()).
     void applyPendingResize();
 
+    // Clear the target for a new frame: zone sky gradient when the atmosphere
+    // is set, the legacy flat colour otherwise (shared by the render overloads).
+    void clearBackdrop();
+    // Fog post-pass over rendered geometry; no-op without a valid atmosphere.
+    void fogPass();
+
     int width_, height_;
     int pendingW_ = 0, pendingH_ = 0;   // requested size; applied at next render()
+    bool skyValid_ = false;             // atmosphere set this frame?
+    Rgba skyTop_{ 18, 20, 28, 255 };    // gradient top (derived from zone fog)
+    Rgba skyHorizon_{ 18, 20, 28, 255 };// gradient horizon == fog colour
     Image       scene_;
     Framebuffer fb_;
     PickResult  lastPick_;
