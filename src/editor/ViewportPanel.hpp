@@ -28,7 +28,7 @@ public:
     Camera camera;
 
     explicit ViewportPanel(int w = 900, int h = 560)
-        : width_(w), height_(h), scene_(w, h), fb_(w, h) {}
+        : width_(w), height_(h), displayW_(w), displayH_(h), scene_(w, h), fb_(w, h) {}
 
     // Render terrain + overlay into the internal scene image at the camera.
     // `light` supplies coloured ambient/diffuse (e.g. resolved from Light.dbc);
@@ -56,10 +56,19 @@ public:
     // every frame alongside the ShadeLight so it tracks the day tick.
     void setAtmosphere(bool valid, const Vec3& fogColorLinear);
 
-    // Resize the internal render target so the scene re-renders at (w,h). Called
-    // when the docked Viewport panel changes size, so the 3D view fills its pane
-    // and keeps the correct aspect ratio instead of stretching a fixed image.
+    // Resize the panel to (w,h) display pixels. The internal render target is
+    // sized to w*renderScale x h*renderScale (see setRenderScale); the smaller
+    // image is stretched to the full panel by the GPU (LINEAR), so the CPU
+    // software rasteriser shades far fewer pixels. Aspect is preserved, so
+    // picking/gizmo (which work in display coords) stay correct.
     void resize(int w, int h);
+
+    // Internal-resolution factor in (0,1]: 1.0 = render at full panel resolution
+    // (sharpest), lower = fewer pixels rasterised (faster, softer). The terrain
+    // fill cost scales with pixel count, so this is the main viewport perf knob.
+    // Clamped to [0.25, 1.0]; a change re-sizes the render target next frame.
+    void  setRenderScale(float s);
+    float renderScale() const { return renderScale_; }
 
     // ImGui panel: show the scene (sampled from `sceneTex`) and run the gizmo
     // over `selected` (may be null). Returns true while the gizmo is dragged.
@@ -101,8 +110,10 @@ private:
     // Fog post-pass over rendered geometry; no-op without a valid atmosphere.
     void fogPass();
 
-    int width_, height_;
-    int pendingW_ = 0, pendingH_ = 0;   // requested size; applied at next render()
+    int width_, height_;                // internal RENDER (framebuffer) size
+    int pendingW_ = 0, pendingH_ = 0;   // requested render size; applied at next render()
+    int displayW_ = 900, displayH_ = 560; // panel size the scene is stretched to
+    float renderScale_ = 1.0f;          // render size = display size * this
     bool skyValid_ = false;             // atmosphere set this frame?
     Rgba skyTop_{ 18, 20, 28, 255 };    // gradient top (derived from zone fog)
     Rgba skyHorizon_{ 18, 20, 28, 255 };// gradient horizon == fog colour

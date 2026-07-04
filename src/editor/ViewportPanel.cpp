@@ -82,16 +82,26 @@ void ViewportPanel::render(const std::vector<const TileScene*>& nearTiles, const
 }
 
 void ViewportPanel::resize(int w, int h) {
-    // Record the request only; render() reallocates on the next frame (see there).
+    // w,h are the panel (display) size. The render target is the scaled-down
+    // size; render() reallocates it next frame. Aspect is preserved.
     if (w < 1 || h < 1) return;
-    pendingW_ = w;
-    pendingH_ = h;
+    displayW_ = w;
+    displayH_ = h;
+    pendingW_ = std::max(1, (int)(w * renderScale_ + 0.5f));
+    pendingH_ = std::max(1, (int)(h * renderScale_ + 0.5f));
+}
+
+void ViewportPanel::setRenderScale(float s) {
+    renderScale_ = s < 0.25f ? 0.25f : (s > 1.0f ? 1.0f : s);
+    resize(displayW_, displayH_);   // re-apply to the render target
 }
 
 Ray ViewportPanel::rayAt(float localX, float localY) const {
-    const float aspect = float(width_) / float(height_);
+    // Mouse coords are in DISPLAY pixels; the screen ray uses display size (the
+    // aspect matches the render target, which is a uniform scale of it).
+    const float aspect = float(displayW_) / float(displayH_);
     return screenRay(camera.eye, camera.forward(), camera.right(), camera.up(),
-                     camera.fovY, aspect, localX, localY, float(width_), float(height_));
+                     camera.fovY, aspect, localX, localY, float(displayW_), float(displayH_));
 }
 
 PickResult ViewportPanel::pickAt(float localX, float localY,
@@ -118,12 +128,14 @@ bool ViewportPanel::draw(ImTextureID sceneTex, GizmoController& giz, Mat4* selec
     resize((int)avail.x, (int)avail.y);
 
     const ImVec2 imgPos = ImGui::GetCursorScreenPos();
-    ImGui::Image(sceneTex, ImVec2((float)width_, (float)height_));
+    // Stretch the (possibly lower-res) render target across the full panel; the
+    // GPU upsamples it (LINEAR), so the CPU rasteriser shades far fewer pixels.
+    ImGui::Image(sceneTex, ImVec2((float)displayW_, (float)displayH_));
     const bool hovered = ImGui::IsItemHovered();
 
     if (selected) {
-        const float aspect = float(width_) / float(height_);
-        giz.beginFrame(imgPos.x, imgPos.y, (float)width_, (float)height_);
+        const float aspect = float(displayW_) / float(displayH_);
+        giz.beginFrame(imgPos.x, imgPos.y, (float)displayW_, (float)displayH_);
         using_ = giz.manipulate(camera.view(), camera.proj(aspect), *selected);
     }
 

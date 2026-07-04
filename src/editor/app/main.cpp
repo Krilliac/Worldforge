@@ -196,6 +196,10 @@ int main(int argc, char** argv) {
     editor::DebugVisPanel        debugVis;
     editor::EntityInspectorPanel inspector;
     editor::ViewportPanel        viewport(900, 560);
+    // Render the CPU viewport below panel resolution by default and upscale it:
+    // terrain fill cost scales with pixel count, so this keeps looking-at-the-
+    // world smooth. Tunable live via View > Render scale.
+    viewport.setRenderScale(0.6f);
     editor::GizmoController       giz;
     editor::MapBrowserPanel      mapBrowser;
     editor::AssetBrowserPanel    assetBrowser;
@@ -383,8 +387,11 @@ int main(int argc, char** argv) {
         bool placeKey = pNow && !pWas; pWas = pNow;
 
         // Drain the bridge: live entities/server-status feed the WorldView; the
-        // debug-vis stream accumulates (cleared on DEBUG_CLEAR).
+        // debug-vis stream accumulates (cleared on DEBUG_CLEAR). Any bridge frame
+        // means the scene changed and must re-render this frame.
+        bool bridgeUpdated = false;
         for (const auto& f : bridge.poll()) {
+            bridgeUpdated = true;
             switch (f.opcode) {
                 case EDITOR_ENTITY_STATE:
                 case EDITOR_ENTITY_REMOVE:
@@ -432,6 +439,10 @@ int main(int argc, char** argv) {
         if (useTile)
             AssetLoader::applyLighting(realTile, lights, mapId, tileX, tileY, dayTick);
 
+        // ---- tile streaming (always; cheap when the resident ring is full) ---
+        // Runs every frame so tiles keep filling in, but sets tilesChanged so the
+        // (expensive) re-render below fires while the ring is still populating.
+        bool tilesChanged = false;
         if (streamWorld && haveWdl && !browseMap.empty()) {
             // Drive the resident ring from the camera's tile. worldToTile is the
             // documented inverse of tileCornerWorld (VERIFY-FLAGGED axis mapping).
@@ -439,7 +450,9 @@ int main(int argc, char** argv) {
             focus.x = std::clamp(focus.x, 0, 63);
             focus.y = std::clamp(focus.y, 0, 63);
             TileStreamer::Plan plan = streamer.plan(focus);
-            for (TileCoord c : plan.toEvict) { nearCache.erase(tileKey(c)); streamer.markEvicted(c); }
+            for (TileCoord c : plan.toEvict) {
+                nearCache.erase(tileKey(c)); streamer.markEvicted(c); tilesChanged = true;
+            }
             // Budget tile builds per frame: building a tile (parse ADT + decode
             // BLPs + build meshes/doodads/WMOs) is heavy, so loading a whole ring
             // burst in one frame stalls it -- the choppiness when moving. Build at
@@ -460,37 +473,63 @@ int main(int argc, char** argv) {
                     nearCache.emplace(tileKey(c), std::move(ts));
                 }
                 streamer.markLoaded(c);   // mark even if absent so we don't retry every frame
+                tilesChanged = true;
             }
-
-            // Frustum-cull the resident neighbours into the draw list. The active
-            // editable tile is always drawn from realTile (it carries live edits).
-            const float aspect = float(viewport.width()) / float(viewport.height());
-            const Frustum fr = makeFrustum(viewport.camera.proj(aspect) * viewport.camera.view());
-            auto tileBox = [](TileCoord c) {
-                const Vec3 nw = tileCornerWorld(c.x, c.y);
-                return Aabb{ Vec3{ nw.x - float(TILE_SIZE), nw.y - float(TILE_SIZE), -2000.0f },
-                            Vec3{ nw.x, nw.y, 2000.0f } };
-            };
-            std::vector<const TileScene*> nearTiles;
-            if (useTile) nearTiles.push_back(&realTile);
-            const int activeKey = useTile ? tileKey({ tileX, tileY }) : -1;
-            for (auto& kv : nearCache) {
-                if (kv.first == activeKey) continue;        // already added via realTile
-                const TileCoord c{ kv.first % 64, kv.first / 64 };
-                if (!aabbVisible(fr, tileBox(c))) continue;
-                nearTiles.push_back(&kv.second);
-            }
-            viewport.render(nearTiles, worldWdlMesh, debug, sceneLight);
-        } else if (useTile) {
-            viewport.render(realTile, debug, sceneLight);
-        } else {
-            viewport.render(mesh, debug, sceneLight);
         }
-        glBindTexture(GL_TEXTURE_2D, sceneTex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, viewport.width(), viewport.height(),
-                     0, GL_RGBA, GL_UNSIGNED_BYTE, viewport.scene().pixels.data());
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        // ---- re-rasterise only when something visible changed ---------------
+        // The CPU software rasteriser is the frame's dominant cost; rendering it
+        // every frame gates the WHOLE UI (menus/tabs move like slow motion). Only
+        // re-render on an actual change -- camera move, streamed tiles, day/atmos,
+        // bridge updates, a resize, or active editing (mouse/place). Otherwise the
+        // last scene texture is reused and ImGui runs at full speed.
+        static Vec3  pEye{ 1e30f, 0, 0 };
+        static float pYaw = 1e30f, pPitch = 0.0f, pDay = -1.0f;
+        static int   pW = 0, pH = 0, warm = 3;
+        const auto& Cam = viewport.camera;
+        const bool camMoved = length(Cam.eye - pEye) > 0.01f ||
+                              std::fabs(Cam.yaw - pYaw) > 1e-4f ||
+                              std::fabs(Cam.pitch - pPitch) > 1e-4f;
+        const bool sizeChanged = viewport.width() != pW || viewport.height() != pH;
+        const bool lmb = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+        const bool needRender = warm > 0 || camMoved || sizeChanged || tilesChanged ||
+                                bridgeUpdated || dayAuto || dayTick != pDay || lmb || placeKey;
+        if (warm > 0) --warm;
+        pEye = Cam.eye; pYaw = Cam.yaw; pPitch = Cam.pitch; pDay = dayTick;
+        pW = viewport.width(); pH = viewport.height();
+
+        if (needRender) {
+            if (streamWorld && haveWdl && !browseMap.empty()) {
+                // Frustum-cull the resident neighbours into the draw list. The
+                // active editable tile is always drawn from realTile (live edits).
+                const float aspect = float(viewport.width()) / float(viewport.height());
+                const Frustum fr = makeFrustum(viewport.camera.proj(aspect) * viewport.camera.view());
+                auto tileBox = [](TileCoord c) {
+                    const Vec3 nw = tileCornerWorld(c.x, c.y);
+                    return Aabb{ Vec3{ nw.x - float(TILE_SIZE), nw.y - float(TILE_SIZE), -2000.0f },
+                                Vec3{ nw.x, nw.y, 2000.0f } };
+                };
+                std::vector<const TileScene*> nearTiles;
+                if (useTile) nearTiles.push_back(&realTile);
+                const int activeKey = useTile ? tileKey({ tileX, tileY }) : -1;
+                for (auto& kv : nearCache) {
+                    if (kv.first == activeKey) continue;    // already added via realTile
+                    const TileCoord c{ kv.first % 64, kv.first / 64 };
+                    if (!aabbVisible(fr, tileBox(c))) continue;
+                    nearTiles.push_back(&kv.second);
+                }
+                viewport.render(nearTiles, worldWdlMesh, debug, sceneLight);
+            } else if (useTile) {
+                viewport.render(realTile, debug, sceneLight);
+            } else {
+                viewport.render(mesh, debug, sceneLight);
+            }
+            glBindTexture(GL_TEXTURE_2D, sceneTex);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, viewport.width(), viewport.height(),
+                         0, GL_RGBA, GL_UNSIGNED_BYTE, viewport.scene().pixels.data());
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        }
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -545,6 +584,9 @@ int main(int argc, char** argv) {
                 ImGui::MenuItem("Stream World (LOD)", nullptr, &streamWorld);
                 int ring = streamer.radius();
                 if (ImGui::SliderInt("Ring radius", &ring, 0, 4)) streamer.setRadius(ring);
+                float rs = viewport.renderScale();
+                if (ImGui::SliderFloat("Render scale", &rs, 0.25f, 1.0f, "%.2f"))
+                    viewport.setRenderScale(rs);   // lower = faster (softer), higher = sharper
                 ImGui::EndMenu();
             }
             ImGui::Separator();
