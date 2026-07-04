@@ -62,4 +62,11 @@ struct DrawDistances {
 float doodadAlpha(float d, const DrawDistances& dd = {});
 float wmoAlpha(float d, const DrawDistances& dd = {});
 
+// Cross-fade weight of a Full tile vs the coarse WDL horizon at distance `d`:
+// 1 (full tile) until `band` yards before `fullDist`, ramping to 0 at `fullDist`
+// (beyond which only the WDL far mesh shows). The renderer blends the full tile
+// over the WDL by this weight so the LOD switch doesn't pop. This is `fadeAlpha`
+// applied at the tile boundary.
+float tileFullWeight(float d, float fullDist, float band);
+
 } // namespace wf

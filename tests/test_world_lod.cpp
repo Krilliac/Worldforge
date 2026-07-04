@@ -106,4 +106,14 @@ void test_world_lod() {
         CHECK(doodadAlpha(250.0f, dd) < wmoAlpha(250.0f, dd));   // doodad fading, WMO not
         CHECK_APPROX(wmoAlpha(1000.0f, dd), 0.0f);               // WMO gone at its cull
     }
+
+    // --- tile Full<->WDL cross-fade weight ----------------------------------
+    {
+        // Full weight 1 until `band` before fullDist, ramp to 0 at fullDist.
+        CHECK_APPROX(tileFullWeight(500.0f,  1000.0f, 200.0f), 1.0f);   // well inside
+        CHECK_APPROX(tileFullWeight(800.0f,  1000.0f, 200.0f), 1.0f);   // at band start
+        CHECK_APPROX(tileFullWeight(900.0f,  1000.0f, 200.0f), 0.5f);   // mid-band
+        CHECK_APPROX(tileFullWeight(1000.0f, 1000.0f, 200.0f), 0.0f);   // at fullDist
+        CHECK_APPROX(tileFullWeight(1500.0f, 1000.0f, 200.0f), 0.0f);   // beyond -> WDL only
+    }
 }

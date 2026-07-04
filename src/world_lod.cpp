@@ -51,4 +51,8 @@ float wmoAlpha(float d, const DrawDistances& dd) {
     return fadeAlpha(d, dd.wmoFade, dd.wmoCull);
 }
 
+float tileFullWeight(float d, float fullDist, float band) {
+    return fadeAlpha(d, fullDist - band, fullDist);
+}
+
 } // namespace wf

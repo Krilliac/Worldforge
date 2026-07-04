@@ -117,6 +117,41 @@ void test_render() {
         CHECK(lit > 200);                         // terrain + instance + overlay drawn
     }
 
+    // --- object draw-distance culling (T3.4): far doodads are skipped -------
+    {
+        Image tex(1,1); tex.at(0,0) = Rgba{200,120,40,255};
+        TexMesh box;
+        box.vertices = { {{-1,-1,0},{0,0,1},{0,0}}, {{1,-1,0},{0,0,1},{1,0}}, {{0,1,0},{0,0,1},{0.5f,1}} };
+        box.indices = { 0,1,2 };
+
+        Scene scene;
+        scene.instances.push_back({ &box, &tex, Mat4::translate({0,0,0}) });  // doodad at origin
+        Mat4 view = Mat4::lookAt({0,-5,3}, {0,0,0}, {0,0,1});
+        Mat4 proj = Mat4::perspective(60.0, 1.0, 0.1, 100.0);
+
+        auto countLit = [&](bool cull, Vec3 camPos) {
+            Framebuffer fb(64,64);
+            fb.clear(Rgba{10,10,14,255});
+            scene.cullObjects = cull;
+            scene.cameraPos   = camPos;
+            renderScene(fb, scene, proj * view);
+            int n = 0;
+            for (const Rgba& p : fb.color.pixels)
+                if (!(p.r==10 && p.g==10 && p.b==14)) ++n;
+            return n;
+        };
+
+        int base = countLit(false, {0,0,0});      // cull off: instance drawn
+        CHECK(base > 20);
+        // cull on, cameraPos 400 yd from the origin doodad (past doodadCull 300).
+        CHECK(countLit(true, {0,0,400}) == 0);    // culled
+        CHECK(countLit(true, {0,0,50})  == base); // within doodadFade -> unchanged
+
+        // A WMO at the same 400 yd survives (wmoCull 1000 is much farther).
+        scene.instances[0].isWmo = true;
+        CHECK(countLit(true, {0,0,400}) == base);
+    }
+
     // --- terrain MCAL splat: blend a base + alpha-mapped overlay ----------
     {
         Image grass(1,1); grass.at(0,0) = Rgba{40,160,40,255};

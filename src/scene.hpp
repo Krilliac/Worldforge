@@ -14,6 +14,7 @@
 #include "terrain.hpp"     // Mesh
 #include "raster.hpp"      // Framebuffer, TexMesh
 #include "debugdraw.hpp"
+#include "world_lod.hpp"   // DrawDistances / doodadAlpha / wmoAlpha
 
 namespace wf {
 
@@ -21,6 +22,7 @@ struct ModelInstance {
     const TexMesh* mesh    = nullptr;   // posed/static, model-local space
     const Image*   texture = nullptr;   // BLP-decoded RGBA
     Mat4           transform = Mat4::identity();   // local -> world placement
+    bool           isWmo   = false;     // WMO (long draw distance) vs M2 doodad
 };
 
 // A translucent liquid (MCLQ) surface in world space: the flat water/lava mesh
@@ -44,6 +46,17 @@ struct Scene {
     // leave default for the original fixed-light behaviour.
     ShadeLight light;                                     // opaque terrain/objects
     ShadeLight liquidLight{ {0.5f,0.4f,0.8f}, {0.5f,0.5f,0.5f}, {0.5f,0.5f,0.5f} };
+
+    // Object draw-distance culling (T3.4). When cullObjects is set, an instance
+    // past its kind's cull distance (doodad vs WMO, via DrawDistances) from
+    // cameraPos is skipped -- far clutter isn't drawn. Off by default, so the
+    // legacy behaviour (draw every instance) is unchanged. Soft alpha fade near
+    // the cull edge is a later polish (needs a per-draw alpha multiplier in the
+    // rasteriser); the fade math (doodadAlpha/wmoAlpha) already drives the
+    // cull threshold.
+    bool          cullObjects = false;
+    Vec3          cameraPos{ 0, 0, 0 };
+    DrawDistances drawDist{};
 };
 
 // Render the scene into `fb` through `viewProj`: terrain first (lit/shaded),
