@@ -167,8 +167,17 @@ Dbc Dbc::parse(const std::vector<uint8_t>& buf) {
 }
 
 uint32_t Dbc::getU32(uint32_t rec, uint32_t field) const {
-    if (rec >= recordCount_ || field >= fieldCount_)
-        throw std::out_of_range("DBC::getU32 index out of range");
+    // An out-of-range record is a caller logic error (throw). An out-of-range
+    // FIELD is data variance: real/patched client DBCs can carry fewer fields
+    // than a reader's newest-known layout expects (patch MPQs override the base
+    // with different field counts), so a missing field reads as 0 -- the natural
+    // "absent" value every typed reader already handles (0 id -> skipped, 0
+    // string offset -> "" via getString). This keeps the editor robust against
+    // real client data instead of crashing on one unexpected column.
+    if (rec >= recordCount_)
+        throw std::out_of_range("DBC::getU32 record index out of range");
+    if (field >= fieldCount_)
+        return 0;
     const size_t off = static_cast<size_t>(rec) * recordSize_ + static_cast<size_t>(field) * 4;
     ByteReader r(records_.data() + off, 4);
     return r.u32();

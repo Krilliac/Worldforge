@@ -190,6 +190,23 @@ void test_dbc_defs() {
     CHECK(normalizeModelPath("a.MDL") == "a.m2");
     CHECK(normalizeModelPath("z.wmo") == "z.wmo");
 
+    // --- Dbc::getU32 robustness: out-of-range FIELD -> 0, RECORD -> throw ----
+    // Real/patched client DBCs can carry fewer fields than a reader expects; a
+    // missing field must read as 0 (not crash the editor). An out-of-range
+    // record is still a caller bug and throws.
+    {
+        DbcBuilder b(3);
+        b.addRecord({ 10, 20, 30 });
+        Dbc dbc = Dbc::parse(b.build());
+        CHECK(dbc.getU32(0, 2) == 30);          // in range
+        CHECK(dbc.getU32(0, 3) == 0);           // field past fieldCount -> 0
+        CHECK(dbc.getU32(0, 999) == 0);
+        CHECK(dbc.getString(0, 5).empty());     // getString over a missing field -> ""
+        bool threw = false;
+        try { (void)dbc.getU32(1, 0); } catch (const std::out_of_range&) { threw = true; }
+        CHECK(threw);                           // out-of-range record still throws
+    }
+
     // --- CharHairGeosets (T3.3): typed read + resolver ----------------------
     // Layout matches the real 1.12.1 client (6 fields x 24 bytes):
     // id, race, sex, variation, geosetId, showScalp.
