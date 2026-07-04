@@ -32,6 +32,7 @@ void test_world_socket();
 void test_minimap();
 void test_movement();
 void test_query();
+void test_query_cache();
 void test_render();
 void test_asset();
 void test_placement_io();
@@ -83,6 +84,7 @@ int main() {
     test_minimap();
     test_movement();
     test_query();
+    test_query_cache();
     test_render();
     test_asset();
     test_placement_io();
