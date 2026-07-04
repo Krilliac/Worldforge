@@ -76,4 +76,34 @@ void test_world_lod() {
 
     // Empty input -> empty output (no crash, exact one-per-input contract).
     CHECK(classify(cam, {}).empty());
+
+    // --- object draw-distance fade (T3.4) -----------------------------------
+    {
+        // fadeAlpha: 1 up to fadeStart, linear ramp to 0 at cullDist.
+        CHECK_APPROX(fadeAlpha(0.0f,   100.0f, 200.0f), 1.0f);
+        CHECK_APPROX(fadeAlpha(100.0f, 100.0f, 200.0f), 1.0f);   // at fadeStart
+        CHECK_APPROX(fadeAlpha(150.0f, 100.0f, 200.0f), 0.5f);   // midpoint
+        CHECK_APPROX(fadeAlpha(200.0f, 100.0f, 200.0f), 0.0f);   // at cull
+        CHECK_APPROX(fadeAlpha(999.0f, 100.0f, 200.0f), 0.0f);   // beyond cull
+
+        // Monotonically non-increasing across the ramp.
+        float prev = 1.0f;
+        for (int i = 0; i <= 20; ++i) {
+            float a = fadeAlpha(100.0f + i * 5.0f, 100.0f, 200.0f);
+            CHECK(a <= prev + 1e-6f);
+            prev = a;
+        }
+
+        // Degenerate cullDist <= fadeStart -> hard cut at cullDist.
+        CHECK_APPROX(fadeAlpha(150.0f, 200.0f, 200.0f), 1.0f);   // d < cull -> visible
+        CHECK_APPROX(fadeAlpha(250.0f, 200.0f, 200.0f), 0.0f);   // d >= cull -> gone
+
+        // Doodads fade out much closer than WMOs at the same distance.
+        DrawDistances dd;
+        CHECK_APPROX(doodadAlpha(0.0f, dd), 1.0f);
+        CHECK_APPROX(doodadAlpha(350.0f, dd), 0.0f);             // past doodadCull
+        CHECK(wmoAlpha(350.0f, dd) > 0.9f);                      // WMO still fully up
+        CHECK(doodadAlpha(250.0f, dd) < wmoAlpha(250.0f, dd));   // doodad fading, WMO not
+        CHECK_APPROX(wmoAlpha(1000.0f, dd), 0.0f);               // WMO gone at its cull
+    }
 }

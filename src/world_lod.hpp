@@ -39,4 +39,27 @@ std::vector<TileLodResult> classify(Vec3 camera,
                                     const std::vector<TileCoord>& tiles,
                                     const LodThresholds& th = {});
 
+// ---- draw-distance fade for placed objects (M2 doodads / WMOs) ---------------
+// Terrain streams far (LodThresholds), but doodads and map-objects have their
+// own, much shorter draw distances and fade out with distance instead of popping.
+// fadeAlpha is the fraction visible at distance `d`: 1 up to `fadeStart`, then a
+// linear ramp to 0 at `cullDist` (0 == cull, don't draw). A cullDist <= fadeStart
+// degrades to a hard cut at cullDist. Pure; the renderer multiplies object alpha
+// by this and skips objects whose alpha is 0.
+float fadeAlpha(float d, float fadeStart, float cullDist);
+
+// Per-object-kind draw distances. Doodads (grass, clutter, small props) fade out
+// close; WMOs (buildings) are visible much farther. Yards; tunable like the
+// vanilla draw-distance CVars. Defaults are conservative mid-range values.
+struct DrawDistances {
+    float doodadFade = 200.0f;   // doodad fully visible within this
+    float doodadCull = 300.0f;   // doodad gone beyond this
+    float wmoFade    = 700.0f;
+    float wmoCull    = 1000.0f;
+};
+
+// Visible fraction of a doodad / WMO at distance `d` (0 == culled).
+float doodadAlpha(float d, const DrawDistances& dd = {});
+float wmoAlpha(float d, const DrawDistances& dd = {});
+
 } // namespace wf

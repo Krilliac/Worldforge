@@ -36,4 +36,19 @@ std::vector<TileLodResult> classify(Vec3 camera,
     return out;
 }
 
+float fadeAlpha(float d, float fadeStart, float cullDist) {
+    if (cullDist <= fadeStart) return d < cullDist ? 1.0f : 0.0f;  // hard cut
+    if (d <= fadeStart) return 1.0f;
+    if (d >= cullDist)  return 0.0f;
+    return (cullDist - d) / (cullDist - fadeStart);               // linear ramp
+}
+
+float doodadAlpha(float d, const DrawDistances& dd) {
+    return fadeAlpha(d, dd.doodadFade, dd.doodadCull);
+}
+
+float wmoAlpha(float d, const DrawDistances& dd) {
+    return fadeAlpha(d, dd.wmoFade, dd.wmoCull);
+}
+
 } // namespace wf
