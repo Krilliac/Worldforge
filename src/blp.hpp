@@ -31,4 +31,21 @@ Image decodeBlp(const std::vector<uint8_t>& buf, BlpInfo* outInfo = nullptr);
 // throws on an out-of-range/empty level or unsupported input.
 Image decodeBlpMip(const std::vector<uint8_t>& buf, int mipLevel, BlpInfo* outInfo = nullptr);
 
+// Parse just the BLP header (no pixel decode): dimensions, format, mip count.
+// Throws on a non-BLP2 / zero-dimension / JPEG-content (unsupported) input.
+BlpInfo readBlpInfo(const std::vector<uint8_t>& buf);
+
+// Choose the mip level best matching a desired on-screen size: the smallest
+// (coarsest) mip whose largest dimension is still >= targetMaxDim, so the
+// texture is never upsampled from a mip smaller than needed but memory isn't
+// wasted on excess resolution. Clamps to [0, mipCount-1]: a target larger than
+// the base returns 0 (full res), a target below the coarsest mip returns the
+// coarsest. Pure over BlpInfo (no pixel work).
+int selectBlpMip(const BlpInfo& info, int targetMaxDim);
+
+// Decode the mip selected by selectBlpMip() for `targetMaxDim`. Convenience over
+// readBlpInfo + selectBlpMip + decodeBlpMip for LOD/thumbnail/minimap use.
+Image decodeBlpForSize(const std::vector<uint8_t>& buf, int targetMaxDim,
+                       BlpInfo* outInfo = nullptr);
+
 } // namespace wf

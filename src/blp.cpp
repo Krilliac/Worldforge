@@ -151,12 +151,24 @@ void decodePalettized(const std::vector<uint8_t>& buf, const uint8_t* palette,
 
 } // namespace
 
-Image decodeBlpMip(const std::vector<uint8_t>& buf, int mipLevel, BlpInfo* outInfo) {
+namespace {
+// Parse the fixed BLP2 header (magic, format fields, dimensions, mip tables).
+// Fills `info` (incl. mipCount) and the caller's 16-entry offset/size tables.
+// Throws on a non-BLP2, zero-dimension, or JPEG-content (type 0) input.
+void parseBlpHeader(const std::vector<uint8_t>& buf, BlpInfo& info,
+                    uint32_t (&mipOffsets)[16], uint32_t (&mipSizes)[16]) {
     ByteReader r(buf);
     if (r.fourccRaw() != "BLP2") throw std::runtime_error("not a BLP2 file");
 
-    BlpInfo info;
+    info = BlpInfo{};
     info.type          = r.u32();
+    // type 0 = JPEG-compressed content (BLP0/alpha-era, decoded via Intel's
+    // ijl15 in the original client). Vanilla 1.12.1 content is all type 1
+    // (direct: palettized / DXT / raw); reject JPEG loudly rather than
+    // misread it as a direct blob. See formats/blp-mip-jpeg.md.
+    if (info.type == 0)
+        throw std::runtime_error("BLP JPEG content (type 0) unsupported; "
+                                 "alpha-era format, not used by 1.12.1");
     info.compression   = r.u8();
     info.alphaDepth    = r.u8();
     info.alphaEncoding = r.u8();
@@ -164,13 +176,47 @@ Image decodeBlpMip(const std::vector<uint8_t>& buf, int mipLevel, BlpInfo* outIn
     info.width         = r.u32();
     info.height        = r.u32();
 
-    uint32_t mipOffsets[16], mipSizes[16];
     for (int i = 0; i < 16; ++i) mipOffsets[i] = r.u32();
     for (int i = 0; i < 16; ++i) mipSizes[i]   = r.u32();
     for (int i = 0; i < 16; ++i) if (mipOffsets[i] && mipSizes[i]) info.mipCount = i + 1;
 
     if (info.width == 0 || info.height == 0)
         throw std::runtime_error("BLP has zero dimensions");
+}
+}  // namespace
+
+BlpInfo readBlpInfo(const std::vector<uint8_t>& buf) {
+    BlpInfo info;
+    uint32_t mipOffsets[16], mipSizes[16];
+    parseBlpHeader(buf, info, mipOffsets, mipSizes);
+    return info;
+}
+
+int selectBlpMip(const BlpInfo& info, int targetMaxDim) {
+    int levels = info.mipCount > 0 ? info.mipCount : 1;
+    if (targetMaxDim < 1) targetMaxDim = 1;
+    int lvl = 0;
+    for (int i = 0; i < levels && i < 16; ++i) {
+        uint32_t w = info.width  >> i; if (w == 0) w = 1;
+        uint32_t h = info.height >> i; if (h == 0) h = 1;
+        uint32_t dim = w > h ? w : h;
+        if (static_cast<int>(dim) >= targetMaxDim) lvl = i;  // still covers target
+        else break;                                          // smaller than target: stop
+    }
+    return lvl;
+}
+
+Image decodeBlpForSize(const std::vector<uint8_t>& buf, int targetMaxDim, BlpInfo* outInfo) {
+    BlpInfo info = readBlpInfo(buf);
+    Image img = decodeBlpMip(buf, selectBlpMip(info, targetMaxDim), outInfo);
+    if (outInfo) *outInfo = info;   // report the whole-texture info, not just the mip
+    return img;
+}
+
+Image decodeBlpMip(const std::vector<uint8_t>& buf, int mipLevel, BlpInfo* outInfo) {
+    BlpInfo info;
+    uint32_t mipOffsets[16], mipSizes[16];
+    parseBlpHeader(buf, info, mipOffsets, mipSizes);
 
     if (mipLevel < 0 || mipLevel >= 16 || mipLevel >= info.mipCount)
         throw std::runtime_error("BLP mip level out of range");

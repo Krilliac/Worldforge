@@ -175,4 +175,54 @@ void test_blp() {
         };
         CHECK(findTag("IHDR")); CHECK(findTag("IDAT")); CHECK(findTag("IEND"));
     }
+
+    // --- mip selection (T3.2): pure over BlpInfo -----------------------------
+    {
+        BlpInfo info; info.width = 256; info.height = 256; info.mipCount = 9;
+        // Mip dims: 256,128,64,32,16,8,4,2,1 (levels 0..8).
+        CHECK(selectBlpMip(info, 1000) == 0);   // target > base -> full res
+        CHECK(selectBlpMip(info, 256)  == 0);
+        CHECK(selectBlpMip(info, 200)  == 0);   // 256>=200, 128<200 -> 0
+        CHECK(selectBlpMip(info, 128)  == 1);   // 128>=128, 64<128  -> 1
+        CHECK(selectBlpMip(info, 100)  == 1);   // 128>=100, 64<100  -> 1
+        CHECK(selectBlpMip(info, 64)   == 2);
+        CHECK(selectBlpMip(info, 1)    == 8);   // coarsest mip covers 1px
+        CHECK(selectBlpMip(info, 0)    == 8);   // clamped target -> coarsest
+
+        // Non-square: the larger dimension drives selection.
+        BlpInfo wide; wide.width = 256; wide.height = 64; wide.mipCount = 9;
+        CHECK(selectBlpMip(wide, 128) == 1);    // max(128,32)=128 >=128 -> 1
+
+        // Single-mip texture: always level 0.
+        BlpInfo one; one.width = 32; one.height = 32; one.mipCount = 1;
+        CHECK(selectBlpMip(one, 4) == 0);
+        CHECK(selectBlpMip(one, 64) == 0);
+    }
+
+    // --- JPEG-content (type 0) BLP is rejected loudly, not misdecoded --------
+    {
+        auto b = blpHeader(2, 0, 7, 4, 4, 148, 8);   // DXT1-ish header
+        b[4] = 0;                                     // patch type field -> JPEG
+        bool threw = false;
+        try { (void)readBlpInfo(b); } catch (const std::exception&) { threw = true; }
+        CHECK(threw);
+        threw = false;
+        try { (void)decodeBlp(b); } catch (const std::exception&) { threw = true; }
+        CHECK(threw);
+    }
+
+    // --- readBlpInfo + decodeBlpForSize on a real single-mip BLP -------------
+    {
+        // A 2x2 raw-BGRA (compression 3) BLP: header + 16 bytes of pixels.
+        auto b = blpHeader(3, 8, 0, 2, 2, 148, 16);
+        for (int i = 0; i < 4; ++i) { b.push_back(10); b.push_back(20); b.push_back(30); b.push_back(255); }
+        BlpInfo info = readBlpInfo(b);
+        CHECK(info.width == 2 && info.height == 2 && info.compression == 3 && info.mipCount == 1);
+        // decodeBlpForSize on a single-mip texture returns mip 0 regardless.
+        BlpInfo got;
+        Image img = decodeBlpForSize(b, 1, &got);
+        CHECK(img.width == 2 && img.height == 2);
+        CHECK(got.width == 2 && got.height == 2);         // whole-texture info reported
+        CHECK(img.at(0,0).r == 30 && img.at(0,0).b == 10); // BGRA -> RGBA swap
+    }
 }
