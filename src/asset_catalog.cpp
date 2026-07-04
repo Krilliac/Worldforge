@@ -134,4 +134,27 @@ std::vector<DisplayModel> listGroundEffectModels(const Dbc& texture, const Dbc& 
     return out;
 }
 
+// --- DisplayResolver: index the same joins the list* functions produce, keyed
+//     by display id for O(1) runtime lookup. Reusing list* keeps the resolution
+//     semantics (path normalisation, unresolved-skip) identical to the browser.
+void DisplayResolver::buildCreatures(const Dbc& displayInfo, const Dbc& modelData) {
+    for (const DisplayModel& d : listCreatureModels(displayInfo, modelData))
+        creatures_[d.displayId] = d.model;
+}
+
+void DisplayResolver::buildGameObjects(const Dbc& displayInfo) {
+    for (const DisplayModel& d : listGameObjectModels(displayInfo))
+        gameObjects_[d.displayId] = d.model;
+}
+
+const std::string& DisplayResolver::creatureModel(uint32_t displayId) const {
+    auto it = creatures_.find(displayId);
+    return it == creatures_.end() ? empty_ : it->second;
+}
+
+const std::string& DisplayResolver::gameObjectModel(uint32_t displayId) const {
+    auto it = gameObjects_.find(displayId);
+    return it == gameObjects_.end() ? empty_ : it->second;
+}
+
 } // namespace wf

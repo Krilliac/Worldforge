@@ -6,6 +6,7 @@
 // *.wmo), so a panel can present them and the loader can open the selection.
 // ---------------------------------------------------------------------------
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "mpq.hpp"
@@ -54,5 +55,40 @@ std::vector<DisplayModel> listGameObjectModels(const Dbc& displayInfo);
 // (grass/rocks) the client scatters per ground texture. Deduplicated by model,
 // .mdx normalised to .m2. `displayId` carries the source doodad id. Sorted.
 std::vector<DisplayModel> listGroundEffectModels(const Dbc& texture, const Dbc& doodad);
+
+// Runtime displayId -> model resolver. The list* functions above enumerate the
+// whole catalog for the browsers; this indexes the same resolution as an in-
+// memory map so a *server-streamed* entity (SMSG_UPDATE_OBJECT carries a
+// UNIT_FIELD_DISPLAYID / GO display id, see net/update_object.hpp) resolves to
+// its on-disk model in O(1) as objects appear. Same shape as the vanilla client
+// keeping a typed static-DBC view keyed by id (see
+// ../../WoW-RE-Research/client/alpha-053-architecture.md, DBClient WowClientDB).
+//
+// Build once from the mounted client's DBCs; queries are const and thread-safe.
+// Creatures and game objects are separate id spaces (different DBCs), so they are
+// resolved through separate calls. A miss returns an empty string.
+class DisplayResolver {
+public:
+    // Index creature display ids: CreatureDisplayInfo(displayId->modelId) joined
+    // through CreatureModelData(modelId->path). Safe to call on empty DBCs.
+    void buildCreatures(const Dbc& displayInfo, const Dbc& modelData);
+    // Index game-object display ids: GameObjectDisplayInfo(displayId->path).
+    void buildGameObjects(const Dbc& displayInfo);
+
+    // Resolve a creature / game-object display id to its archived model path
+    // (.m2 or .wmo). Returns an empty string when the id is unknown.
+    const std::string& creatureModel(uint32_t displayId) const;
+    const std::string& gameObjectModel(uint32_t displayId) const;
+
+    bool   hasCreature(uint32_t displayId) const { return creatures_.count(displayId) != 0; }
+    bool   hasGameObject(uint32_t displayId) const { return gameObjects_.count(displayId) != 0; }
+    size_t creatureCount()   const { return creatures_.size(); }
+    size_t gameObjectCount() const { return gameObjects_.size(); }
+
+private:
+    std::unordered_map<uint32_t, std::string> creatures_;
+    std::unordered_map<uint32_t, std::string> gameObjects_;
+    std::string empty_;   // returned by reference on a miss
+};
 
 } // namespace wf

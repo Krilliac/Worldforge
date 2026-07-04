@@ -214,6 +214,7 @@ int main(int argc, char** argv) {
     // Spawn catalog: resolve the client's creature/gameobject display ids to real
     // models (the engine's object->model pipeline) so the editor can place them.
     std::vector<DisplayModel> creatureModels, gameObjectModels, detailModels;
+    DisplayResolver displayResolver;   // displayId -> model, for server-streamed entities (T2.1)
     if (mpq.archiveCount() > 0) {
         Dbc cdi  = loadDbc(mpq, "CreatureDisplayInfo");
         Dbc cmd  = loadDbc(mpq, "CreatureModelData");
@@ -223,9 +224,16 @@ int main(int argc, char** argv) {
         creatureModels   = listCreatureModels(cdi, cmd);
         gameObjectModels = listGameObjectModels(godi);
         detailModels     = listGroundEffectModels(get, ged);
-        std::printf("[editor] spawn catalog: %zu creature, %zu gameobject, %zu detail models\n",
-                    creatureModels.size(), gameObjectModels.size(), detailModels.size());
+        // Same joins, indexed by display id: when a live entity arrives over the
+        // bridge with a UNIT_FIELD_DISPLAYID we resolve its model in O(1).
+        displayResolver.buildCreatures(cdi, cmd);
+        displayResolver.buildGameObjects(godi);
+        std::printf("[editor] spawn catalog: %zu creature, %zu gameobject, %zu detail models"
+                    " (resolver: %zu creature, %zu gameobject ids)\n",
+                    creatureModels.size(), gameObjectModels.size(), detailModels.size(),
+                    displayResolver.creatureCount(), displayResolver.gameObjectCount());
     }
+    (void)displayResolver;  // consumed by the live-entity model path (incremental)
     // Live day-tick (T1.2): the viewport's lighting is resolved every frame from
     // the global sky at `dayTick` (0..2880, one WoW day), so dragging the Sky
     // slider re-shades the scene and the optional auto-advance animates dawn->dusk.

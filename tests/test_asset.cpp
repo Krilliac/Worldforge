@@ -402,6 +402,35 @@ void test_asset() {
         auto detail = listGroundEffectModels(getDbc, gedDbc);
         CHECK(detail.size() == 1 && detail[0].displayId == 777);
         CHECK(detail[0].model == "Detail\\Grass01.m2");
+
+        // Runtime resolver: the same joins indexed by display id for O(1) lookup
+        // (what resolves a server-streamed entity's UNIT_FIELD_DISPLAYID).
+        DisplayResolver res;
+        res.buildCreatures(cdiDbc, cmdDbc);
+        res.buildGameObjects(godiDbc);
+        CHECK(res.creatureCount() == 1 && res.gameObjectCount() == 1);
+        CHECK(res.hasCreature(1234) && res.creatureModel(1234) == "Creature\\Cat\\Cat.m2");
+        CHECK(res.hasGameObject(42) && res.gameObjectModel(42) == "World\\wmo\\Tower.wmo");
+        // Cross-space and unknown ids miss cleanly (empty, not a wrong hit).
+        CHECK(!res.hasCreature(42) && res.creatureModel(42).empty());
+        CHECK(res.gameObjectModel(9999).empty());
+
+        // Resolver semantics match the browser list exactly (same normalisation
+        // + unresolved-skip), so no display id lists but fails to resolve.
+        for (const DisplayModel& d : listCreatureModels(cdiDbc, cmdDbc))
+            CHECK(res.creatureModel(d.displayId) == d.model);
+    }
+
+    // Empty DBCs: resolver builds to nothing and every lookup misses (no client).
+    {
+        DbcBuilder emptyCdi(5), emptyCmd(3), emptyGodi(2);
+        Dbc ec = Dbc::parse(emptyCdi.build()), em = Dbc::parse(emptyCmd.build()),
+            eg = Dbc::parse(emptyGodi.build());
+        DisplayResolver res;
+        res.buildCreatures(ec, em);
+        res.buildGameObjects(eg);
+        CHECK(res.creatureCount() == 0 && res.gameObjectCount() == 0);
+        CHECK(res.creatureModel(1).empty() && res.gameObjectModel(1).empty());
     }
 
     // --- texture decode + cache + fallback ----------------------------------
