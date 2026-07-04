@@ -53,9 +53,49 @@ void test_query() {
         CHECK(out.name.empty() && out.guid == 5 && out.race == 1 && r.remaining() == 0);
     }
 
+    // CMSG_CREATURE_QUERY: entry + instance guid.
+    {
+        std::vector<uint8_t> req = encodeCreatureQuery(299, 0xF13000000000ABCDull);
+        CHECK(req.size() == 4 + 8);
+        ByteReader r(req.data(), req.size());
+        CreatureQueryRequest q = decodeCreatureQuery(r);
+        CHECK(q.entry == 299 && q.guid == 0xF13000000000ABCDull && r.remaining() == 0);
+    }
+
+    // SMSG_CREATURE_QUERY_RESPONSE round-trip (three empty name slots + subname).
+    {
+        CreatureQueryResponse in;
+        in.entry = 68; in.name = "Hogger"; in.subName = "";
+        in.typeFlags = 0; in.creatureType = 7; in.family = 0; in.rank = 1;
+        in.petSpellData = 0; in.displayId = 448; in.civilian = false; in.racialLeader = false;
+        std::vector<uint8_t> b = encodeCreatureQueryResponse(in);
+        // 4(entry) +7("Hogger\0") +3(name2/3/4) +1(subname"\0") +7*4(u32 block) +2(flags)
+        CHECK(b.size() == 4 + 7 + 3 + 1 + 28 + 2);
+        ByteReader r(b.data(), b.size());
+        CreatureQueryResponse out = decodeCreatureQueryResponse(r);
+        CHECK(r.remaining() == 0);
+        CHECK(out.entry == 68 && out.name == "Hogger" && out.subName.empty());
+        CHECK(out.creatureType == 7 && out.rank == 1 && out.displayId == 448);
+    }
+
+    // A titled elite with a subname survives, flags decode.
+    {
+        CreatureQueryResponse in;
+        in.entry = 1234; in.name = "Stormwind Guard"; in.subName = "City Guard";
+        in.creatureType = 7; in.rank = 0; in.displayId = 3167;
+        in.civilian = true; in.racialLeader = false;
+        std::vector<uint8_t> b = encodeCreatureQueryResponse(in);
+        ByteReader r(b.data(), b.size());
+        CreatureQueryResponse out = decodeCreatureQueryResponse(r);
+        CHECK(out.name == "Stormwind Guard" && out.subName == "City Guard");
+        CHECK(out.civilian && !out.racialLeader && r.remaining() == 0);
+    }
+
     // Opcode values match the vanilla table.
     CHECK(CMSG_NAME_QUERY == 0x050);
     CHECK(SMSG_NAME_QUERY_RESPONSE == 0x051);
+    CHECK(CMSG_CREATURE_QUERY == 0x060);
+    CHECK(SMSG_CREATURE_QUERY_RESPONSE == 0x061);
 
     // CString helpers: write/read parity incl. embedded-free content.
     {

@@ -84,4 +84,76 @@ inline NameQueryResponse decodeNameQueryResponse(ByteReader& r) {
     return q;
 }
 
+// ---- CMSG_CREATURE_QUERY (client request) -----------------------------------
+// The client asks for a creature template by entry (it passes the seen instance
+// guid too, which the server uses to pick a live displayId). Both raw.
+inline std::vector<uint8_t> encodeCreatureQuery(uint32_t entry, uint64_t guid) {
+    ByteWriter w;
+    w.u32(entry);
+    w.u64(guid);
+    return w.data();
+}
+struct CreatureQueryRequest { uint32_t entry = 0; uint64_t guid = 0; };
+inline CreatureQueryRequest decodeCreatureQuery(ByteReader& r) {
+    CreatureQueryRequest q;
+    q.entry = r.u32();
+    q.guid  = r.u64();
+    return q;
+}
+
+// ---- SMSG_CREATURE_QUERY_RESPONSE -------------------------------------------
+// The CreatureTemplate the client caches for nameplates/tooltips. Vanilla layout
+// (verified vs mangos-zero QueryHandler): after the name there are THREE empty
+// name slots (name2/3/4), then the sub-name, then a block of u32s and two
+// trailing flag bytes. All the numeric fields are u32 (a vanilla trait).
+struct CreatureQueryResponse {
+    uint32_t    entry         = 0;
+    std::string name;
+    std::string subName;      // e.g. "Stormwind Guard"
+    uint32_t    typeFlags     = 0;   // CreatureTypeFlags
+    uint32_t    creatureType  = 0;   // CreatureType.dbc (beast, humanoid, ...)
+    uint32_t    family        = 0;   // CreatureFamily.dbc
+    uint32_t    rank          = 0;   // normal / elite / rare / boss
+    uint32_t    petSpellData  = 0;   // CreatureSpellData.dbc id
+    uint32_t    displayId     = 0;   // model display id
+    bool        civilian      = false;
+    bool        racialLeader  = false;
+};
+
+inline std::vector<uint8_t> encodeCreatureQueryResponse(const CreatureQueryResponse& c) {
+    ByteWriter w;
+    w.u32(c.entry);
+    writeCString(w, c.name);
+    w.u8(0); w.u8(0); w.u8(0);         // name2, name3, name4: always empty
+    writeCString(w, c.subName);
+    w.u32(c.typeFlags);
+    w.u32(c.creatureType);
+    w.u32(c.family);
+    w.u32(c.rank);
+    w.u32(0);                          // unknown (wdbField11)
+    w.u32(c.petSpellData);
+    w.u32(c.displayId);
+    w.u8(c.civilian ? 1 : 0);
+    w.u8(c.racialLeader ? 1 : 0);
+    return w.data();
+}
+
+inline CreatureQueryResponse decodeCreatureQueryResponse(ByteReader& r) {
+    CreatureQueryResponse c;
+    c.entry = r.u32();
+    c.name  = readCString(r);
+    (void)readCString(r); (void)readCString(r); (void)readCString(r);  // name2/3/4 (empty)
+    c.subName      = readCString(r);
+    c.typeFlags    = r.u32();
+    c.creatureType = r.u32();
+    c.family       = r.u32();
+    c.rank         = r.u32();
+    (void)r.u32();                     // unknown (wdbField11)
+    c.petSpellData = r.u32();
+    c.displayId    = r.u32();
+    c.civilian     = r.u8() != 0;
+    c.racialLeader = r.u8() != 0;
+    return c;
+}
+
 }  // namespace wf
