@@ -153,4 +153,23 @@ struct WmoModel {
     std::vector<WmoGroup> groups;
 };
 
+// ---- collision raycast against a group's geometry ---------------------------
+// Result of wmoRaycast: the nearest triangle the ray hits within tMax, its
+// distance `t` along the (normalised) ray, and the triangle index into the
+// group's MOVI list. `hit` is false when nothing is struck.
+struct WmoRayHit {
+    bool     hit      = false;
+    float    t        = 0.0f;   // distance along `dir` (dir assumed unit length)
+    uint32_t triangle = 0;      // MOVI triangle index of the hit face
+};
+
+// Cast a ray (origin + t*dir, t in [0, tMax]) against a WMO group's collision
+// geometry, returning the nearest hit. When the group carries a MOBN/MOBV
+// collision BSP the ray walks the tree (testing only faces in the leaves it can
+// reach); otherwise it falls back to every triangle. `dir` should be unit
+// length. This is the query the parsed-but-unused BSP existed for -- movement
+// and line-of-sight against WMO interiors, the WMO analogue of terrain picking.
+WmoRayHit wmoRaycast(const WmoGroup& group, const Vec3& origin, const Vec3& dir,
+                     float tMax);
+
 } // namespace wf

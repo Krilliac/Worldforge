@@ -262,4 +262,96 @@ WmoGroup parseWmoGroup(const std::vector<uint8_t>& buf) {
     return grp;
 }
 
+// ---- collision raycast ------------------------------------------------------
+namespace {
+
+// Moller-Trumbore ray/triangle intersection. Returns the hit distance in `t`
+// (along `dir`) for a front-or-back facing hit strictly in front of the origin.
+bool rayTriangle(const Vec3& o, const Vec3& dir, const Vec3& v0, const Vec3& v1,
+                 const Vec3& v2, float& t) {
+    const float kEps = 1e-6f;
+    Vec3 e1 = v1 - v0, e2 = v2 - v0;
+    Vec3 p = cross(dir, e2);
+    float det = dot(e1, p);
+    if (det > -kEps && det < kEps) return false;      // ray parallel to triangle
+    float inv = 1.0f / det;
+    Vec3 tv = o - v0;
+    float u = dot(tv, p) * inv;
+    if (u < 0.0f || u > 1.0f) return false;
+    Vec3 q = cross(tv, e1);
+    float v = dot(dir, q) * inv;
+    if (v < 0.0f || u + v > 1.0f) return false;
+    float tt = dot(e2, q) * inv;
+    if (tt <= kEps) return false;                     // behind / at the origin
+    t = tt;
+    return true;
+}
+
+// Fetch the three world-space vertices of MOVI triangle `tri` in `g`.
+inline bool triVerts(const WmoGroup& g, uint32_t tri, Vec3& a, Vec3& b, Vec3& c) {
+    size_t base = static_cast<size_t>(tri) * 3;
+    if (base + 2 >= g.indices.size()) return false;
+    uint16_t ia = g.indices[base], ib = g.indices[base + 1], ic = g.indices[base + 2];
+    if (ia >= g.vertices.size() || ib >= g.vertices.size() || ic >= g.vertices.size())
+        return false;
+    a = g.vertices[ia]; b = g.vertices[ib]; c = g.vertices[ic];
+    return true;
+}
+
+// Test one MOVI triangle, keeping it if nearer than the current best.
+inline void testTri(const WmoGroup& g, uint32_t tri, const Vec3& o, const Vec3& d,
+                    float tMax, WmoRayHit& best) {
+    Vec3 a, b, c;
+    if (!triVerts(g, tri, a, b, c)) return;
+    float t;
+    if (rayTriangle(o, d, a, b, c, t) && t <= tMax && (!best.hit || t < best.t)) {
+        best.hit = true; best.t = t; best.triangle = tri;
+    }
+}
+
+}  // namespace
+
+WmoRayHit wmoRaycast(const WmoGroup& g, const Vec3& origin, const Vec3& dir, float tMax) {
+    WmoRayHit best;
+
+    // No BSP (or no faces indexed by it): brute-force every triangle.
+    if (g.bspNodes.empty() || g.bspFaceIndices.empty()) {
+        uint32_t triCount = static_cast<uint32_t>(g.indices.size() / 3);
+        for (uint32_t tri = 0; tri < triCount; ++tri)
+            testTri(g, tri, origin, dir, tMax, best);
+        return best;
+    }
+
+    // Walk the collision BSP. Conservative: recurse into a child whenever the
+    // ray segment [0,tMax] can reach that child's halfspace (never prunes a
+    // reachable leaf; may visit a straddling node's both children). Correct by
+    // construction -- validated against brute force in tests.
+    const float ax0[3] = { origin.x, origin.y, origin.z };
+    const float axd[3] = { dir.x, dir.y, dir.z };
+
+    std::vector<int> stack;
+    stack.push_back(0);
+    while (!stack.empty()) {
+        int ni = stack.back(); stack.pop_back();
+        if (ni < 0 || ni >= static_cast<int>(g.bspNodes.size())) continue;
+        const WmoBspNode& n = g.bspNodes[ni];
+
+        if (n.flags & 0x4) {                          // leaf: test its faces
+            for (uint32_t f = 0; f < n.nFaces; ++f) {
+                size_t fi = n.faceStart + f;
+                if (fi < g.bspFaceIndices.size())
+                    testTri(g, g.bspFaceIndices[fi], origin, dir, tMax, best);
+            }
+            continue;
+        }
+        int axis = n.flags & 0x3;                     // 0=X, 1=Y, 2=Z split plane
+        float a = ax0[axis];
+        float b = ax0[axis] + tMax * axd[axis];
+        float lo = a < b ? a : b, hi = a < b ? b : a;
+        if (lo <  n.planeDist && n.negChild >= 0) stack.push_back(n.negChild);
+        if (hi >= n.planeDist && n.posChild >= 0) stack.push_back(n.posChild);
+    }
+    return best;
+}
+
 } // namespace wf

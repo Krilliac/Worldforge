@@ -377,4 +377,56 @@ void test_wmo() {
         try { (void)parseWmoRoot(makeWmoVer(18), prof); } catch (...) { ok = false; }
         CHECK(ok);                                           // a profile allowing v18 parses it
     }
+
+    // --- collision raycast (T2.4): brute-force, BSP, and their equivalence ---
+    {
+        // Two triangles facing -X: a "near" wall at x=10, a "far" wall at x=50.
+        WmoGroup g;
+        g.vertices = {
+            {10,-5,-5}, {10,5,-5}, {10,0,5},     // tri 0 (near)
+            {50,-5,-5}, {50,5,-5}, {50,0,5},     // tri 1 (far)
+        };
+        g.indices = { 0,1,2, 3,4,5 };            // MOVI: tri0 = 0..2, tri1 = 3..5
+
+        Vec3 X{1,0,0}, Y{0,1,0};
+
+        // Brute-force path (no BSP): nearest wall wins, back-facing ones ignored.
+        WmoRayHit h0 = wmoRaycast(g, Vec3{0,0,0}, X, 100.0f);
+        CHECK(h0.hit && h0.triangle == 0);
+        CHECK_APPROX(h0.t, 10.0f);
+
+        WmoRayHit h1 = wmoRaycast(g, Vec3{20,0,0}, X, 100.0f);   // past the near wall
+        CHECK(h1.hit && h1.triangle == 1);
+        CHECK_APPROX(h1.t, 30.0f);
+
+        WmoRayHit miss = wmoRaycast(g, Vec3{0,0,0}, Y, 100.0f);  // nothing faces +Y
+        CHECK(!miss.hit);
+
+        WmoRayHit shortRay = wmoRaycast(g, Vec3{0,0,0}, X, 5.0f); // wall beyond tMax
+        CHECK(!shortRay.hit);
+
+        // Same geometry with a collision BSP: X-split at 30 -> tri0 neg, tri1 pos.
+        WmoGroup gb = g;
+        gb.bspFaceIndices = { 0, 1 };            // MOBV: face0->tri0, face1->tri1
+        WmoBspNode root; root.flags = 0; root.planeDist = 30.0f; root.negChild = 1; root.posChild = 2;
+        WmoBspNode leafN; leafN.flags = 4; leafN.faceStart = 0; leafN.nFaces = 1;
+        WmoBspNode leafP; leafP.flags = 4; leafP.faceStart = 1; leafP.nFaces = 1;
+        gb.bspNodes = { root, leafN, leafP };
+
+        // BSP path reproduces the brute-force answers exactly...
+        CHECK(wmoRaycast(gb, Vec3{0,0,0}, X, 100.0f).triangle == 0);
+        CHECK(wmoRaycast(gb, Vec3{20,0,0}, X, 100.0f).triangle == 1);
+        CHECK(!wmoRaycast(gb, Vec3{0,0,0}, Y, 100.0f).hit);
+
+        // ...and agrees with brute force over a sweep of ray origins (this is
+        // what pins the conservative BSP traversal to correct pruning).
+        for (int i = 0; i < 60; ++i) {
+            Vec3 o{ float(i) - 5.0f, 0, 0 };
+            WmoRayHit brute = wmoRaycast(g,  o, X, 100.0f);
+            WmoRayHit viabsp = wmoRaycast(gb, o, X, 100.0f);
+            CHECK(brute.hit == viabsp.hit);
+            if (brute.hit) { CHECK(brute.triangle == viabsp.triangle);
+                             CHECK_APPROX(brute.t, viabsp.t); }
+        }
+    }
 }
