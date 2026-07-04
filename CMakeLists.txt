@@ -153,6 +153,7 @@ add_executable(wforge-tests
   tests/test_movement.cpp
   tests/test_query.cpp
   tests/test_query_cache.cpp
+  tests/test_chat.cpp
   tests/test_render.cpp
   tests/test_asset.cpp
   tests/test_placement_io.cpp

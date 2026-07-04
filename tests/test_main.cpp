@@ -33,6 +33,7 @@ void test_minimap();
 void test_movement();
 void test_query();
 void test_query_cache();
+void test_chat();
 void test_render();
 void test_asset();
 void test_placement_io();
@@ -85,6 +86,7 @@ int main() {
     test_movement();
     test_query();
     test_query_cache();
+    test_chat();
     test_render();
     test_asset();
     test_placement_io();

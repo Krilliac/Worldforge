@@ -38,6 +38,10 @@ enum Opcode : uint32_t {
     CMSG_GAMEOBJECT_QUERY         = 0x05E,
     SMSG_GAMEOBJECT_QUERY_RESPONSE = 0x05F,
 
+    // Chat
+    CMSG_MESSAGECHAT              = 0x095,
+    SMSG_MESSAGECHAT             = 0x096,
+
     // Player movement (MSG_* = same opcode both ways: client sends its own move,
     // server relays other players'). Vanilla 1.12.1 values, cross-checked vs
     // cmangos / mangos-zero Opcodes.h. Each body is a MovementInfo; the server
