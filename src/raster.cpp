@@ -150,8 +150,10 @@ void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
 }
 
 void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
-                   const Image& tex, const ShadeLight& light, bool alphaBlend) {
+                   const Image& tex, const ShadeLight& light, bool alphaBlend, float alphaMul) {
     int W = fb.color.width, H = fb.color.height;
+    if (alphaMul < 0.0f) alphaMul = 0.0f;
+    if (alphaMul > 1.0f) alphaMul = 1.0f;
     Vec3 L = normalize(light.dir);
 
     struct VOut { Vec4 clip; bool valid; };
@@ -217,7 +219,9 @@ void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                 c.b = clamp8(texel.b * lf.z);
                 if (alphaBlend) {
                     // Composite over the framebuffer; translucent -> no depth write.
-                    float a = texel.a / 255.0f;
+                    // alphaMul fades the whole object (distance fade) atop the
+                    // texel's own alpha.
+                    float a = (texel.a / 255.0f) * alphaMul;
                     Rgba& d = fb.color.at(px, py);
                     d.r = clamp8(c.r * a + d.r * (1.0f - a));
                     d.g = clamp8(c.g * a + d.g * (1.0f - a));

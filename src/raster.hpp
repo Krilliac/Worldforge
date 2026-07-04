@@ -78,9 +78,13 @@ Rgba sampleTextureWrap(const Image& tex, float u, float v);
 // it is the opaque alpha-tested path.
 void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                    const Image& texture, Vec3 lightDir, bool alphaBlend = false);
-// Coloured-light overload.
+// Coloured-light overload. `alphaMul` (default 1) scales the composite alpha in
+// the blended path -- used for whole-object distance fade (draw an instance at,
+// e.g., 0.4 opacity near its cull edge). It only takes effect when alphaBlend is
+// true; at alphaMul 1 the behaviour is unchanged.
 void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
-                   const Image& texture, const ShadeLight& light, bool alphaBlend = false);
+                   const Image& texture, const ShadeLight& light, bool alphaBlend = false,
+                   float alphaMul = 1.0f);
 
 // Render an untextured mesh as a single flat-tinted, alpha-blended surface --
 // the translucent liquid pass (ADT MCLQ water/ocean/magma/slime). `tint` is the

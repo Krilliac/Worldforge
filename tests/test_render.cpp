@@ -147,6 +147,24 @@ void test_render() {
         CHECK(countLit(true, {0,0,400}) == 0);    // culled
         CHECK(countLit(true, {0,0,50})  == base); // within doodadFade -> unchanged
 
+        // Soft fade: at 250 yd (doodadFade 200 .. doodadCull 300 -> alpha 0.5) the
+        // instance is still drawn but blended dimmer over the background.
+        auto sumRed = [&](bool cull, Vec3 camPos) {
+            Framebuffer fb(64,64);
+            fb.clear(Rgba{10,10,14,255});
+            scene.cullObjects = cull;
+            scene.cameraPos   = camPos;
+            renderScene(fb, scene, proj * view);
+            long s = 0;
+            for (const Rgba& p : fb.color.pixels) s += p.r;
+            return s;
+        };
+        const long bgRed  = 64L * 64L * 10;        // all-background red floor
+        long opaqueRed = sumRed(true, {0,0,50});   // alpha 1
+        long fadedRed  = sumRed(true, {0,0,250});  // alpha 0.5
+        CHECK(fadedRed < opaqueRed);               // dimmer than full opacity
+        CHECK(fadedRed > bgRed + 100);             // but still visibly present
+
         // A WMO at the same 400 yd survives (wmoCull 1000 is much farther).
         scene.instances[0].isWmo = true;
         CHECK(countLit(true, {0,0,400}) == base);

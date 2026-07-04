@@ -18,7 +18,12 @@ void renderScene(Framebuffer& fb, const Scene& scene, const Mat4& viewProj) {
             Vec3 wp{ inst.transform.at(0, 3), inst.transform.at(1, 3), inst.transform.at(2, 3) };
             float d = length(scene.cameraPos - wp);
             float a = inst.isWmo ? wmoAlpha(d, scene.drawDist) : doodadAlpha(d, scene.drawDist);
-            if (a <= 0.0f) continue;   // beyond the kind's draw distance -> skip
+            if (a <= 0.0f) continue;                     // beyond draw distance -> skip
+            if (a < 1.0f) {                              // in the fade band -> soft fade
+                rasterTexMesh(fb, *inst.mesh, viewProj * inst.transform, *inst.texture,
+                              sl, /*alphaBlend*/ true, /*alphaMul*/ a);
+                continue;
+            }
         }
         rasterTexMesh(fb, *inst.mesh, viewProj * inst.transform, *inst.texture, sl);
     }
