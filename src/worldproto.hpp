@@ -29,6 +29,30 @@ enum Opcode : uint32_t {
     SMSG_UPDATE_OBJECT  = 0x0A9,
     SMSG_MONSTER_MOVE   = 0x0DD,
 
+    // Player movement (MSG_* = same opcode both ways: client sends its own move,
+    // server relays other players'). Vanilla 1.12.1 values, cross-checked vs
+    // cmangos / mangos-zero Opcodes.h. Each body is a MovementInfo; the server
+    // relay form prepends the mover's packed guid (see net/movement.hpp).
+    MSG_MOVE_START_FORWARD       = 0x0B5,
+    MSG_MOVE_START_BACKWARD      = 0x0B6,
+    MSG_MOVE_STOP                = 0x0B7,
+    MSG_MOVE_START_STRAFE_LEFT   = 0x0B8,
+    MSG_MOVE_START_STRAFE_RIGHT  = 0x0B9,
+    MSG_MOVE_STOP_STRAFE         = 0x0BA,
+    MSG_MOVE_JUMP                = 0x0BB,
+    MSG_MOVE_START_TURN_LEFT     = 0x0BC,
+    MSG_MOVE_START_TURN_RIGHT    = 0x0BD,
+    MSG_MOVE_STOP_TURN           = 0x0BE,
+    MSG_MOVE_START_PITCH_UP      = 0x0BF,
+    MSG_MOVE_START_PITCH_DOWN    = 0x0C0,
+    MSG_MOVE_STOP_PITCH          = 0x0C1,
+    MSG_MOVE_SET_RUN_MODE        = 0x0C2,
+    MSG_MOVE_SET_WALK_MODE       = 0x0C3,
+    MSG_MOVE_FALL_LAND           = 0x0C9,
+    MSG_MOVE_SET_FACING          = 0x0DA,
+    MSG_MOVE_SET_PITCH           = 0x0DB,
+    MSG_MOVE_HEARTBEAT           = 0x0EE,
+
     // "The client already knows how to render it" server opcodes -- spectacle /
     // atmosphere / HUD that need only an id or a short body. Values verified for
     // build 5875 against mangos-zero and cmangos Opcodes.h. Builders in
