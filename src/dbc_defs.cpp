@@ -145,4 +145,39 @@ std::string normalizeModelPath(const std::string& dbcPath) {
     return dbcPath;
 }
 
+CharHairGeosetEntry charHairGeosetEntry(const Dbc& dbc, uint32_t rec) {
+    CharHairGeosetEntry e;
+    e.id        = dbc.getU32(rec, 0);
+    e.raceId    = dbc.getU32(rec, 1);
+    e.sexId     = dbc.getU32(rec, 2);
+    e.variation = dbc.getU32(rec, 3);
+    e.geosetId  = dbc.getU32(rec, 4);
+    e.showScalp = dbc.getU32(rec, 5) != 0;
+    return e;
+}
+
+void HairGeosetResolver::build(const Dbc& dbc) {
+    for (uint32_t r = 0; r < dbc.recordCount(); ++r) {
+        CharHairGeosetEntry e = charHairGeosetEntry(dbc, r);
+        byKey_[key(e.raceId, e.sexId, e.variation)] = e;
+    }
+}
+
+int HairGeosetResolver::hairGeoset(uint32_t race, uint32_t sex, uint32_t variation) const {
+    auto it = byKey_.find(key(race, sex, variation));
+    return it == byKey_.end() ? -1 : static_cast<int>(it->second.geosetId);
+}
+
+bool HairGeosetResolver::showScalp(uint32_t race, uint32_t sex, uint32_t variation) const {
+    auto it = byKey_.find(key(race, sex, variation));
+    return it != byKey_.end() && it->second.showScalp;
+}
+
+uint32_t HairGeosetResolver::variationCount(uint32_t race, uint32_t sex) const {
+    uint32_t n = 0;
+    for (const auto& kv : byKey_)
+        if (kv.second.raceId == race && kv.second.sexId == sex) ++n;
+    return n;
+}
+
 } // namespace wf

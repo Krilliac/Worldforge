@@ -100,8 +100,24 @@ struct GroundEffectTextureEntry {
     uint32_t density = 0;               // field 9 (VERIFY-FLAGGED)
 };
 
+// CharHairGeosets.dbc entry. Layout confirmed against the owned 1.12.1 client
+// (148 records x 6 fields x 24 bytes; sample rec0 = id 241, race 9, sex 0,
+// variation 0, geoset 1, showScalp 0). Maps a (race, sex, hair-style variation)
+// to the M2 geoset (skin-section) id to enable for that hair -- the hair sits in
+// geoset group 0 (ids 1..99), which composes with T2.2 selectGeosets (base id 0
+// always shown + the chosen hair geoset).
+struct CharHairGeosetEntry {
+    uint32_t id        = 0;   // field 0
+    uint32_t raceId    = 0;   // field 1
+    uint32_t sexId     = 0;   // field 2 (0 = male, 1 = female)
+    uint32_t variation = 0;   // field 3 (hair-style index)
+    uint32_t geosetId  = 0;   // field 4 (M2 geoset id to show for this hair)
+    bool     showScalp = false; // field 5 (bald scalp vs hair mesh)
+};
+
 // Typed accessors. `rec` is a 0-based record index in `[0, dbc.recordCount())`.
 MapEntry        mapEntry(const Dbc& dbc, uint32_t rec);
+CharHairGeosetEntry charHairGeosetEntry(const Dbc& dbc, uint32_t rec);
 AreaEntry       areaEntry(const Dbc& dbc, uint32_t rec);
 LiquidTypeEntry liquidTypeEntry(const Dbc& dbc, uint32_t rec);
 LightEntry      lightEntry(const Dbc& dbc, uint32_t rec);
@@ -110,6 +126,28 @@ CreatureDisplayInfoEntry   creatureDisplayInfoEntry(const Dbc& dbc, uint32_t rec
 GameObjectDisplayInfoEntry gameObjectDisplayInfoEntry(const Dbc& dbc, uint32_t rec);
 GroundEffectDoodadEntry    groundEffectDoodadEntry(const Dbc& dbc, uint32_t rec);
 GroundEffectTextureEntry   groundEffectTextureEntry(const Dbc& dbc, uint32_t rec);
+
+// Index over CharHairGeosets.dbc: resolve a character's (race, sex, hair-style
+// variation) to the hair geoset id to enable (T3.3 character assembly, built on
+// the T2.2 geoset model). Build once from the parsed DBC; a miss returns -1.
+class HairGeosetResolver {
+public:
+    void build(const Dbc& charHairGeosets);
+    // Hair geoset id for (race, sex, variation), or -1 if absent. The caller adds
+    // this id to the character M2's visible geoset set (group 0 = hair).
+    int hairGeoset(uint32_t race, uint32_t sex, uint32_t variation) const;
+    // showScalp flag for the same key (false if absent) -- a bald/scalp variation.
+    bool showScalp(uint32_t race, uint32_t sex, uint32_t variation) const;
+    // Number of distinct hair-style variations for (race, sex) -- for a UI/count.
+    uint32_t variationCount(uint32_t race, uint32_t sex) const;
+    size_t size() const { return byKey_.size(); }
+
+private:
+    static uint64_t key(uint32_t race, uint32_t sex, uint32_t variation) {
+        return (uint64_t(race) << 40) | (uint64_t(sex) << 32) | variation;
+    }
+    std::unordered_map<uint64_t, CharHairGeosetEntry> byKey_;
+};
 
 // Normalise a DBC model path to the on-disk file: vanilla DBCs reference models
 // with a .mdx (or .mdl) extension but the archive stores .m2 (MD20). Replaces a

@@ -1,5 +1,6 @@
 #include "test.hpp"
 #include "dbc_defs.hpp"
+#include "m2.hpp"          // M2Submesh / selectGeosets (T3.3 geoset composition)
 #include "gridmap.hpp"
 #include "navmesh.hpp"
 #include "vmap.hpp"
@@ -188,6 +189,49 @@ void test_dbc_defs() {
     CHECK(normalizeModelPath("X\\Y.mdx") == "X\\Y.m2");
     CHECK(normalizeModelPath("a.MDL") == "a.m2");
     CHECK(normalizeModelPath("z.wmo") == "z.wmo");
+
+    // --- CharHairGeosets (T3.3): typed read + resolver ----------------------
+    // Layout matches the real 1.12.1 client (6 fields x 24 bytes):
+    // id, race, sex, variation, geosetId, showScalp.
+    {
+        DbcBuilder chg(6);
+        chg.addRecord({ 241, 1, 0, 0, 1, 0 });   // Human male, style 0 -> geoset 1
+        chg.addRecord({ 242, 1, 0, 1, 5, 1 });   // Human male, style 1 -> geoset 5, scalp
+        chg.addRecord({ 300, 1, 1, 0, 2, 0 });   // Human female, style 0 -> geoset 2
+        chg.addRecord({ 301, 3, 0, 0, 7, 0 });   // Dwarf male, style 0 -> geoset 7
+        Dbc dbc = Dbc::parse(chg.build());
+
+        CharHairGeosetEntry e = charHairGeosetEntry(dbc, 1);
+        CHECK(e.id == 242 && e.raceId == 1 && e.sexId == 0 && e.variation == 1);
+        CHECK(e.geosetId == 5 && e.showScalp);
+
+        HairGeosetResolver res;
+        res.build(dbc);
+        CHECK(res.size() == 4);
+        CHECK(res.hairGeoset(1, 0, 0) == 1);        // Human male style 0
+        CHECK(res.hairGeoset(1, 0, 1) == 5);        // Human male style 1
+        CHECK(res.showScalp(1, 0, 1));              // that one shows scalp
+        CHECK(!res.showScalp(1, 0, 0));
+        CHECK(res.hairGeoset(1, 1, 0) == 2);        // Human female (distinct sex key)
+        CHECK(res.hairGeoset(3, 0, 0) == 7);        // Dwarf male
+        CHECK(res.hairGeoset(1, 0, 9) == -1);       // unknown variation -> miss
+        CHECK(res.hairGeoset(9, 0, 0) == -1);       // unknown race -> miss
+        CHECK(res.variationCount(1, 0) == 2);       // Human male has 2 styles here
+        CHECK(res.variationCount(1, 1) == 1);
+
+        // The resolved hair geoset composes with T2.2 selectGeosets: hair is
+        // geoset group 0, so the chosen hair id is added alongside the base (0).
+        std::vector<M2Submesh> subs;
+        auto mk = [](uint16_t id){ M2Submesh s; s.id = id; return s; };
+        subs.push_back(mk(0));                       // base skin
+        subs.push_back(mk(1));                       // hair geoset 1
+        subs.push_back(mk(5));                       // hair geoset 5
+        int hair = res.hairGeoset(1, 0, 1);          // -> 5
+        // Select base + only the chosen hair variation (group 0, variation = id).
+        std::unordered_map<uint16_t, uint16_t> chosen{ { 0, (uint16_t)hair } };
+        std::vector<uint32_t> vis = selectGeosets(subs, chosen);
+        CHECK((vis == std::vector<uint32_t>{ 0, 2 }));   // base (idx0) + hair id 5 (idx2)
+    }
 }
 
 void test_gridmap() {
