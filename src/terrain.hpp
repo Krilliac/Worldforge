@@ -106,6 +106,23 @@ struct MapChunk {
 // Returns false when the chunk carries no shadow map (out-of-range too).
 bool shadowAt(const MapChunk& mc, int row, int col);
 
+// Resolve a chunk's MCRF reference indices (mc.doodadRefs / mc.wmoRefs) into
+// pointers to the referenced ADT placement entries (MDDF DoodadDef / MODF
+// WmoDef, from the parsed Adt). Out-of-range indices are skipped. MCRF is how a
+// chunk names *which* of the tile's placements fall in it -- the basis for
+// per-chunk culling / "what's in this chunk" selection, rather than testing
+// every tile placement against every chunk. Generic so it serves both ref lists
+// without coupling terrain.hpp to the ADT placement types.
+template <class Def>
+std::vector<const Def*> resolveChunkRefs(const std::vector<uint32_t>& refs,
+                                         const std::vector<Def>& defs) {
+    std::vector<const Def*> out;
+    out.reserve(refs.size());
+    for (uint32_t i : refs)
+        if (i < defs.size()) out.push_back(&defs[i]);
+    return out;
+}
+
 struct Vertex {
     Vec3 position;   // world space
     Vec3 normal;

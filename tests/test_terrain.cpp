@@ -526,4 +526,25 @@ void test_terrain() {
             CHECK(std::fabs(std::sqrt(n.x*n.x + n.y*n.y + n.z*n.z) - 1.0f) < 1e-3f);
         }
     }
+
+    // --- MCRF reference resolution (resolveChunkRefs) -----------------------
+    {
+        // Stand-in placement list; refs index into it. (Generic over the entry
+        // type, so the same code serves MDDF DoodadDef and MODF WmoDef.)
+        std::vector<int> defs = { 100, 101, 102, 103 };
+        MapChunk mc;
+        mc.doodadRefs = { 0, 2, 3 };                 // valid indices
+        auto got = resolveChunkRefs(mc.doodadRefs, defs);
+        CHECK(got.size() == 3);
+        CHECK(*got[0] == 100 && *got[1] == 102 && *got[2] == 103);
+
+        // Out-of-range indices are skipped, not dereferenced.
+        mc.wmoRefs = { 1, 9, 3, 4 };                 // 9 and 4 are past the end
+        auto gw = resolveChunkRefs(mc.wmoRefs, defs);
+        CHECK(gw.size() == 2 && *gw[0] == 101 && *gw[1] == 103);
+
+        // Empty refs -> empty result; the returned pointers alias `defs`.
+        CHECK(resolveChunkRefs(std::vector<uint32_t>{}, defs).empty());
+        CHECK(got[0] == &defs[0]);
+    }
 }
