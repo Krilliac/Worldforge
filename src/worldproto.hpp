@@ -29,6 +29,11 @@ enum Opcode : uint32_t {
     SMSG_UPDATE_OBJECT  = 0x0A9,
     SMSG_MONSTER_MOVE   = 0x0DD,
 
+    // Entity query / client-side cache (the alpha DBClient "DBCache" path): the
+    // client asks the server to resolve a GUID/entry it doesn't know yet.
+    CMSG_NAME_QUERY            = 0x050,
+    SMSG_NAME_QUERY_RESPONSE   = 0x051,
+
     // Player movement (MSG_* = same opcode both ways: client sends its own move,
     // server relays other players'). Vanilla 1.12.1 values, cross-checked vs
     // cmangos / mangos-zero Opcodes.h. Each body is a MovementInfo; the server

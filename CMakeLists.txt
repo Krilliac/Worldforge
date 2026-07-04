@@ -151,6 +151,7 @@ add_executable(wforge-tests
   tests/test_world_socket.cpp
   tests/test_minimap.cpp
   tests/test_movement.cpp
+  tests/test_query.cpp
   tests/test_render.cpp
   tests/test_asset.cpp
   tests/test_placement_io.cpp

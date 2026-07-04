@@ -31,6 +31,7 @@ void test_net();
 void test_world_socket();
 void test_minimap();
 void test_movement();
+void test_query();
 void test_render();
 void test_asset();
 void test_placement_io();
@@ -81,6 +82,7 @@ int main() {
     test_world_socket();
     test_minimap();
     test_movement();
+    test_query();
     test_render();
     test_asset();
     test_placement_io();
