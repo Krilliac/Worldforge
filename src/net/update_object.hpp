@@ -138,7 +138,12 @@ inline uint8_t readMovementBlock(ByteReader& r, ObjectUpdate& o) {
         o.hasPosition = true;
 
         if (moveFlags & MOVEFLAG_ONTRANSPORT) {
-            readPackedGuid(r);                     // transport guid
+            r.u64();                               // transport guid: RAW u64 in
+                                                   // 1.12.1 (packed-guid transport
+                                                   // is a 2.x+ change). See
+                                                   // net/movement.hpp readMovementInfo,
+                                                   // the shared codec this should
+                                                   // later delegate to (DRY).
             r.f32(); r.f32(); r.f32(); r.f32();    // transport offset x,y,z,o
             r.u32();                               // transport time
         }

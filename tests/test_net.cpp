@@ -302,6 +302,50 @@ void test_net() {
         CHECK_APPROX(so.radius, 1.5f);   // scale folded into bounding radius
     }
 
+    // ---- SMSG_UPDATE_OBJECT: LIVING + ONTRANSPORT. The transport guid is a
+    //      RAW u64 in 1.12.1 (not packed); this fixes a latent bug. A value
+    //      field decoded AFTER the movement block only lands correctly if the
+    //      transport guid consumed exactly 8 bytes, so this pins the alignment.
+    {
+        ByteWriter w;
+        w.u32(1);
+        w.u8(0);
+        w.u8((uint8_t)UpdateType::CREATE_OBJECT2);
+        uint64_t guid = 0x11ull;
+        w.u8(0x01); w.u8(0x11);            // packed guid 0x11
+        w.u8((uint8_t)ObjectType::UNIT);
+
+        w.u8(UPDATEFLAG_LIVING);
+        w.u32(MOVEFLAG_ONTRANSPORT);       // on a transport
+        w.u32(999);                        // time
+        w.f32(10.0f); w.f32(20.0f); w.f32(30.0f);  // pos
+        w.f32(1.0f);                       // orientation
+        w.u64(0xDEADBEEFCAFEull);          // transport guid (RAW u64)
+        w.f32(1); w.f32(2); w.f32(3); w.f32(4);    // transport offset x,y,z,o
+        w.u32(50);                         // transport time
+        w.f32(0.0f);                       // fall time
+        for (int i = 0; i < 6; ++i) w.f32(7.0f);   // 6 speeds
+
+        // A single value field after the movement block: if the transport guid
+        // were misread as a packed guid (wrong byte count) this would desync.
+        {
+            uint8_t blocks = 1;
+            uint32_t mask = 0;
+            mask |= (1u << OBJECT_FIELD_ENTRY);
+            w.u8(blocks);
+            w.u32(mask);
+            w.u32(777);                    // entry
+        }
+
+        auto result = decodeUpdateObject(w.take());
+        CHECK(result.objects.size() == 1);
+        const ObjectUpdate& o = result.objects[0];
+        CHECK(o.guid == guid && o.hasPosition);
+        CHECK_APPROX(o.pos.x, 10.0f);
+        CHECK_APPROX(o.orientation, 1.0f);
+        CHECK(o.entry == 777);             // aligned: raw-u64 transport guid
+    }
+
     // ---- SMSG_UPDATE_OBJECT: OUT_OF_RANGE_OBJECTS yields leaving guids.
     {
         ByteWriter w;
