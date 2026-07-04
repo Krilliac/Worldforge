@@ -530,4 +530,66 @@ std::vector<Bone> buildBonesForAnimation(const M2Animation& anim, int animIndex)
     return bones;
 }
 
+// ---- material blend modes ---------------------------------------------------
+M2RasterState resolveM2Material(M2BlendMode blend, uint16_t flags) {
+    M2RasterState s;
+    switch (blend) {
+        case M2BlendMode::Opaque:
+            break;                                   // defaults: opaque, writeDepth
+        case M2BlendMode::AlphaKey:
+            s.alphaTest = true;                      // cutout, still writes depth
+            break;
+        case M2BlendMode::Alpha:
+        case M2BlendMode::Mod:
+        case M2BlendMode::Mod2x:
+            s.alphaBlend = true;
+            s.writeDepth = false;
+            break;
+        case M2BlendMode::Add:
+        case M2BlendMode::BlendAdd:
+            s.alphaBlend = true;
+            s.emissive   = true;                     // additive glow: ignore lighting
+            s.writeDepth = false;
+            break;
+        default:                                     // unknown -> safe opaque
+            break;
+    }
+    s.unlit    = (flags & M2RF_UNLIT) != 0 || s.emissive;
+    s.twoSided = (flags & M2RF_TWO_SIDED) != 0;
+    if (flags & M2RF_NO_ZWRITE) s.writeDepth = false;
+    return s;
+}
+
+// ---- geoset selection -------------------------------------------------------
+M2GeosetId decodeGeosetId(uint16_t submeshId) {
+    M2GeosetId g;
+    g.base      = (submeshId == 0);
+    g.group     = static_cast<uint16_t>(submeshId / 100);
+    g.variation = static_cast<uint16_t>(submeshId % 100);
+    return g;
+}
+
+std::vector<uint32_t> selectGeosets(const std::vector<M2Submesh>& submeshes,
+                                    const std::unordered_map<uint16_t, uint16_t>& chosen) {
+    // Default variation per group = the lowest variation present, so a model with
+    // no explicit choice draws a deterministic "first look".
+    std::unordered_map<uint16_t, uint16_t> lowest;
+    for (const M2Submesh& s : submeshes) {
+        if (s.id == 0) continue;
+        M2GeosetId g = decodeGeosetId(s.id);
+        auto it = lowest.find(g.group);
+        if (it == lowest.end() || g.variation < it->second) lowest[g.group] = g.variation;
+    }
+    std::vector<uint32_t> out;
+    for (uint32_t i = 0; i < submeshes.size(); ++i) {
+        const M2Submesh& s = submeshes[i];
+        if (s.id == 0) { out.push_back(i); continue; }   // base skin: always drawn
+        M2GeosetId g = decodeGeosetId(s.id);
+        auto it = chosen.find(g.group);
+        uint16_t want = (it != chosen.end()) ? it->second : lowest[g.group];
+        if (g.variation == want) out.push_back(i);
+    }
+    return out;
+}
+
 } // namespace wf

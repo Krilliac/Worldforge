@@ -52,6 +52,28 @@ TexMesh skinM2(const M2Model& model, const std::vector<Mat4>& pose) {
     return mesh;
 }
 
+TexMesh skinM2Geosets(const M2Model& model, const std::vector<Mat4>& pose,
+                      const std::unordered_map<uint16_t, uint16_t>& chosen) {
+    TexMesh mesh = skinM2(model, pose);         // full skinned vertices + all indices
+    if (model.submeshes.empty()) return mesh;   // no geosets: draw everything
+
+    // Rebuild the index list from only the chosen submeshes' triangle ranges.
+    std::vector<uint32_t> sel = selectGeosets(model.submeshes, chosen);
+    std::vector<uint32_t> idx;
+    for (uint32_t si : sel) {
+        const M2Submesh& s = model.submeshes[si];
+        for (uint32_t k = 0; k < s.indexCount; ++k) {
+            uint32_t t = static_cast<uint32_t>(s.indexStart) + k;
+            if (t >= model.triangles.size()) break;
+            uint16_t vi = model.triangles[t];
+            if (vi < mesh.vertices.size()) idx.push_back(vi);
+        }
+    }
+    idx.resize(idx.size() - (idx.size() % 3));
+    mesh.indices = std::move(idx);
+    return mesh;
+}
+
 TexMesh poseM2(const M2Model& model, const M2Animation& anim, int animIndex, uint32_t tMs) {
     if (animIndex < 0 || animIndex >= (int)anim.sequences.size() || anim.bones.empty())
         return skinM2(model, {});                       // static bind pose

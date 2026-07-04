@@ -7,6 +7,7 @@
 // identity / empty pose it yields the static bind-pose mesh. UVs come straight
 // from the model, so the textured rasteriser can shade it with its BLP.
 // ---------------------------------------------------------------------------
+#include <unordered_map>
 #include <vector>
 
 #include "math.hpp"
@@ -17,8 +18,17 @@ namespace wf {
 
 // Skin view 0 of `model` with `bonePose` (world-space bone matrices from
 // computePose; pass an empty vector for the static bind pose). Returns a TexMesh
-// in model-local space; the caller applies the placement transform.
+// in model-local space; the caller applies the placement transform. Draws every
+// submesh (all geosets).
 TexMesh skinM2(const M2Model& model, const std::vector<Mat4>& bonePose);
+
+// Skin only the selected geosets: same skinned vertex pool as skinM2, but the
+// index list is limited to the submeshes selectGeosets() picks for `chosen`
+// (base skin + one variation per group). A model with no submeshes falls back to
+// drawing everything (identical to skinM2), so this is safe on creature models
+// that carry a single geoset. See m2.hpp selectGeosets / decodeGeosetId.
+TexMesh skinM2Geosets(const M2Model& model, const std::vector<Mat4>& bonePose,
+                      const std::unordered_map<uint16_t, uint16_t>& chosen = {});
 
 // Convenience: sample the model's animation `animIndex` at time `tMs` and skin.
 // (Builds the bones for that sequence and composes the pose.)

@@ -207,4 +207,89 @@ void test_m2_material() {
         CHECK_APPROX(a2.textureWeights[0].weight.values[0], -16384.0f/32767.0f);
         CHECK(a2.textureWeights[0].weight.values[0] < 0.0f);
     }
+
+    // --- blend-mode -> raster state (T2.2) ----------------------------------
+    {
+        M2RasterState op = resolveM2Material(M2BlendMode::Opaque, 0);
+        CHECK(!op.alphaTest && !op.alphaBlend && !op.emissive && op.writeDepth);
+
+        M2RasterState ak = resolveM2Material(M2BlendMode::AlphaKey, 0);
+        CHECK(ak.alphaTest && !ak.alphaBlend && ak.writeDepth);      // cutout writes depth
+
+        M2RasterState al = resolveM2Material(M2BlendMode::Alpha, 0);
+        CHECK(al.alphaBlend && !al.writeDepth && !al.emissive);      // translucent, no z-write
+
+        for (M2BlendMode add : { M2BlendMode::Add, M2BlendMode::BlendAdd }) {
+            M2RasterState a = resolveM2Material(add, 0);
+            CHECK(a.alphaBlend && a.emissive && a.unlit && !a.writeDepth);
+        }
+        for (M2BlendMode mod : { M2BlendMode::Mod, M2BlendMode::Mod2x }) {
+            M2RasterState m = resolveM2Material(mod, 0);
+            CHECK(m.alphaBlend && !m.emissive && !m.writeDepth);
+        }
+
+        // Flag bits: unlit / two-sided / forced no-z-write on an opaque material.
+        M2RasterState f = resolveM2Material(M2BlendMode::Opaque,
+                                            M2RF_UNLIT | M2RF_TWO_SIDED | M2RF_NO_ZWRITE);
+        CHECK(f.unlit && f.twoSided && !f.writeDepth);
+        // Unknown blend value falls back to opaque, not garbage.
+        M2RasterState u = resolveM2Material(static_cast<M2BlendMode>(99), 0);
+        CHECK(!u.alphaBlend && !u.alphaTest && u.writeDepth);
+    }
+
+    // --- geoset id decode + selection (T2.2) --------------------------------
+    {
+        CHECK(decodeGeosetId(0).base);
+        M2GeosetId g1 = decodeGeosetId(101);   // group 1, variation 1
+        CHECK(!g1.base && g1.group == 1 && g1.variation == 1);
+        M2GeosetId g2 = decodeGeosetId(702);   // group 7, variation 2
+        CHECK(g2.group == 7 && g2.variation == 2);
+
+        std::vector<M2Submesh> subs;
+        auto mk = [](uint16_t id) { M2Submesh s; s.id = id; return s; };
+        subs.push_back(mk(0));      // 0: base skin      (idx 0)
+        subs.push_back(mk(101));    // 1: group1 var1    (idx 1)
+        subs.push_back(mk(102));    // 2: group1 var2    (idx 2)
+        subs.push_back(mk(201));    // 3: group2 var1    (idx 3)
+
+        // Default: base + lowest variation of each group -> {0,101,201}.
+        std::vector<uint32_t> def = selectGeosets(subs, {});
+        CHECK((def == std::vector<uint32_t>{0, 1, 3}));
+
+        // Choose group1 variation 2 -> {0,102,201}; group2 unspecified -> its lowest.
+        std::vector<uint32_t> pick = selectGeosets(subs, { {1, 2} });
+        CHECK((pick == std::vector<uint32_t>{0, 2, 3}));
+
+        // Choosing a variation that doesn't exist drops that group entirely
+        // (only base + other groups' defaults remain).
+        std::vector<uint32_t> miss = selectGeosets(subs, { {1, 9} });
+        CHECK((miss == std::vector<uint32_t>{0, 3}));
+    }
+
+    // --- skinM2Geosets filters triangles by selected submesh ----------------
+    {
+        // Two submeshes over 6 vertices / 2 triangles: submesh id 0 (tri 0),
+        // submesh id 101 (tri 1). Selecting the base only must drop tri 1.
+        M2Model m;
+        m.version = 0x100;
+        for (int i = 0; i < 6; ++i)
+            m.vertices.push_back(M2Vertex{ Vec3{float(i),0,0}, {0,0,0,0}, {0,0,0,0}, {0,0,1}, {0,0} });
+        m.vertexLookup = { 0,1,2,3,4,5 };
+        m.triangles    = { 0,1,2, 3,4,5 };
+        M2Submesh s0; s0.id = 0;   s0.indexStart = 0; s0.indexCount = 3; s0.vertexStart=0; s0.vertexCount=3;
+        M2Submesh s1; s1.id = 101; s1.indexStart = 3; s1.indexCount = 3; s1.vertexStart=3; s1.vertexCount=3;
+        m.submeshes = { s0, s1 };
+
+        TexMesh all = skinM2(m, {});
+        CHECK(all.indices.size() == 6);                       // both triangles
+
+        // Choosing group1 variation 2 (absent) leaves only the base geoset.
+        TexMesh baseOnly = skinM2Geosets(m, {}, { {1, 2} });
+        CHECK(baseOnly.indices.size() == 3);                  // just triangle 0
+        CHECK(baseOnly.indices[0] == 0 && baseOnly.indices[2] == 2);
+
+        // Default selection draws base + group1's only variation -> both tris.
+        TexMesh def = skinM2Geosets(m, {}, {});
+        CHECK(def.indices.size() == 6);
+    }
 }
