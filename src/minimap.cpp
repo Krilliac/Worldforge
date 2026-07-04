@@ -1,6 +1,9 @@
 #include "minimap.hpp"
 
 #include <cctype>
+#include <vector>
+
+#include "blp.hpp"   // decodeBlpForSize
 
 namespace wf {
 namespace {
@@ -77,6 +80,41 @@ std::string MinimapIndex::resolve(const std::string& logicalKey) const {
 
 std::string MinimapIndex::tile(const std::string& map, int x, int y) const {
     return resolve(tileKey(map, x, y));
+}
+
+Image assembleMinimap(const MpqManager& mpq, const MinimapIndex& index,
+                      const std::string& map, int tilePx, Rgba bg, int* outCount) {
+    const int DIM = 64;
+    if (tilePx < 1) tilePx = 1;
+    const int W = DIM * tilePx;
+    Image out(W, W);
+    for (Rgba& p : out.pixels) p = bg;
+
+    int count = 0;
+    std::vector<uint8_t> buf;
+    for (int y = 0; y < DIM; ++y) {
+        for (int x = 0; x < DIM; ++x) {
+            std::string stored = index.tile(map, x, y);
+            if (stored.empty()) continue;
+            if (!mpq.readFile(MinimapIndex::storedPath(stored), buf)) continue;
+            Image tile;
+            try { tile = decodeBlpForSize(buf, tilePx); }
+            catch (...) { continue; }             // skip a bad/unsupported tile
+            if (tile.width <= 0 || tile.height <= 0) continue;
+            // Nearest-resample the decoded tile into its tilePx cell.
+            const int ox = x * tilePx, oy = y * tilePx;
+            for (int ty = 0; ty < tilePx; ++ty) {
+                int sy = ty * tile.height / tilePx;
+                for (int tx = 0; tx < tilePx; ++tx) {
+                    int sx = tx * tile.width / tilePx;
+                    out.at(ox + tx, oy + ty) = tile.at(sx, sy);
+                }
+            }
+            ++count;
+        }
+    }
+    if (outCount) *outCount = count;
+    return out;
 }
 
 }  // namespace wf

@@ -201,6 +201,8 @@ target_link_libraries(wforge-flythrough PRIVATE wforge)
 # Whole-map low-res overview from the .wdl heightfield (top-down elevation minimap).
 add_executable(wforge-minimap src/minimap_demo.cpp)
 target_link_libraries(wforge-minimap PRIVATE wforge)
+add_executable(wforge-minimap-real src/minimap_real_demo.cpp)
+target_link_libraries(wforge-minimap-real PRIVATE wforge)
 
 # ---------------------------------------------------------------------------
 # Editor: Dear ImGui panels. ImGui core compiles with no GPU/display (it only

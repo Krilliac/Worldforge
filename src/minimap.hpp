@@ -20,6 +20,9 @@
 #include <string>
 #include <unordered_map>
 
+#include "image.hpp"   // Image, Rgba
+#include "mpq.hpp"     // MpqManager
+
 namespace wf {
 
 // Parsed md5translate table: logical tile key -> stored blp name.
@@ -53,5 +56,16 @@ public:
 private:
     std::unordered_map<std::string, std::string> byLogical_;
 };
+
+// Assemble the whole baked minimap for `map`: probe every tile in the 64x64 grid,
+// resolve it through `index`, read the stored .blp from `mpq`
+// (textures\Minimap\<stored>), decode it (at ~tilePx via the mip selector), and
+// blit each into one image at `tilePx` per tile. Absent/unreadable tiles are
+// left as `bg`. Returns the (64*tilePx) square image; `*outCount` (if given)
+// reports how many tiles were placed. Tile (x,y): x = column (→ +X image),
+// y = row (→ +Y image, top-down) -- VERIFY-FLAGGED axis, matching the WDL demo.
+Image assembleMinimap(const MpqManager& mpq, const MinimapIndex& index,
+                      const std::string& map, int tilePx, Rgba bg,
+                      int* outCount = nullptr);
 
 }  // namespace wf
