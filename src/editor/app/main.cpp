@@ -83,6 +83,36 @@ ShadeLight shadeFromSample(const LightingSample& s) {
     return sl;
 }
 
+// Snap the camera to a newly-selected map's "start": drop it over the centroid
+// of the map's present tiles (from the WDL), so selecting a map lands you on the
+// landmass looking at it -- not stranded at the previous map's coordinates or out
+// in the ocean. Approximate ground height comes from the WDL; the camera is set
+// back + up and oriented to look at the tile centre. No-op if the map is empty.
+void snapCameraToMap(editor::Camera& cam, const Wdl& wdl) {
+    long sx = 0, sy = 0, n = 0;
+    for (int y = 0; y < Wdl::DIM; ++y)
+        for (int x = 0; x < Wdl::DIM; ++x)
+            if (wdl.tilePresent(x, y)) { sx += x; sy += y; ++n; }
+    if (n == 0) return;
+    const int cx = int(sx / n), cy = int(sy / n);
+    // Snap the centroid to the nearest actually-present tile (the centroid itself
+    // may fall on an ocean gap between landmasses).
+    int bx = cx, by = cy, bestD = 1 << 30;
+    for (int y = 0; y < Wdl::DIM; ++y)
+        for (int x = 0; x < Wdl::DIM; ++x)
+            if (wdl.tilePresent(x, y)) {
+                int d = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+                if (d < bestD) { bestD = d; bx = x; by = y; }
+            }
+    const Vec3 corner = tileCornerWorld(bx, by);                  // NW corner
+    Vec3 center{ corner.x - float(TILE_SIZE * 0.5), corner.y - float(TILE_SIZE * 0.5),
+                 float(wdl.height(bx, by, Wdl::OUTER / 2, Wdl::OUTER / 2)) };
+    cam.eye = { center.x - 260.0f, center.y - 260.0f, center.z + 320.0f };
+    Vec3 dir = normalize(center - cam.eye);
+    cam.yaw   = std::atan2(dir.y, dir.x);
+    cam.pitch = std::asin(std::max(-1.0f, std::min(1.0f, dir.z)));
+}
+
 // Resolve the client Data dir: explicit argv[1] or $WFORGE_CLIENT first, then
 // auto-discovery walking up from there (or the cwd).
 std::filesystem::path resolveDataDir(int argc, char** argv) {
@@ -331,9 +361,11 @@ int main(int argc, char** argv) {
         float dt = float(now - lastT); lastT = now;
 
         // WASD fly + RMB mouse-look (only when the viewport has focus-ish).
+        // Inverted look ("grab the world" map-editor style): dragging right pans
+        // the view left, dragging up tilts down -- both mouse axes negated.
         double mx, my; glfwGetCursorPos(win, &mx, &my);
         if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
-            viewport.camera.look(float(mx - lastX) * 0.005f, float(lastY - my) * 0.005f);
+            viewport.camera.look(-float(mx - lastX) * 0.005f, -float(lastY - my) * 0.005f);
         }
         lastX = mx; lastY = my;
         float spd = 80.0f * dt;
@@ -408,7 +440,20 @@ int main(int argc, char** argv) {
             focus.y = std::clamp(focus.y, 0, 63);
             TileStreamer::Plan plan = streamer.plan(focus);
             for (TileCoord c : plan.toEvict) { nearCache.erase(tileKey(c)); streamer.markEvicted(c); }
+            // Budget tile builds per frame: building a tile (parse ADT + decode
+            // BLPs + build meshes/doodads/WMOs) is heavy, so loading a whole ring
+            // burst in one frame stalls it -- the choppiness when moving. Build at
+            // most kLoadsPerFrame nearest-first; the rest fill in over the next few
+            // frames (tiles pop in progressively but the camera stays smooth).
+            std::sort(plan.toLoad.begin(), plan.toLoad.end(), [&](TileCoord a, TileCoord b) {
+                int da = (a.x - focus.x) * (a.x - focus.x) + (a.y - focus.y) * (a.y - focus.y);
+                int db = (b.x - focus.x) * (b.x - focus.x) + (b.y - focus.y) * (b.y - focus.y);
+                return da < db;
+            });
+            constexpr int kLoadsPerFrame = 2;
+            int budget = kLoadsPerFrame;
             for (TileCoord c : plan.toLoad) {
+                if (budget-- <= 0) break;                  // rest of the ring next frame
                 TileScene ts = loader.buildTileScene(browseMap, c.x, c.y);
                 if (!ts.terrain.empty()) {
                     AssetLoader::applyLighting(ts, lights, mapId, c.x, c.y, dayTick);
@@ -585,7 +630,10 @@ int main(int argc, char** argv) {
         // Map browser: select a map (loads its WDT tile grid), then click a present
         // tile to load it into the viewport (takes effect next frame).
         mapBrowser.draw();
-        { std::string m; if (mapBrowser.takeMapChanged(m)) { browseMap = m; showMapTiles(m); } }
+        { std::string m; if (mapBrowser.takeMapChanged(m)) {
+              browseMap = m; showMapTiles(m);
+              if (haveWdl) snapCameraToMap(viewport.camera, worldWdl);  // jump to the map's start
+          } }
         { int tx, ty; if (!browseMap.empty() && mapBrowser.takeTileRequest(tx, ty)) loadTile(browseMap, tx, ty); }
 
         // Asset browser: choose the active placement model.
