@@ -356,4 +356,9 @@ if(WFORGE_EDITOR_APP)
   )
   target_include_directories(wforge-editor-app PRIVATE ${IMGUI_DIR}/backends)
   target_link_libraries(wforge-editor-app PRIVATE wforge-editor glfw OpenGL::GL)
+  # Statically link the GCC/C++/pthread runtimes so the editor is a true drop-in:
+  # copy wforge-editor-app.exe next to WoW.exe and it runs with no extra DLLs.
+  if(MINGW OR (CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND WIN32))
+    target_link_options(wforge-editor-app PRIVATE -static -static-libgcc -static-libstdc++)
+  endif()
 endif()

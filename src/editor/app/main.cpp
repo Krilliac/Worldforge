@@ -113,15 +113,73 @@ void snapCameraToMap(editor::Camera& cam, const Wdl& wdl) {
     cam.pitch = std::asin(std::max(-1.0f, std::min(1.0f, dir.z)));
 }
 
-// Resolve the client Data dir: explicit argv[1] or $WFORGE_CLIENT first, then
-// auto-discovery walking up from there (or the cwd).
+// --- client auto-discovery: exe-relative + a remembered last-good path -------
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+static std::filesystem::path executableDir() {
+    wchar_t buf[MAX_PATH];
+    DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return {};
+    return std::filesystem::path(std::wstring(buf, n)).parent_path();
+}
+#else
+static std::filesystem::path executableDir() { return {}; }
+#endif
+
+// The remembered client path lives next to the editor exe, so once a client has
+// been mounted the editor auto-mounts on every later boot -- even after the exe
+// is moved out of the WoW folder.
+static std::filesystem::path clientConfigPath() {
+    std::filesystem::path dir = executableDir();
+    return dir.empty() ? std::filesystem::path{} : dir / "wforge_client.txt";
+}
+static std::filesystem::path loadRememberedClient() {
+    std::filesystem::path cfg = clientConfigPath();
+    if (cfg.empty()) return {};
+    std::ifstream f(cfg);
+    std::string line;
+    if (f) std::getline(f, line);
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' '))
+        line.pop_back();
+    return line.empty() ? std::filesystem::path{} : std::filesystem::path(line);
+}
+static void rememberClient(const std::filesystem::path& dataDir) {
+    std::filesystem::path cfg = clientConfigPath();
+    if (cfg.empty()) return;
+    std::ofstream f(cfg, std::ios::trunc);
+    if (f) f << dataDir.string() << "\n";
+}
+
+// Resolve the client Data dir with NO argument needed. Priority:
+//   1. explicit argv[1] / $WFORGE_CLIENT,
+//   2. next to the editor exe -- drop wforge-editor-app.exe in the WoW folder and
+//      it finds ./Data (findDataDir walks up a few parents too),
+//   3. the last client we successfully mounted (remembered beside the exe),
+//   4. the working directory.
+// First hit that looks like a Data dir wins.
 std::filesystem::path resolveDataDir(int argc, char** argv) {
     std::string hint;
     if (argc > 1) hint = argv[1];
     else if (const char* e = std::getenv("WFORGE_CLIENT")) hint = e;
-    std::filesystem::path d = findDataDir(hint);
-    if (d.empty() && !hint.empty()) d = hint;  // accept an explicit Data dir verbatim
-    return d;
+    if (!hint.empty()) {
+        std::filesystem::path d = findDataDir(hint);
+        return d.empty() ? std::filesystem::path(hint) : d;   // accept explicit verbatim
+    }
+    if (std::filesystem::path exe = executableDir(); !exe.empty()) {
+        if (std::filesystem::path d = findDataDir(exe); !d.empty()) return d;
+    }
+    if (std::filesystem::path saved = loadRememberedClient(); !saved.empty()) {
+        if (std::filesystem::path d = findDataDir(saved); !d.empty()) return d;
+        if (looksLikeDataDir(saved)) return saved;
+    }
+    std::error_code ec;
+    return findDataDir(std::filesystem::current_path(ec));
 }
 
 // Optional real-tile selector: argv "<DataDir> <Map> <x> <y>" (coords after the
@@ -234,6 +292,7 @@ int main(int argc, char** argv) {
             if (locale.empty()) locale = "enUS";
             mountWowClient(mpq, dataDir, locale);
             if (mpq.archiveCount() > 0) {
+                rememberClient(dataDir);   // auto-mount this client on future boots
                 Dbc light = loadDbc(mpq, "Light"),         lparams = loadDbc(mpq, "LightParams");
                 Dbc lint  = loadDbc(mpq, "LightIntBand"),  lfloat  = loadDbc(mpq, "LightFloatBand");
                 lights.build(&light, &lparams, &lint, &lfloat);
