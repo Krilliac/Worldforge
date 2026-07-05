@@ -48,6 +48,7 @@ add_library(wforge STATIC
   src/srp6.cpp
   src/raster.cpp
   src/editing.cpp
+  src/command_stack.cpp
   src/gizmo.cpp
   src/editor_bridge.cpp
   src/db_export.cpp
@@ -138,6 +139,9 @@ add_executable(wforge-tests
   tests/test_proto.cpp
   tests/test_raster.cpp
   tests/test_editing.cpp
+  tests/test_command_stack.cpp
+  tests/test_dbc_schema.cpp
+  tests/test_gridmap_writer.cpp
   tests/test_bridge.cpp
   tests/test_debugdraw.cpp
   tests/test_modelmesh.cpp

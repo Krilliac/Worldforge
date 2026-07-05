@@ -58,6 +58,9 @@ void test_liquid_color();
 void test_tile_streamer();
 void test_world_lod();
 void test_world_pick();
+void test_command_stack();
+void test_dbc_schema();
+void test_gridmap_writer();
 
 int main() {
     test_math();
@@ -118,6 +121,9 @@ int main() {
     test_tile_streamer();
     test_world_lod();
     test_world_pick();
+    test_command_stack();
+    test_dbc_schema();
+    test_gridmap_writer();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;
