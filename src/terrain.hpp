@@ -134,6 +134,24 @@ struct MapChunk {
 // Returns false when the chunk carries no shadow map (out-of-range too).
 bool shadowAt(const MapChunk& mc, int row, int col);
 
+// Brush falloff profile. The full definition lives in editing.hpp (which
+// includes this header, so it is opaque-declared here to avoid the cycle).
+enum class Falloff;
+
+// Paint the MCSH shadow bitmap -- the vanilla shadow tool (1.12.1 has no MCCV
+// vertex colours; the baked 1-bit MCSH map is what the client darkens by).
+// (u,v) and `radius` are in normalised chunk space [0,1], like paintAlpha;
+// `strength` is in [0,1]. The target is 1-bit, so partial strength dithers: a
+// texel's bit is painted only when strength*weight clears its threshold from a
+// 4x4 ordered-dither (Bayer) matrix, giving a stable dithered penumbra rather
+// than a hard disc (repainting the same stroke is a no-op). `set` true sets
+// bits (shadow), false clears them (light). Allocates mc.shadow (512 B,
+// zeroed) on the first paint of a shadow-less chunk; clearing such a chunk is
+// a no-op. Bits are row-major, LSB-first within each byte -- the shadowAt()
+// layout. Returns the number of texels whose bit actually changed.
+int paintShadow(MapChunk& mc, float u, float v, float radius,
+                float strength, Falloff falloff, bool set);
+
 // Resolve a chunk's MCRF reference indices (mc.doodadRefs / mc.wmoRefs) into
 // pointers to the referenced ADT placement entries (MDDF DoodadDef / MODF
 // WmoDef, from the parsed Adt). Out-of-range indices are skipped. MCRF is how a
@@ -230,6 +248,23 @@ std::vector<uint8_t> writeAdtHeights(const std::vector<uint8_t>& adtBuf,
 std::vector<uint8_t> writeAdtNormals(const std::vector<uint8_t>& adtBuf,
                                      const std::vector<MapChunk>& chunks);
 
+// Patch each chunk's 512-byte MCSH shadow bitmap back into its ADT bytes, the
+// shadow counterpart of writeAdtHeights: chunks whose mcshOffset locates an
+// in-file MCSH payload have mc.shadow copied over it (vanilla always writes
+// the full 512 bytes); every other byte is untouched. Throws if an offset +
+// 512 bytes runs past the buffer (a sign `chunks` and `adtBuf` don't match).
+// LIMITATION: a chunk that GAINED a shadow map in memory (paintShadow on a
+// chunk with no MCSH in the file, mcshOffset == 0) cannot be patched in place
+// -- inserting a sub-chunk would shift every offset after it -- so it is
+// skipped and counted into *skippedNoMcsh (when non-null); whole-chunk
+// re-serialisation (new MCSH + header ofs/size + MCNK_HAS_MCSH flag) is the
+// adt_writer's job. Note the parser applies the 63->64 edge duplication to
+// mc.shadow at parse time, so the FIXED bits are what is written back -- a
+// write-time no-op, since the client re-duplicates that edge on load anyway.
+std::vector<uint8_t> writeAdtShadows(const std::vector<uint8_t>& adtBuf,
+                                     const std::vector<MapChunk>& chunks,
+                                     int* skippedNoMcsh = nullptr);
+
 // MCNK-header patchers, the surgical siblings of writeAdtHeights: each returns
 // a copy of adtBuf with ONE header field poked per chunk -- located through
 // mc.mcnkHeaderOffset (chunks with offset 0 are skipped) -- and every other
@@ -257,6 +292,33 @@ std::vector<uint8_t> writeAdtPredTex(const std::vector<uint8_t>& adtBuf,
 // and back), so a decode->encode round-trip is byte-identical.
 std::array<uint8_t, 64> decodePredTex(const uint8_t* packed);   // packed: 16 bytes
 std::array<uint8_t, 16> encodePredTex(const std::array<uint8_t, 64>& cells);
+
+// Recompute the ground-effect predominant-texture map from the chunk's alpha
+// maps: for each of the 64 8x8-texel subcells, evaluate every MCLY layer's
+// effective weight at the cell's centre texel (subcell (r,c) -> alpha texel
+// row r*8+4, col c*8+4) under the client's sequential-lerp blend --
+//   eff[i] = a_i * prod_{j>i}(1 - a_j),   eff[0] = prod_{j>=1}(1 - a_j)
+// -- and pick the argmax as the cell's 2-bit layer index (0..3: the vanilla
+// layer cap is 4, so higher layers never appear). A one-layer chunk (no
+// alphas) yields all zeros; ties go to the lower layer. This is the write-back
+// invariant behind texture painting: whenever painting changes which layer
+// dominates a cell, predTex must be recomputed (updatePredTex) or the
+// grass/footstep ground effects keep following the stale layer's effectId.
+std::array<uint8_t, 64> computePredominantLayer(const MapChunk& mc, bool bigAlpha);
+
+// computePredominantLayer packed via encodePredTex into mc.predTex, ready to
+// persist with writeAdtPredTex. Call after every alpha-map edit.
+void updatePredTex(MapChunk& mc, bool bigAlpha);
+
+// Editor write path for the noEffectDoodad map (header +0x50, 8x8 cells x
+// 1 bit, row-major LSB-first: byte subY, bit subX): suppress (or re-allow)
+// ground-effect doodads in one subcell. Out-of-range coordinates are ignored.
+// Persist with writeAdtPredTex, which writes both ground-effect maps.
+void setNoEffectDoodad(MapChunk& mc, int subX, int subY, bool suppress);
+
+// Toggle the chunk 'impassable' flag (MCNK_IMPASSABLE, bit 0x2). Pairs with
+// writeAdtChunkFlags to persist the edit.
+void setChunkImpassable(MapChunk& mc, bool impassable);
 
 // Recompute every chunk's MCNR vertex normals from the (possibly edited) MCVT
 // height field of the whole tile. Used after a terrain sculpt so lighting tracks

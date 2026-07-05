@@ -2,6 +2,7 @@
 #include "byte_reader.hpp"
 #include "chunk.hpp"
 #include "coords.hpp"
+#include "editing.hpp"   // Falloff / falloffWeight, for paintShadow
 
 #include <algorithm>
 #include <cmath>
@@ -76,10 +77,59 @@ void clearHoleBit(MapChunk& mc, int subX, int subY) {
 void setAllHoles(MapChunk& mc)   { mc.holes = 0xFFFF; }
 void clearAllHoles(MapChunk& mc) { mc.holes = 0; }
 
+void setChunkImpassable(MapChunk& mc, bool impassable) {
+    if (impassable) mc.flags |= MCNK_IMPASSABLE;
+    else            mc.flags &= ~MCNK_IMPASSABLE;
+}
+
 bool shadowAt(const MapChunk& mc, int row, int col) {
     if (mc.shadow.empty() || row < 0 || col < 0 || row >= 64 || col >= 64) return false;
     const size_t bit = static_cast<size_t>(row) * 64 + static_cast<size_t>(col);
     return ((mc.shadow[bit >> 3] >> (bit & 7)) & 1u) != 0;
+}
+
+int paintShadow(MapChunk& mc, float u, float v, float radius,
+                float strength, Falloff falloff, bool set) {
+    constexpr int    DIM    = 64;
+    constexpr size_t kBytes = DIM * DIM / 8u;   // 512
+    if (radius <= 0.0f || strength <= 0.0f) return 0;
+    if (mc.shadow.empty() && !set) return 0;    // nothing to clear, don't allocate
+
+    // 4x4 ordered-dither (Bayer) matrix. Per-texel thresholds (b + 0.5) / 16
+    // spread uniformly over (0,1), so strength*weight in [0,1] sets a stable,
+    // evenly dithered fraction of the covered texels; 1.0 clears every
+    // threshold (solid), 0.5 sets half of them (checkered penumbra).
+    static constexpr uint8_t kBayer4[4][4] = {
+        {  0,  8,  2, 10 },
+        { 12,  4, 14,  6 },
+        {  3, 11,  1,  9 },
+        { 15,  7, 13,  5 },
+    };
+
+    const float cx  = u * DIM;                  // brush centre in texel space
+    const float cy  = v * DIM;
+    const float rad = radius * DIM;
+    int changed = 0;
+    for (int row = 0; row < DIM; ++row) {
+        for (int col = 0; col < DIM; ++col) {
+            const float dx = (col + 0.5f) - cx;
+            const float dy = (row + 0.5f) - cy;
+            const float d  = std::sqrt(dx * dx + dy * dy);
+            const float w  = falloffWeight(falloff, d, rad);
+            if (w <= 0.0f) continue;
+            const float threshold = (kBayer4[row & 3][col & 3] + 0.5f) / 16.0f;
+            if (strength * w < threshold) continue;
+            if (mc.shadow.size() < kBytes) mc.shadow.resize(kBytes, 0);  // first paint
+            const size_t  bit  = static_cast<size_t>(row) * DIM + col;
+            const uint8_t mask = static_cast<uint8_t>(1u << (bit & 7));
+            uint8_t& b = mc.shadow[bit >> 3];
+            const uint8_t before = b;
+            if (set) b |= mask;
+            else     b = static_cast<uint8_t>(b & ~mask);
+            if (b != before) ++changed;
+        }
+    }
+    return changed;
 }
 
 static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
@@ -372,9 +422,11 @@ static void parseMcrf(MapChunk& mc, const uint8_t* data, uint32_t size,
 // Like MCAL, the last row/column carries no real data, and the client
 // duplicates the previous one unless MCNK_DO_NOT_FIX_ALPHA is set (the flag
 // governs both maps). Unlike the alpha path -- where the fix is deferred to
-// draw time so decode/encode stays a loss-less codec -- there is no shadow
-// write path yet, so the fix is applied here at parse time and shadowAt() /
-// the renderer see fixed data directly.
+// draw time so decode/encode stays a loss-less codec -- the fix is applied
+// here at parse time and shadowAt() / the renderer / paintShadow() see fixed
+// data directly. That makes writeAdtShadows() write the FIXED edge bits back,
+// which is deliberate and harmless: the edge carries no real data and the
+// client re-duplicates it on load either way (see writeAdtShadows).
 static void parseMcsh(MapChunk& mc, const uint8_t* data, uint32_t size) {
     constexpr uint32_t kBytes = 64u * 64u / 8u;   // 512
     uint32_t n = std::min(size, kBytes);
@@ -546,6 +598,32 @@ std::vector<uint8_t> writeAdtNormals(const std::vector<uint8_t>& adtBuf,
     return out;
 }
 
+std::vector<uint8_t> writeAdtShadows(const std::vector<uint8_t>& adtBuf,
+                                     const std::vector<MapChunk>& chunks,
+                                     int* skippedNoMcsh) {
+    constexpr size_t kBytes = 64u * 64u / 8u;   // 512
+    if (skippedNoMcsh) *skippedNoMcsh = 0;
+    std::vector<uint8_t> out = adtBuf;   // start byte-identical to the original
+    for (const MapChunk& mc : chunks) {
+        if (mc.mcshOffset == 0) {
+            // No in-file MCSH to patch. A shadow map painted onto such a chunk
+            // needs whole-chunk re-serialisation (see the header note): count
+            // it so the caller knows the edit did NOT reach the file.
+            if (!mc.shadow.empty() && skippedNoMcsh) ++*skippedNoMcsh;
+            continue;
+        }
+        if (mc.shadow.empty()) continue;         // parsed map discarded: keep file bytes
+        const size_t base = mc.mcshOffset;
+        if (base + kBytes > out.size())
+            throw std::runtime_error("writeAdtShadows: MCSH offset past end of ADT "
+                                     "(chunks do not match this buffer)");
+        const size_t n = std::min(mc.shadow.size(), kBytes);
+        std::copy(mc.shadow.begin(), mc.shadow.begin() + static_cast<long>(n),
+                  out.begin() + static_cast<long>(base));
+    }
+    return out;
+}
+
 // Shared plumbing for the MCNK-header patchers: copy adtBuf, then let `poke`
 // write into each chunk's 128-byte header (located via mcnkHeaderOffset;
 // chunks with offset 0 -- not parsed from a buffer, or unsupported -- are
@@ -626,6 +704,51 @@ std::array<uint8_t, 16> encodePredTex(const std::array<uint8_t, 64>& cells) {
     for (int k = 0; k < 64; ++k)
         packed[k / 4] |= static_cast<uint8_t>((cells[k] & 0x3) << ((k % 4) * 2));
     return packed;
+}
+
+std::array<uint8_t, 64> computePredominantLayer(const MapChunk& mc, bool bigAlpha) {
+    std::array<uint8_t, 64> cells{};
+    const size_t nLayers = std::min<size_t>(mc.layers.size(), 4);   // vanilla layer cap
+    if (nLayers <= 1) return cells;   // base coat only (no alphas): every cell 0
+
+    std::array<AlphaMap, 4> maps;     // maps[1..3]; [0] unused (base has no alpha)
+    for (size_t i = 1; i < nLayers; ++i)
+        maps[i] = decodeAlphaMap(mc, i, bigAlpha);
+
+    for (int r = 0; r < 8; ++r) {
+        for (int c = 0; c < 8; ++c) {
+            // Sample every layer at the subcell's centre texel.
+            const int row = r * 8 + 4, col = c * 8 + 4;
+            // Sequential-lerp visibility, walked top layer down: a layer's
+            // effective weight is its own alpha times the transparency of
+            // every layer above it; whatever filters through them all is what
+            // remains of the base coat.
+            float eff[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+            float vis = 1.0f;   // prod of (1 - a_j) over the layers above
+            for (int i = static_cast<int>(nLayers) - 1; i >= 1; --i) {
+                const float a = maps[i].at(row, col) / 255.0f;
+                eff[i] = a * vis;
+                vis *= 1.0f - a;
+            }
+            eff[0] = vis;
+            int best = 0;                          // ties go to the lower layer
+            for (int i = 1; i < static_cast<int>(nLayers); ++i)
+                if (eff[i] > eff[best]) best = i;
+            cells[r * 8 + c] = static_cast<uint8_t>(best);   // 2-bit value, 0..3
+        }
+    }
+    return cells;
+}
+
+void updatePredTex(MapChunk& mc, bool bigAlpha) {
+    mc.predTex = encodePredTex(computePredominantLayer(mc, bigAlpha));
+}
+
+void setNoEffectDoodad(MapChunk& mc, int subX, int subY, bool suppress) {
+    if (subX < 0 || subX > 7 || subY < 0 || subY > 7) return;
+    const uint8_t mask = static_cast<uint8_t>(1u << subX);   // row-major, LSB-first
+    if (suppress) mc.noEffectDoodad[subY] |= mask;
+    else          mc.noEffectDoodad[subY] = static_cast<uint8_t>(mc.noEffectDoodad[subY] & ~mask);
 }
 
 void recomputeTileNormals(std::vector<MapChunk>& chunks) {

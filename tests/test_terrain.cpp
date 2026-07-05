@@ -1,5 +1,6 @@
 #include "test.hpp"
 #include "terrain.hpp"
+#include "editing.hpp"   // Falloff, for paintShadow
 #include "coords.hpp"
 
 #include <cmath>
@@ -828,5 +829,194 @@ void test_terrain() {
         std::array<uint8_t, 64> hot{};
         hot[0] = 0xFF;                               // -> 3
         CHECK(encodePredTex(hot)[0] == 0x03);
+    }
+
+    // --- paintShadow: 1-bit dithered MCSH shadow brush -----------------------
+    {
+        // Full strength + Flat falloff: every texel inside the disc clears its
+        // Bayer threshold (max 15.5/16) -> a solid circle. Chunk starts with
+        // no shadow map; the first paint allocates it.
+        MapChunk m;
+        CHECK(m.shadow.empty());
+        const int full = paintShadow(m, 0.5f, 0.5f, 0.25f, 1.0f, Falloff::Flat, true);
+        CHECK(m.shadow.size() == 512);               // allocated on first paint
+        CHECK(full > 0);
+        // Centre (u,v)=(0.5,0.5) -> texel space (32,32), radius 0.25 -> 16.
+        CHECK(shadowAt(m, 32, 32));                  // centre set
+        CHECK(shadowAt(m, 32, 47));                  // texel centre 15.5 in -> inside
+        CHECK(!shadowAt(m, 32, 48));                 // texel centre 16.5 out -> clear
+        CHECK(!shadowAt(m, 0, 0));                   // far outside stays clear
+        // The changed count is exactly the number of set bits.
+        auto countBits = [](const std::vector<uint8_t>& sh) {
+            int n = 0;
+            for (uint8_t b : sh) for (int k = 0; k < 8; ++k) n += (b >> k) & 1;
+            return n;
+        };
+        CHECK(countBits(m.shadow) == full);
+
+        // Clearing the same disc erases exactly those texels.
+        CHECK(paintShadow(m, 0.5f, 0.5f, 0.25f, 1.0f, Falloff::Flat, false) == full);
+        CHECK(countBits(m.shadow) == 0);
+
+        // Half strength dithers: the Bayer thresholds spread over (0,1), so a
+        // 0.5 * Flat brush sets ~half the covered texels -- strictly between
+        // an empty and a solid disc.
+        MapChunk d;
+        const int half = paintShadow(d, 0.5f, 0.5f, 0.25f, 0.5f, Falloff::Flat, true);
+        CHECK(half > 0);
+        CHECK(half < full);
+        // The dither pattern is stable: repainting the same stroke is a no-op.
+        CHECK(paintShadow(d, 0.5f, 0.5f, 0.25f, 0.5f, Falloff::Flat, true) == 0);
+
+        // A falloff curve dithers the penumbra even at full strength: fewer
+        // texels than the solid Flat disc, but the centre (weight 1) still set.
+        MapChunk p;
+        const int soft = paintShadow(p, 0.5f, 0.5f, 0.25f, 1.0f, Falloff::Linear, true);
+        CHECK(soft > 0);
+        CHECK(soft < full);
+        CHECK(shadowAt(p, 32, 32));
+
+        // Strength 0 paints nothing and does not allocate; clearing a chunk
+        // with no shadow map is a no-op too.
+        MapChunk z;
+        CHECK(paintShadow(z, 0.5f, 0.5f, 0.25f, 0.0f, Falloff::Flat, true) == 0);
+        CHECK(z.shadow.empty());
+        CHECK(paintShadow(z, 0.5f, 0.5f, 0.25f, 1.0f, Falloff::Flat, false) == 0);
+        CHECK(z.shadow.empty());
+    }
+
+    // --- writeAdtShadows: surgical MCSH patch round-trips --------------------
+    {
+        // A one-chunk ADT with a zeroed 512-byte MCSH sub-chunk.
+        std::vector<uint8_t> hdr(128, 0);
+        auto h32 = [&](size_t off, uint32_t v){ for(int i=0;i<4;i++) hdr[off+i]=(v>>(8*i))&0xFF; };
+        h32(0x00, MCNK_HAS_MCSH);
+        std::vector<uint8_t> mcsh(512, 0);
+        std::vector<uint8_t> body = hdr;
+        chunk(body, "MCSH", mcsh);
+        std::vector<uint8_t> src;
+        chunk(src, "MCNK", body);
+
+        std::vector<MapChunk> cs = parseChunks(src);
+        CHECK(cs[0].mcshOffset != 0);                // located the in-file MCSH
+        // Paint a solid disc well away from rows/cols 62-63, so the parse-time
+        // 63->64 edge duplication cannot disturb the round trip.
+        CHECK(paintShadow(cs[0], 0.5f, 0.5f, 0.25f, 1.0f, Falloff::Flat, true) > 0);
+
+        int skipped = -1;
+        std::vector<uint8_t> patched = writeAdtShadows(src, cs, &skipped);
+        CHECK(skipped == 0);
+        CHECK(patched.size() == src.size());         // patched in place, same length
+
+        // Re-parse: the painted shadow bytes survive exactly.
+        std::vector<MapChunk> rc = parseChunks(patched);
+        CHECK(rc[0].shadow == cs[0].shadow);
+        CHECK(shadowAt(rc[0], 32, 32));
+        CHECK(!shadowAt(rc[0], 0, 0));
+
+        // Only the 512-byte MCSH span changed; every other byte is identical.
+        const size_t base = cs[0].mcshOffset;
+        bool outsideIdentical = true;
+        for (size_t i = 0; i < src.size(); ++i) {
+            if (i >= base && i < base + 512u) continue;
+            if (patched[i] != src[i]) { outsideIdentical = false; break; }
+        }
+        CHECK(outsideIdentical);
+
+        // A no-edit write reproduces the original byte-for-byte.
+        CHECK(writeAdtShadows(src, parseChunks(src)) == src);
+
+        // A chunk that GAINED a shadow but has no MCSH in the file cannot be
+        // patched in place: it is skipped and reported, buffer untouched.
+        std::vector<uint8_t> noSh = makeMCNK(/*holes*/0, 0.0f, 0, 0);
+        std::vector<MapChunk> cs2 = parseChunks(noSh);
+        CHECK(cs2[0].mcshOffset == 0);
+        CHECK(paintShadow(cs2[0], 0.5f, 0.5f, 0.2f, 1.0f, Falloff::Flat, true) > 0);
+        int skipped2 = 0;
+        CHECK(writeAdtShadows(noSh, cs2, &skipped2) == noSh);
+        CHECK(skipped2 == 1);
+    }
+
+    // --- computePredominantLayer / updatePredTex: ground-effect recompute ----
+    {
+        // Two layers; layer 1 fully opaque on the west half (columns 0..31).
+        // Cell centres sample texel column c*8+4: cells 0..3 land in the
+        // opaque half -> layer 1; cells 4..7 fall through to the base -> 0.
+        MapChunk a;
+        a.layers.resize(2);
+        a.layers[1].flags = MCLY_USE_ALPHA;
+        a.layers[1].ofsAlpha = 0;
+        AlphaMap m1;
+        for (int r = 0; r < 64; ++r)
+            for (int c = 0; c < 64; ++c)
+                m1.texels[static_cast<size_t>(r) * 64 + c] = static_cast<uint8_t>((c < 32) ? 255 : 0);
+        a.alpha = encodeAlphaMap(m1, /*bigAlpha*/true);
+        std::array<uint8_t, 64> cells = computePredominantLayer(a, /*bigAlpha*/true);
+        bool split = true;
+        for (int r = 0; r < 8; ++r)
+            for (int c = 0; c < 8; ++c)
+                if (cells[r * 8 + c] != (c < 4 ? 1 : 0)) split = false;
+        CHECK(split);
+
+        // updatePredTex packs the same answer into the header field, and the
+        // predTex codec round-trips it.
+        updatePredTex(a, true);
+        CHECK(decodePredTex(a.predTex.data()) == cells);
+
+        // Sequential-lerp visibility: an opaque layer 2 hides layer 1
+        // everywhere, even where layer 1 is itself opaque.
+        a.layers.resize(3);
+        a.layers[2].flags = MCLY_USE_ALPHA;
+        a.layers[2].ofsAlpha = 4096;                 // after layer 1's 8-bit map
+        a.alpha.resize(8192, 255);                   // layer 2: all 255
+        std::array<uint8_t, 64> top = computePredominantLayer(a, true);
+        bool allTop = true;
+        for (uint8_t cell : top) if (cell != 2) allTop = false;
+        CHECK(allTop);
+
+        // The blend threshold: a lone overlay needs >50% coverage to win.
+        MapChunk t;
+        t.layers.resize(2);
+        t.layers[1].flags = MCLY_USE_ALPHA;
+        AlphaMap w;
+        w.texels.fill(100);                          // eff1 0.39 < eff0 0.61
+        t.alpha = encodeAlphaMap(w, true);
+        CHECK(computePredominantLayer(t, true)[0] == 0);
+        w.texels.fill(200);                          // eff1 0.78 > eff0 0.22
+        t.alpha = encodeAlphaMap(w, true);
+        CHECK(computePredominantLayer(t, true)[0] == 1);
+
+        // A one-layer chunk (no alphas) yields all zeros -- and so does the
+        // degenerate no-layer chunk.
+        std::array<uint8_t, 64> zero{};
+        MapChunk s1;
+        s1.layers.resize(1);
+        CHECK(computePredominantLayer(s1, false) == zero);
+        CHECK(computePredominantLayer(s1, true) == zero);
+        CHECK(computePredominantLayer(MapChunk{}, false) == zero);
+    }
+
+    // --- setNoEffectDoodad + setChunkImpassable ------------------------------
+    {
+        // noEffectDoodad: 8x8 x 1 bit, row-major LSB-first (byte subY, bit subX).
+        MapChunk m;
+        setNoEffectDoodad(m, /*subX*/3, /*subY*/2, true);
+        CHECK(m.noEffectDoodad[2] == 0x08);
+        setNoEffectDoodad(m, 0, 0, true);
+        CHECK(m.noEffectDoodad[0] == 0x01);
+        setNoEffectDoodad(m, 3, 2, false);
+        CHECK(m.noEffectDoodad[2] == 0);
+        CHECK(m.noEffectDoodad[0] == 0x01);          // other bits untouched
+        setNoEffectDoodad(m, 8, 0, true);            // out of range: ignored
+        setNoEffectDoodad(m, 0, -1, true);
+        CHECK(m.noEffectDoodad[0] == 0x01);
+
+        // Impassable helper: toggles exactly bit 0x2, preserving the rest.
+        MapChunk f;
+        f.flags = MCNK_HAS_MCSH;
+        setChunkImpassable(f, true);
+        CHECK(f.flags == (MCNK_HAS_MCSH | MCNK_IMPASSABLE));
+        setChunkImpassable(f, false);
+        CHECK(f.flags == MCNK_HAS_MCSH);
     }
 }

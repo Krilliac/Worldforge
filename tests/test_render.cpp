@@ -216,8 +216,12 @@ void test_render() {
         CHECK(green);
     }
 
-    // --- MCSH baked shadow darkens the terrain splat ----------------------
+    // --- MCSH baked shadow darkens the splat by exactly 178/256 -----------
     {
+        // The client computes 178 * value >> 8 for shadowed terrain texels;
+        // the constant must be that exact ratio, not an eyeballed factor.
+        CHECK_NEAR(kMcshShadowFactor, 178.0 / 256.0, 1e-6);
+
         MapChunk mc;
         mc.position = {0,0,0};
         for (int i = 0; i < 145; ++i) mc.heights[i] = 0.0f;
@@ -228,17 +232,34 @@ void test_render() {
         Mat4 view = Mat4::lookAt({16,16,40}, {16,16,0}, {0,1,0});
         Mat4 proj = Mat4::perspective(60.0, 1.0, 0.5, 500.0);
 
+        std::vector<uint8_t> allShadow(512, 0xFF);   // every texel shadowed
         auto litSum = [&](const std::vector<uint8_t>* sh) {
             Framebuffer fb(64,64); fb.clear(Rgba{0,0,0,255});
             rasterTerrainSplat(fb, tm, proj*view, layers, 4.0f, ShadeLight{}, sh);
             long s = 0; for (const Rgba& p : fb.color.pixels) s += p.g; return s;
         };
-        std::vector<uint8_t> allShadow(512, 0xFF);   // every texel shadowed
         long lit = litSum(nullptr);
         long shd = litSum(&allShadow);
         CHECK(lit > 0);
         CHECK(shd < lit);                            // shadow darkens the terrain
-        CHECK(shd * 100 < lit * 70 && shd * 100 > lit * 40);   // ~0.55x, allow rounding
+        CHECK(shd * 100 < lit * 75 && shd * 100 > lit * 60);   // ~0.695x overall
+
+        // Exact per-texel readback: the flat chunk + uniform normal + 1x1
+        // texture shade every covered pixel identically, so the brightest
+        // pixel IS the uniform surface value. Rendered with and without a
+        // full MCSH, the two values sit exactly 178/256 apart -- each side
+        // rounds once to 8 bits, so allow 1/255 of slack.
+        auto maxG = [&](const std::vector<uint8_t>* sh) {
+            Framebuffer fb(64,64); fb.clear(Rgba{0,0,0,255});
+            rasterTerrainSplat(fb, tm, proj*view, layers, 4.0f, ShadeLight{}, sh);
+            int m = 0;
+            for (const Rgba& p : fb.color.pixels) if (p.g > m) m = p.g;
+            return m;
+        };
+        const int litV = maxG(nullptr);
+        const int shdV = maxG(&allShadow);
+        CHECK(litV > 50);                            // bright enough to resolve the ratio
+        CHECK(std::fabs(shdV - litV * kMcshShadowFactor) <= 1.0f);
     }
 
     // --- WMO group -> textured mesh preserves UVs -------------------------

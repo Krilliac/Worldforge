@@ -15,6 +15,11 @@
 
 namespace wf {
 
+// The client's exact MCSH darkening factor: a shadowed terrain texel is scaled
+// by 178/256 (the engine computes 178 * value >> 8, ~0.695). Kept exact -- not
+// an eyeballed constant -- so rasteriser readbacks can assert the ratio.
+constexpr float kMcshShadowFactor = 178.0f / 256.0f;
+
 struct TerrainLayer {
     const Image*    texture = nullptr;   // the layer's BLP-decoded tile
     const AlphaMap* alpha   = nullptr;   // 64x64 coverage; null = full (base layer)
@@ -29,7 +34,8 @@ Rgba splatSample(const std::vector<TerrainLayer>& layers, float u, float v, floa
 
 // Rasterise a terrain TexMesh (uv = chunk 0..1) with the layer splat + lighting.
 // `shadow`, when non-null, is the chunk's raw 64x64-bit MCSH map: texels whose
-// bit is set are darkened (baked terrain self-shadow). Pass null for no shadow.
+// bit is set are darkened by exactly kMcshShadowFactor (baked terrain
+// self-shadow). Pass null for no shadow.
 void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                         const std::vector<TerrainLayer>& layers, float tiling, Vec3 lightDir,
                         const std::vector<uint8_t>* shadow = nullptr);

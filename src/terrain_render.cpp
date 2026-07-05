@@ -64,7 +64,6 @@ inline bool shadowSample(const std::vector<uint8_t>* shadow, float u, float v) {
     size_t bit = (size_t)row * AlphaMap::DIM + col;
     return bit < shadow->size() * 8 && (((*shadow)[bit >> 3] >> (bit & 7)) & 1u) != 0;
 }
-constexpr float kTerrainShadow = 0.55f;   // brightness multiplier for shadowed texels
 } // namespace
 
 void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
@@ -133,7 +132,8 @@ void rasterTerrainSplat(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                 n = normalize(n);
                 Vec3 lf = light.shade(n, Lr);
 
-                const float sh = shadowSample(shadow, u, v) ? kTerrainShadow : 1.0f;
+                // Baked MCSH shadow: the client's exact 178/256 darkening.
+                const float sh = shadowSample(shadow, u, v) ? kMcshShadowFactor : 1.0f;
                 Rgba c = splatSample(layers, u, v, tiling);
                 c.r = clamp8(c.r * lf.x * sh); c.g = clamp8(c.g * lf.y * sh); c.b = clamp8(c.b * lf.z * sh);
                 c.a = 255;
