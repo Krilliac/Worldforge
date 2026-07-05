@@ -11,7 +11,9 @@
 #include "terrain_render.hpp"   // TerrainLayer (TileScene render overload test)
 #include "debugdraw.hpp"
 #include "image.hpp"
+#include "coords.hpp"
 
+#include <cmath>
 #include <vector>
 
 using namespace wf;
@@ -208,5 +210,92 @@ void test_viewport() {
         // The white ground loses green to the red fog with distance: the far row
         // must have lost strictly more than the near row.
         CHECK(farPx.g < nearPx.g);
+    }
+
+    // --- brush cursor: ground-conforming ring geometry (pure) ----------------
+    {
+        auto heightFn = [](float x, float y) { return 0.25f * x - 0.5f * y + 3.0f; };
+        const Vec3 c{10.0f, -20.0f, 0.0f};
+        const auto ring = brushRingPoints(c, 5.0f, heightFn);
+        CHECK(ring.size() == 32);                        // default n = 32
+        for (const Vec3& p : ring) {
+            const float dx = p.x - c.x, dy = p.y - c.y;
+            CHECK_NEAR(std::sqrt(dx * dx + dy * dy), 5.0f, 1e-3);
+            CHECK_NEAR(p.z, heightFn(p.x, p.y), 1e-5);   // conforms to the ground
+        }
+        CHECK(brushRingPoints(c, 5.0f, heightFn, 8).size() == 8);
+        CHECK(brushRingPoints(c, 0.0f, heightFn).empty());     // degenerate radius
+        // A null heightFn falls back to the centre height.
+        const auto flatRing = brushRingPoints(Vec3{0, 0, 4.5f}, 2.0f, nullptr, 4);
+        CHECK(flatRing.size() == 4);
+        CHECK_APPROX(flatRing[0].z, 4.5f);
+    }
+
+    // --- cursor spec plumbing + Alt-drag radius resize ------------------------
+    {
+        ViewportPanel bp(64, 48);
+        CHECK(bp.brushCursor().shape == BrushCursor::Shape::None);
+        CHECK_APPROX(bp.altDragDeltaX(), 0.0f);
+
+        BrushCursor c;
+        c.shape = BrushCursor::Shape::Circle;
+        c.center = {1, 2, 3};
+        c.radius = 12.5f;
+        c.innerRatio = 0.4f;
+        bp.setBrushCursor(c);
+        CHECK(bp.brushCursor().shape == BrushCursor::Shape::Circle);
+        CHECK_APPROX(bp.brushCursor().radius, 12.5f);
+        CHECK_APPROX(bp.brushCursor().center.y, 2.0f);
+
+        // Pure radius-resize mapping: 0.25 yd per pixel, clamped to [1, 200].
+        CHECK_APPROX(ViewportPanel::resizeRadius(20.0f, 8.0f), 22.0f);
+        CHECK_APPROX(ViewportPanel::resizeRadius(1.5f, -100.0f), 1.0f);
+        CHECK_APPROX(ViewportPanel::resizeRadius(199.0f, 100.0f), 200.0f);
+
+        // Overlay geometry lands in the existing debug-draw path: 32 outer +
+        // 32 inner segments for a circle with an inner ratio.
+        DebugDraw ddc;
+        bp.appendBrushOverlay(ddc, [](float, float) { return 0.0f; });
+        CHECK(ddc.stats().lines == 64);
+
+        // Chunk-square cursor: the 4 edges of the hovered MCNK.
+        BrushCursor sq;
+        sq.shape = BrushCursor::Shape::ChunkSquare;
+        sq.blockX = 32; sq.blockY = 32; sq.row = 0; sq.col = 0;
+        bp.setBrushCursor(sq);
+        DebugDraw dds;
+        bp.appendBrushOverlay(dds, [](float, float) { return 7.0f; });
+        CHECK(dds.stats().lines == 4);
+
+        // Shape::None appends nothing.
+        bp.setBrushCursor(BrushCursor{});
+        DebugDraw ddn;
+        bp.appendBrushOverlay(ddn, nullptr);
+        CHECK(ddn.stats().lines == 0);
+    }
+
+    // --- hovered MCNK square from a picked world point (pure) ----------------
+    {
+        int row = -1, col = -1;
+        // Just inside tile 32,32 chunk (0,0): its NW corner sits at world (0,0)
+        // and the chunk extends -CHUNK_SIZE in both axes.
+        CHECK(ViewportPanel::chunkSquareAt(Vec3{-1.0f, -1.0f, 0.0f}, 32, 32, row, col));
+        CHECK(row == 0 && col == 0);
+        // Deeper into the tile: 1.5 chunks south, 2.5 chunks east.
+        CHECK(ViewportPanel::chunkSquareAt(
+            Vec3{-1.5f * static_cast<float>(CHUNK_SIZE),
+                 -2.5f * static_cast<float>(CHUNK_SIZE), 0.0f}, 32, 32, row, col));
+        CHECK(row == 1 && col == 2);
+        // North of the tile's edge: outside -> false.
+        CHECK(!ViewportPanel::chunkSquareAt(Vec3{5.0f, -1.0f, 0.0f}, 32, 32, row, col));
+
+        // The square's corner loop conforms to the height function and starts
+        // at the chunk's NW corner.
+        const auto sq = chunkSquarePoints(32, 32, 0, 0,
+                                          [](float, float) { return 2.5f; });
+        CHECK(sq.size() == 4);
+        CHECK_APPROX(sq[0].x, 0.0f);
+        CHECK_APPROX(sq[0].y, 0.0f);
+        for (const Vec3& p : sq) CHECK_APPROX(p.z, 2.5f);
     }
 }

@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 #include "imgui.h"
 
+#include <functional>
 #include <vector>
 
 #include "image.hpp"
@@ -22,6 +23,37 @@
 #include "editor/GizmoController.hpp"
 
 namespace wf::editor {
+
+// Cursor spec of the active tool, fed by the host each frame so the viewport's
+// overlay pass can draw it: a ground-conforming circle for radius brushes
+// (sculpt/paint) or the hovered MCNK square for chunk-scoped tools (holes,
+// area id). Pure state -- geometry comes from the free functions below.
+struct BrushCursor {
+    enum class Shape { None, Circle, ChunkSquare };
+    Shape shape = Shape::None;
+    // Circle:
+    Vec3  center;                    // world-space brush centre (the pick point)
+    float radius     = 0.0f;         // world yards
+    float innerRatio = 0.0f;         // inner full-strength ring fraction [0,1]
+    // ChunkSquare:
+    int   blockX = 0, blockY = 0;    // hovered tile (WDT indices)
+    int   row = 0, col = 0;          // hovered MCNK row/col within the tile (0..15)
+};
+
+// Ground-conforming brush-ring geometry: `n` points evenly spaced around
+// `center` at `radius` in the world XY plane, each dropped onto the terrain by
+// sampling heightFn(x, y) (falls back to center.z with a null heightFn). Pure
+// -- the overlay pass turns the loop into DebugDraw line segments. Empty for a
+// degenerate radius or n < 3.
+std::vector<Vec3> brushRingPoints(const Vec3& center, float radius,
+                                  const std::function<float(float, float)>& heightFn,
+                                  int n = 32);
+
+// The four corners of MCNK (row, col) of tile (blockX, blockY) as a closed
+// loop (NW -> SW -> SE -> NE in world axes), heights via heightFn (0 when
+// null) -- the hovered-chunk square for chunk-scoped tools. Pure.
+std::vector<Vec3> chunkSquarePoints(int blockX, int blockY, int row, int col,
+                                    const std::function<float(float, float)>& heightFn);
 
 class ViewportPanel {
 public:
@@ -94,6 +126,33 @@ public:
     const PickResult& lastPick() const { return lastPick_; }
     const WorldPick&  lastWorldPick() const { return lastWorldPick_; }
 
+    // --- brush cursor overlay ------------------------------------------------
+    // The host sets the active tool's cursor spec each frame (Shape::None to
+    // hide it); the overlay pass reads it back / appends its geometry.
+    void setBrushCursor(const BrushCursor& c) { brushCursor_ = c; }
+    const BrushCursor& brushCursor() const { return brushCursor_; }
+
+    // Append the cursor's overlay geometry (ground-conforming ring -- plus an
+    // inner ring when innerRatio > 0 -- or the hovered MCNK square) to `dd`,
+    // drawn by the existing software-raster overlay pass (rasterDebug) with
+    // everything else. heightFn samples terrain height at world (x, y).
+    void appendBrushOverlay(DebugDraw& dd,
+                            const std::function<float(float, float)>& heightFn) const;
+
+    // Alt+drag radius resize: the horizontal mouse delta draw() saw this frame
+    // while Alt+LMB-dragging over the image (0 otherwise). The host applies it
+    // to the active tool's radius via resizeRadius().
+    float altDragDeltaX() const { return altDragDx_; }
+    // Pure mapping of an Alt-drag pixel delta onto a brush radius (0.25 yd per
+    // pixel, clamped to [1, 200]).
+    static float resizeRadius(float radius, float dragDeltaX);
+
+    // Hovered MCNK square of tile (blockX, blockY) under a picked world point
+    // (the existing pick path supplies the point); false when the point lies
+    // outside that tile. Pure chunk-grid math.
+    static bool chunkSquareAt(const Vec3& worldPoint, int blockX, int blockY,
+                              int& rowOut, int& colOut);
+
     const Image& scene() const { return scene_; }
     int width()  const { return width_; }
     int height() const { return height_; }
@@ -121,6 +180,8 @@ private:
     Framebuffer fb_;
     PickResult  lastPick_;
     WorldPick   lastWorldPick_;
+    BrushCursor brushCursor_;           // active tool's cursor spec (host-fed)
+    float       altDragDx_ = 0.0f;      // Alt+LMB drag delta seen by draw()
 
     // Build the world-space ray for a viewport pixel (shared by both pick paths).
     Ray rayAt(float localX, float localY) const;
