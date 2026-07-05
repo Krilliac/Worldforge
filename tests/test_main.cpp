@@ -34,6 +34,7 @@ void test_movement();
 void test_query();
 void test_query_cache();
 void test_chat();
+void test_page_text();
 void test_loot_response();
 void test_text_emote();
 void test_item_query();
@@ -92,6 +93,7 @@ int main() {
     test_query();
     test_query_cache();
     test_chat();
+    test_page_text();
     test_loot_response();
     test_text_emote();
     test_item_query();
