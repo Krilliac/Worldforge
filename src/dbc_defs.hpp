@@ -115,6 +115,35 @@ struct CharHairGeosetEntry {
     bool     showScalp = false; // field 5 (bald scalp vs hair mesh)
 };
 
+// ---- ItemDisplayInfo.dbc: item icon / model resolution ---------------------
+// The client render table item templates point at via displayId (see
+// net/item_query.hpp ItemQueryResponse::displayId). Vanilla 1.12.1 layout is 23
+// fields x 92 bytes (dbc_probe): id, modelName[2], modelTexture[2],
+// inventoryIcon[2], geosetGroup[3], flags, spellVisualId, groupSound,
+// helmetGeoset[2], texture[8]. The field ORDER matches the mangos
+// ItemDisplayInfoEntry struct (id, model, modelTexture, inventoryIcon, ...); the
+// primary inventory icon is field 5. We expose the fields a 2D editor actually
+// needs -- the icon plus the world model names.
+struct ItemDisplayInfoEntry {
+    uint32_t    id = 0;              // field 0
+    std::string modelName[2];       // fields 1..2 (left/right .mdx)
+    std::string modelTexture[2];    // fields 3..4
+    std::string inventoryIcon;      // field 5 (the icon BLP name, no extension)
+};
+ItemDisplayInfoEntry itemDisplayInfoEntry(const Dbc& dbc, uint32_t rec);
+
+// Index over ItemDisplayInfo.dbc by id -> resolve an item's displayId to its
+// inventory icon (and world model). icon(displayId) returns "" if unknown.
+class ItemDisplayDb {
+public:
+    void build(const Dbc& itemDisplayInfo);
+    const ItemDisplayInfoEntry* get(uint32_t displayId) const;
+    std::string icon(uint32_t displayId) const;   // "" if unknown / no icon
+    size_t size() const { return byId_.size(); }
+private:
+    std::unordered_map<uint32_t, ItemDisplayInfoEntry> byId_;
+};
+
 // ---- Emotes.dbc / EmotesText.dbc: the /emote system ------------------------
 // Layout from mangos-zero DBCStructure (Emotes "nxxxixx" 7 fields; EmotesText
 // "nxixx.." 19 fields), cross-checked vs the owned client. Emotes maps an emote

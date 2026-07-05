@@ -145,6 +145,32 @@ std::string normalizeModelPath(const std::string& dbcPath) {
     return dbcPath;
 }
 
+ItemDisplayInfoEntry itemDisplayInfoEntry(const Dbc& dbc, uint32_t rec) {
+    ItemDisplayInfoEntry e;
+    e.id              = dbc.getU32(rec, 0);
+    e.modelName[0]    = dbc.getString(rec, 1);
+    e.modelName[1]    = dbc.getString(rec, 2);
+    e.modelTexture[0] = dbc.getString(rec, 3);
+    e.modelTexture[1] = dbc.getString(rec, 4);
+    e.inventoryIcon   = dbc.getString(rec, 5);
+    return e;
+}
+
+void ItemDisplayDb::build(const Dbc& dbc) {
+    for (uint32_t r = 0; r < dbc.recordCount(); ++r) {
+        ItemDisplayInfoEntry e = itemDisplayInfoEntry(dbc, r);
+        byId_[e.id] = e;
+    }
+}
+const ItemDisplayInfoEntry* ItemDisplayDb::get(uint32_t displayId) const {
+    auto it = byId_.find(displayId);
+    return it == byId_.end() ? nullptr : &it->second;
+}
+std::string ItemDisplayDb::icon(uint32_t displayId) const {
+    const ItemDisplayInfoEntry* e = get(displayId);
+    return e ? e->inventoryIcon : std::string();
+}
+
 EmotesEntry emotesEntry(const Dbc& dbc, uint32_t rec) {
     EmotesEntry e;
     e.id         = dbc.getU32(rec, 0);

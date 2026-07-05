@@ -190,6 +190,29 @@ void test_dbc_defs() {
     CHECK(normalizeModelPath("a.MDL") == "a.m2");
     CHECK(normalizeModelPath("z.wmo") == "z.wmo");
 
+    // --- ItemDisplayInfo: displayId -> icon / model (23 fields x 92) --------
+    {
+        DbcBuilder idi(23);
+        uint32_t m0 = idi.addString("Sword_2H_Claymore_A_01.mdx");
+        uint32_t t0 = idi.addString("Sword_2H_Claymore_A_01");
+        uint32_t ic = idi.addString("INV_Sword_09");
+        std::vector<uint32_t> row(23, 0);
+        row[0] = 30606; row[1] = m0; row[3] = t0; row[5] = ic;  // id, model, tex, icon
+        idi.addRecord(row);
+        Dbc idiDbc = Dbc::parse(idi.build());
+        ItemDisplayInfoEntry e = itemDisplayInfoEntry(idiDbc, 0);
+        CHECK(e.id == 30606 && e.inventoryIcon == "INV_Sword_09");
+        CHECK(e.modelName[0] == "Sword_2H_Claymore_A_01.mdx");
+        CHECK(e.modelTexture[0] == "Sword_2H_Claymore_A_01");
+
+        ItemDisplayDb db;
+        db.build(idiDbc);
+        CHECK(db.size() == 1);
+        CHECK(db.icon(30606) == "INV_Sword_09");     // displayId -> icon name
+        CHECK(db.icon(999) == "");                    // unknown -> empty
+        CHECK(db.get(30606) && db.get(30606)->modelName[0] == "Sword_2H_Claymore_A_01.mdx");
+    }
+
     // --- Emotes / EmotesText: the /emote pipeline ---------------------------
     {
         // Emotes.dbc (7 fields): id, name(str), anim, flags, type, standState, sound.
