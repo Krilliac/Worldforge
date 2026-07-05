@@ -70,6 +70,9 @@ add_library(wforge STATIC
   src/placement_io.cpp
   src/lighting.cpp
   src/minimap.cpp
+  src/minimap_gen.cpp
+  src/liquid_edit.cpp
+  src/texture_layers.cpp
   src/client_data.cpp
   src/wav.cpp
   src/audio.cpp
@@ -154,6 +157,9 @@ add_executable(wforge-tests
   tests/test_net.cpp
   tests/test_world_socket.cpp
   tests/test_minimap.cpp
+  tests/test_minimap_gen.cpp
+  tests/test_liquid_edit.cpp
+  tests/test_texture_layers.cpp
   tests/test_movement.cpp
   tests/test_query.cpp
   tests/test_query_cache.cpp

@@ -61,6 +61,9 @@ void test_world_pick();
 void test_command_stack();
 void test_dbc_schema();
 void test_gridmap_writer();
+void test_liquid_edit();
+void test_texture_layers();
+void test_minimap_gen();
 
 int main() {
     test_math();
@@ -124,6 +127,9 @@ int main() {
     test_command_stack();
     test_dbc_schema();
     test_gridmap_writer();
+    test_liquid_edit();
+    test_texture_layers();
+    test_minimap_gen();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;
