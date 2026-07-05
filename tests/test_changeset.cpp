@@ -15,6 +15,11 @@ void test_changeset() {
     CHECK(sqlQuote("Slim's Friend") == "'Slim''s Friend'");
     CHECK(sqlQuote("''") == "''''''");            // every quote doubled
     CHECK(sqlQuote("") == "''");
+    // Backslash is MySQL's escape character: every one is doubled, so paths
+    // survive and a trailing backslash cannot escape the closing quote.
+    CHECK(sqlQuote("World\\Maps\\Azeroth") == "'World\\\\Maps\\\\Azeroth'");
+    CHECK(sqlQuote("trail\\") == "'trail\\\\'");
+    CHECK(sqlQuote("\\'") == "'\\\\'''");         // backslash + quote, both escaped
     bool threw = false;
     try { sqlQuote(std::string_view("bad\0nul", 7)); }
     catch (const std::invalid_argument&) { threw = true; }

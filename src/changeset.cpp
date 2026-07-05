@@ -15,6 +15,10 @@ std::string sqlQuote(std::string_view value) {
         if (c == '\0') throw std::invalid_argument("sqlQuote: embedded NUL");
         out.push_back(c);
         if (c == '\'') out.push_back('\'');   // '' is SQL's escaped quote
+        // Backslash is MySQL's escape character (the output runs against the
+        // mangos world DB): double it, or "World\Maps\..." corrupts and a
+        // trailing backslash would escape the closing quote.
+        if (c == '\\') out.push_back('\\');
     }
     out.push_back('\'');
     return out;

@@ -14,14 +14,17 @@ std::string f(float v) {
     return os.str();
 }
 
-// SQL string literal: single quotes doubled ('O'Neill' -> 'O''Neill').
+// SQL string literal: single quotes doubled ('O'Neill' -> 'O''Neill') and
+// backslashes doubled -- backslash is MySQL's escape character, so a lone one
+// corrupts the value and a trailing one escapes the closing quote.
 std::string quoted(const std::string& s) {
     std::string out;
     out.reserve(s.size() + 2);
     out += '\'';
     for (char c : s) {
-        if (c == '\'') out += "''";
-        else           out += c;
+        if      (c == '\'') out += "''";
+        else if (c == '\\') out += "\\\\";
+        else                out += c;
     }
     out += '\'';
     return out;

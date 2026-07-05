@@ -121,6 +121,16 @@ void test_waypoint_path() {
               "(299, 1, 7, 8, 9, 0, 0, 0, 'start');");
     }
 
+    // --- comment quoting: backslashes doubled for MySQL, trailing one safe ----
+    {
+        WaypointPath p;
+        appendNode(p, {{1.0f, 2.0f, 3.0f}, 0.0f, 0, 0, "World\\Maps\\stop"});
+        appendNode(p, {{4.0f, 5.0f, 6.0f}, 0.0f, 0, 0, "trail\\"});
+        std::string sql = waypointSql(p, 50001, false);
+        CHECK(sql.find("'World\\\\Maps\\\\stop'") != std::string::npos);
+        CHECK(sql.find("'trail\\\\'") != std::string::npos);   // quote not escaped away
+    }
+
     // --- empty path = just the DELETE (clears the patrol) ---------------------
     {
         WaypointPath p;
