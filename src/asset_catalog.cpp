@@ -30,6 +30,12 @@ bool iequalsAscii(const std::string& a, const char* b) {
     return n == a.size() && b[n] == '\0';
 }
 
+std::string lowerAscii(const std::string& s) {
+    std::string out = s;
+    for (char& c : out) c = (char)std::tolower((unsigned char)c);
+    return out;
+}
+
 } // namespace
 
 std::vector<MapInfo> listMaps(const MpqManager& mpq) {
@@ -47,16 +53,50 @@ std::vector<MapInfo> listMaps(const MpqManager& mpq) {
 }
 
 bool isWmoGroupFile(const std::string& wmoPath) {
-    // Group files end with _NNN.wmo (exactly three digits before the extension).
-    const std::string ext = ".wmo";
-    if (wmoPath.size() < ext.size() + 4) return false;
-    size_t dot = wmoPath.size() - ext.size();
+    // Group files end with _NNN.wmo (exactly three digits before the extension;
+    // the extension is matched case-insensitively -- MPQ paths mix casings).
+    const char* ext = ".wmo";
+    const size_t extLen = 4;
+    if (wmoPath.size() < extLen + 4) return false;
+    size_t dot = wmoPath.size() - extLen;
+    for (size_t i = 0; i < extLen; ++i)
+        if (std::tolower((unsigned char)wmoPath[dot + i]) != ext[i]) return false;
     // The 4 chars before ".wmo" must be '_' followed by three digits.
     size_t u = dot - 4;
     if (wmoPath[u] != '_') return false;
     for (size_t i = u + 1; i < dot; ++i)
         if (!std::isdigit((unsigned char)wmoPath[i])) return false;
     return true;
+}
+
+AssetTree buildAssetTree(const std::vector<std::string>& paths) {
+    AssetTree tree;
+    for (int i = 0; i < (int)paths.size(); ++i) {
+        std::vector<std::string> parts = splitPath(paths[i]);
+        if (parts.empty()) continue;                      // empty/degenerate path
+        AssetTreeNode* node = &tree.root;
+        for (size_t d = 0; d + 1 < parts.size(); ++d) {   // all but the file name
+            AssetTreeNode& child = node->dirs[lowerAscii(parts[d])];
+            if (child.name.empty()) child.name = parts[d];   // first-seen casing
+            node = &child;
+        }
+        node->fileIndices.push_back(i);   // a path with no directory -> root
+    }
+    return tree;
+}
+
+namespace {
+void collectSubtree(const AssetTreeNode& node, std::vector<int>& out) {
+    out.insert(out.end(), node.fileIndices.begin(), node.fileIndices.end());
+    for (const auto& [key, child] : node.dirs) collectSubtree(child, out);
+}
+} // namespace
+
+std::vector<int> subtreePaths(const AssetTreeNode& node) {
+    std::vector<int> out;
+    collectSubtree(node, out);
+    std::sort(out.begin(), out.end());
+    return out;
 }
 
 std::vector<std::string> listModels(const MpqManager& mpq, ModelKind kind) {

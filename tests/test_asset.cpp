@@ -302,6 +302,54 @@ void test_asset() {
         CHECK(wmoInteriorTint({c}, 4.0f).x == 1.0f);   // clamped to 1.0
     }
 
+    // --- AssetTree: listfile folder hierarchy (case-insensitive merge) ------
+    {
+        std::vector<std::string> paths = {
+            "WORLD\\Azeroth\\Elwynn\\tree.m2",     // 0
+            "World\\Azeroth\\Duskwood\\log.m2",    // 1
+            "World\\wmo\\Ironforge.wmo",           // 2
+            "loosefile.m2",                        // 3  (no directory)
+            "WORLD\\x.m2",                         // 4
+            "World\\X.m2",                         // 5  (distinct path, same dir)
+        };
+        AssetTree tree = buildAssetTree(paths);
+
+        // 'WORLD\' and 'World\' merge into ONE node (MPQ paths are case-
+        // insensitive) that keeps the first-seen display casing...
+        CHECK(tree.root.dirs.size() == 1);
+        const AssetTreeNode& world = tree.root.dirs.begin()->second;
+        CHECK(world.name == "WORLD");
+        // ...and both file entries survive the merge (genuinely distinct paths).
+        CHECK(world.fileIndices.size() == 2);
+        CHECK(world.fileIndices[0] == 4 && world.fileIndices[1] == 5);
+        CHECK(world.dirs.count("azeroth") == 1 && world.dirs.count("wmo") == 1);
+
+        // A path with no directory lands in the root.
+        CHECK(tree.root.fileIndices.size() == 1 && tree.root.fileIndices[0] == 3);
+
+        // subtreePaths returns exactly the prefix set, sorted.
+        CHECK(subtreePaths(tree.root) == std::vector<int>({0, 1, 2, 3, 4, 5}));
+        const AssetTreeNode& azeroth = world.dirs.at("azeroth");
+        CHECK(azeroth.name == "Azeroth");
+        CHECK(subtreePaths(azeroth) == std::vector<int>({0, 1}));
+        CHECK(subtreePaths(world)   == std::vector<int>({0, 1, 2, 4, 5}));
+        CHECK(subtreePaths(world.dirs.at("wmo")) == std::vector<int>({2}));
+
+        // An empty listfile builds an empty tree.
+        AssetTree empty = buildAssetTree({});
+        CHECK(empty.root.dirs.empty() && empty.root.fileIndices.empty());
+        CHECK(subtreePaths(empty.root).empty());
+
+        // WMO group-file noise filter: _NNN.wmo (3 digits), any extension casing.
+        CHECK(isWmoGroupFile("Ironforge_000.wmo"));
+        CHECK(isWmoGroupFile("wmo\\Azeroth\\Ironforge_012.WMO"));
+        CHECK(!isWmoGroupFile("Ironforge.wmo"));           // root WMO
+        CHECK(!isWmoGroupFile("Iron_ore.wmo"));            // not three digits
+        CHECK(!isWmoGroupFile("Ironforge_0000.wmo"));      // four digits
+        CHECK(!isWmoGroupFile("Ironforge_000.m2"));        // wrong extension
+        CHECK(!isWmoGroupFile(".wmo"));                    // degenerate
+    }
+
     const char* mpqPath = "wforge_asset_test.mpq";
     std::vector<std::pair<std::string, std::vector<uint8_t>>> files = {
         { "test.blp", makeRawBlp(2, 2, Rgba{40, 200, 60, 255}) },

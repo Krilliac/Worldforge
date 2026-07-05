@@ -5,6 +5,7 @@
 // client's maps (World\Maps\*\*.wdt) and its placeable models (*.m2 / root
 // *.wmo), so a panel can present them and the loader can open the selection.
 // ---------------------------------------------------------------------------
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -31,8 +32,35 @@ enum class ModelKind { M2, Wmo };
 std::vector<std::string> listModels(const MpqManager& mpq, ModelKind kind);
 
 // True if `wmoPath` is a WMO group file (basename ends with _NNN.wmo, NNN digits)
-// rather than a root WMO. Exposed for reuse/tests.
+// rather than a root WMO. Extension matched case-insensitively (MPQ paths mix
+// casings). Exposed for reuse/tests -- the asset browser offers it as a
+// browse-mode toggle so only placeable root WMOs list.
 bool isWmoGroupFile(const std::string& wmoPath);
+
+// --- AssetTree: the listfile folder hierarchy behind the asset browser -------
+// Built ONCE from flat archived paths ("World\Azeroth\...\Tree.m2"). Directory
+// children are keyed CASE-INSENSITIVELY (MPQ paths are case-insensitive, so
+// "WORLD\" and "World\" merge into one node) with the first-seen casing kept as
+// the display name. Leaf files are stored as indices into the source path
+// vector, so the tree adds no second string pool and two genuinely distinct
+// paths that differ only by case both keep their entries.
+struct AssetTreeNode {
+    std::string name;                            // display casing (first seen)
+    std::map<std::string, AssetTreeNode> dirs;   // key = lowercased component
+    std::vector<int> fileIndices;                // files directly in this dir
+};
+
+struct AssetTree {
+    AssetTreeNode root;   // unnamed; holds top-level dirs + directory-less files
+};
+
+// Build the folder tree from a flat path list (indices refer into `paths`).
+// Empty/degenerate paths are skipped; an empty list yields an empty tree.
+AssetTree buildAssetTree(const std::vector<std::string>& paths);
+
+// Every file index in `node`'s subtree (its own files + all descendants'),
+// sorted ascending -- the "scope the browser to this folder" prefix set.
+std::vector<int> subtreePaths(const AssetTreeNode& node);
 
 // A placeable thing resolved from the client's display DBCs: a display id and the
 // on-disk model it maps to (.m2 doodad or .wmo), with a human label for browsing.
