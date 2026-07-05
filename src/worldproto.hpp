@@ -158,6 +158,8 @@ struct ServerHeader { uint16_t opcode; uint32_t payloadLen; };
 struct ClientHeader { uint32_t opcode; uint32_t payloadLen; };
 
 inline std::vector<uint8_t> writeServerHeader(uint16_t opcode, uint32_t payloadLen) {
+    if (payloadLen > 0xFFFFu - 2)
+        throw std::length_error("writeServerHeader: payload exceeds the u16 size field");
     uint16_t size = static_cast<uint16_t>(payloadLen + 2);
     return { static_cast<uint8_t>(size >> 8), static_cast<uint8_t>(size & 0xFF),
              static_cast<uint8_t>(opcode & 0xFF), static_cast<uint8_t>(opcode >> 8) };
@@ -170,6 +172,10 @@ inline ServerHeader readServerHeader(const uint8_t* h) {
 }
 
 inline std::vector<uint8_t> writeClientHeader(uint32_t opcode, uint32_t payloadLen) {
+    // The size field is a u16 counting opcode + payload: silently truncating an
+    // oversize payload would desync the peer's framing, so fail loud instead.
+    if (payloadLen > 0xFFFFu - 4)
+        throw std::length_error("writeClientHeader: payload exceeds the u16 size field");
     uint16_t size = static_cast<uint16_t>(payloadLen + 4);
     return { static_cast<uint8_t>(size >> 8), static_cast<uint8_t>(size & 0xFF),
              static_cast<uint8_t>(opcode & 0xFF), static_cast<uint8_t>((opcode >> 8) & 0xFF),

@@ -53,6 +53,8 @@ public:
     //      ack. Each returns the allocated opId, or 0 if the send failed. ----
     uint32_t sendReloadGrid(uint32_t mapId, int32_t gx, int32_t gy);
     uint32_t sendMarkPoints(const std::vector<Vec3>& points, uint32_t ttlMs);
+    // Also returns 0 (without sending) when sql + reloadCommand together
+    // exceed the u16 frame size field (~64 KiB) -- never truncates on the wire.
     uint32_t sendSqlApply(const std::string& sql, const std::string& reloadCommand);
 
     // Poll until the ack for `opId` arrives (bounded wait, no busy spin).

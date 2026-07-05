@@ -4,6 +4,7 @@
 #include "worldproto.hpp"
 
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -112,5 +113,18 @@ void test_proto() {
         auto ch = writeClientHeader(CMSG_AUTH_SESSION, 200);
         ClientHeader c = readClientHeader(ch.data());
         CHECK(c.opcode == CMSG_AUTH_SESSION && c.payloadLen == 200);
+
+        // The u16 size field caps the payload: an oversize one must fail loud
+        // (a truncated size would desync the peer's framing).
+        bool threwClient = false, threwServer = false;
+        try { writeClientHeader(CMSG_AUTH_SESSION, 0x10000); }
+        catch (const std::length_error&) { threwClient = true; }
+        try { writeServerHeader(SMSG_AUTH_RESPONSE, 0x10000); }
+        catch (const std::length_error&) { threwServer = true; }
+        CHECK(threwClient);
+        CHECK(threwServer);
+        // The largest encodable payloads still frame fine.
+        CHECK(writeClientHeader(CMSG_AUTH_SESSION, 0xFFFF - 4).size() == 6);
+        CHECK(writeServerHeader(SMSG_AUTH_RESPONSE, 0xFFFF - 2).size() == 4);
     }
 }

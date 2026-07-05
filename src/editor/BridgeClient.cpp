@@ -114,6 +114,12 @@ uint32_t BridgeClient::sendMarkPoints(const std::vector<Vec3>& points, uint32_t 
 }
 
 uint32_t BridgeClient::sendSqlApply(const std::string& sql, const std::string& reloadCommand) {
+    // The frame size field is a u16 counting opcode + payload; an oversize
+    // combined payload would wrap it and desync the socket, so reject locally
+    // (return 0 = failed) instead of letting the encoder truncate.
+    constexpr size_t kMaxPayload = 0xFFFF - 4;               // u16 size - u32 opcode
+    const size_t payload = 2 + sql.size() + 2 + reloadCommand.size() + 4;
+    if (payload > kMaxPayload) return 0;
     SqlApply op; op.sql = sql; op.reloadCommand = reloadCommand; op.opId = nextOpId_++;
     return trackedSend(encode(op), op.opId);
 }

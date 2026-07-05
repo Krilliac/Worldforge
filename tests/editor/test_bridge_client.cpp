@@ -252,8 +252,24 @@ void test_bridge_client() {
         CHECK(res.applied == 0 && res.failedIndex == 0);
         CHECK(res.ackStatus == BridgeClient::kStatusTooLarge);
 
+        // sendSqlApply guards the COMBINED payload too: sql + reloadCommand
+        // each fit a u16 length prefix here, but together they overflow the
+        // u16 frame size field -- the send must fail locally (opId 0), not
+        // wrap the size and desync the socket.
+        uint32_t opId = client.sendSqlApply(std::string(40000, 'a'),
+                                            std::string(30000, 'b'));
+        CHECK(opId == 0);
+        CHECK(client.pendingAckCount() == 0);
+
+        // A frame at the cap still goes through and is acked normally.
+        uint32_t okId = client.sendSqlApply(std::string(60000, 'c'), "");
+        CHECK(okId != 0);
+        Ack okAck;
+        CHECK(client.waitForAck(okId, okAck));
+
         client.disconnect();
         server.join();
-        CHECK(server.sim.appliedSql().empty());
+        CHECK(server.sim.appliedSql().size() == 1);   // only the in-cap frame landed
+        CHECK(server.sim.appliedSql()[0].sql.size() == 60000);
     }
 }
