@@ -145,6 +145,58 @@ std::string normalizeModelPath(const std::string& dbcPath) {
     return dbcPath;
 }
 
+EmotesEntry emotesEntry(const Dbc& dbc, uint32_t rec) {
+    EmotesEntry e;
+    e.id         = dbc.getU32(rec, 0);
+    e.name       = dbc.getString(rec, 1);
+    e.animId     = dbc.getU32(rec, 2);
+    e.flags      = dbc.getU32(rec, 3);
+    e.emoteType  = dbc.getU32(rec, 4);
+    e.standState = dbc.getU32(rec, 5);
+    e.soundId    = dbc.getU32(rec, 6);
+    return e;
+}
+
+EmotesTextEntry emotesTextEntry(const Dbc& dbc, uint32_t rec) {
+    EmotesTextEntry e;
+    e.id      = dbc.getU32(rec, 0);
+    e.name    = dbc.getString(rec, 1);
+    e.emoteId = dbc.getU32(rec, 2);
+    return e;
+}
+
+namespace {
+std::string lowerStr(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+}  // namespace
+
+void EmoteDb::build(const Dbc* emotes, const Dbc* emotesText) {
+    if (emotes) {
+        for (uint32_t r = 0; r < emotes->recordCount(); ++r) {
+            EmotesEntry e = emotesEntry(*emotes, r);
+            emotes_[e.id] = e;
+        }
+    }
+    if (emotesText) {
+        for (uint32_t r = 0; r < emotesText->recordCount(); ++r) {
+            EmotesTextEntry e = emotesTextEntry(*emotesText, r);
+            if (!e.name.empty()) byCommand_[lowerStr(e.name)] = e.emoteId;
+        }
+    }
+}
+
+int EmoteDb::commandToTextEmote(const std::string& command) const {
+    auto it = byCommand_.find(lowerStr(command));
+    return it == byCommand_.end() ? -1 : static_cast<int>(it->second);
+}
+
+const EmotesEntry* EmoteDb::emote(uint32_t emoteId) const {
+    auto it = emotes_.find(emoteId);
+    return it == emotes_.end() ? nullptr : &it->second;
+}
+
 FactionTemplateEntry factionTemplateEntry(const Dbc& dbc, uint32_t rec) {
     FactionTemplateEntry e;
     e.id         = dbc.getU32(rec, 0);

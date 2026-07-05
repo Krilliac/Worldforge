@@ -115,6 +115,44 @@ struct CharHairGeosetEntry {
     bool     showScalp = false; // field 5 (bald scalp vs hair mesh)
 };
 
+// ---- Emotes.dbc / EmotesText.dbc: the /emote system ------------------------
+// Layout from mangos-zero DBCStructure (Emotes "nxxxixx" 7 fields; EmotesText
+// "nxixx.." 19 fields), cross-checked vs the owned client. Emotes maps an emote
+// id to the animation + sound to play; EmotesText maps a /command word to the
+// text-emote id the client sends in CMSG_TEXT_EMOTE (see net/text_emote.hpp).
+struct EmotesEntry {
+    uint32_t    id            = 0;   // field 0
+    std::string name;                // field 1 (slash command / internal name)
+    uint32_t    animId        = 0;   // field 2 (animation to play)
+    uint32_t    flags         = 0;   // field 3
+    uint32_t    emoteType     = 0;   // field 4 (spec proc)
+    uint32_t    standState    = 0;   // field 5
+    uint32_t    soundId       = 0;   // field 6 (event sound)
+};
+struct EmotesTextEntry {
+    uint32_t    id       = 0;        // field 0
+    std::string name;                // field 1 (the /command word, e.g. "dance")
+    uint32_t    emoteId  = 0;        // field 2 (the text-emote id -> CMSG_TEXT_EMOTE)
+};
+EmotesEntry     emotesEntry(const Dbc& dbc, uint32_t rec);
+EmotesTextEntry emotesTextEntry(const Dbc& dbc, uint32_t rec);
+
+// Resolves the /emote pipeline: a command word -> its text-emote id (what the
+// client sends), and an emote id -> its Emotes row (animation + sound to play).
+class EmoteDb {
+public:
+    void build(const Dbc* emotes, const Dbc* emotesText);
+    // Text-emote id for a /command word (case-insensitive), or -1 if unknown.
+    int  commandToTextEmote(const std::string& command) const;
+    // Emotes row for an emote id (animation/sound), or nullptr.
+    const EmotesEntry* emote(uint32_t emoteId) const;
+    size_t emoteCount() const { return emotes_.size(); }
+    size_t commandCount() const { return byCommand_.size(); }
+private:
+    std::unordered_map<uint32_t, EmotesEntry> emotes_;      // emote id -> row
+    std::unordered_map<std::string, uint32_t> byCommand_;   // lower(cmd) -> textEmote
+};
+
 // ---- FactionTemplate.dbc: creature reaction system -------------------------
 // Layout verified vs the owned 1.12.1 client (dbc_probe: 239 rec x 14 x 56):
 // id, faction, flags, ourMask (our faction-group bits), friendMask/enemyMask

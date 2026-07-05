@@ -190,6 +190,40 @@ void test_dbc_defs() {
     CHECK(normalizeModelPath("a.MDL") == "a.m2");
     CHECK(normalizeModelPath("z.wmo") == "z.wmo");
 
+    // --- Emotes / EmotesText: the /emote pipeline ---------------------------
+    {
+        // Emotes.dbc (7 fields): id, name(str), anim, flags, type, standState, sound.
+        // Real rec0 = 233, <name>, 136, 8192, 2, 0, 3782.
+        DbcBuilder em(7);
+        uint32_t nOff = em.addString("EMOTE_ONESHOT_DANCE");
+        em.addRecord({ 233, nOff, 136, 8192, 2, 0, 3782 });
+        Dbc emDbc = Dbc::parse(em.build());
+        EmotesEntry e = emotesEntry(emDbc, 0);
+        CHECK(e.id == 233 && e.animId == 136 && e.soundId == 3782);
+        CHECK(e.name == "EMOTE_ONESHOT_DANCE");
+
+        // EmotesText.dbc (19 fields): id, name(command str), emoteId, then 16 more.
+        DbcBuilder et(19);
+        uint32_t cOff = et.addString("dance");
+        std::vector<uint32_t> row(19, 0);
+        row[0] = 10; row[1] = cOff; row[2] = 34;      // id, "dance", textEmote 34
+        et.addRecord(row);
+        Dbc etDbc = Dbc::parse(et.build());
+        EmotesTextEntry te = emotesTextEntry(etDbc, 0);
+        CHECK(te.id == 10 && te.name == "dance" && te.emoteId == 34);
+
+        // EmoteDb ties them together: /command -> textEmote id, emote id -> anim.
+        EmoteDb db;
+        db.build(&emDbc, &etDbc);
+        CHECK(db.emoteCount() == 1 && db.commandCount() == 1);
+        CHECK(db.commandToTextEmote("dance") == 34);
+        CHECK(db.commandToTextEmote("DANCE") == 34);     // case-insensitive
+        CHECK(db.commandToTextEmote("wave") == -1);      // unknown -> -1
+        const EmotesEntry* row233 = db.emote(233);
+        CHECK(row233 && row233->animId == 136 && row233->soundId == 3782);
+        CHECK(db.emote(999) == nullptr);
+    }
+
     // --- FactionTemplate reaction (real 1.12.1 layout: 14 fields x 56) ------
     {
         // Real rec1 shape: id 188, faction 148, flags 1025, ourMask 0,
