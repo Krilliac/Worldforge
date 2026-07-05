@@ -18,6 +18,9 @@
 #include <vector>
 
 #include "net/query.hpp"
+#include "net/item_query.hpp"
+#include "net/quest_query.hpp"
+#include "net/guild_query.hpp"
 
 namespace wf {
 
@@ -89,25 +92,94 @@ public:
         gameObjects_[r.entry] = r;
     }
 
+    // ---- item template cache (by entry) ---------------------------------
+    const ItemQueryResponse* item(uint32_t entry) const {
+        auto it = items_.find(entry);
+        return it == items_.end() ? nullptr : &it->second;
+    }
+    bool wantItem(uint32_t entry) {
+        if (items_.count(entry) || itemPending_.count(entry)) return false;
+        itemPending_.insert(entry);
+        return true;
+    }
+    std::vector<uint8_t> buildItemQuery(uint32_t entry, uint64_t guid) {
+        if (!wantItem(entry)) return {};
+        return encodeItemQuery(entry, guid);
+    }
+    void onItemResponse(const ItemQueryResponse& r) {
+        itemPending_.erase(r.entry);
+        items_[r.entry] = r;
+    }
+
+    // ---- quest template cache (by quest id) -----------------------------
+    const QuestQueryResponse* quest(uint32_t questId) const {
+        auto it = quests_.find(questId);
+        return it == quests_.end() ? nullptr : &it->second;
+    }
+    bool wantQuest(uint32_t questId) {
+        if (quests_.count(questId) || questPending_.count(questId)) return false;
+        questPending_.insert(questId);
+        return true;
+    }
+    std::vector<uint8_t> buildQuestQuery(uint32_t questId) {
+        if (!wantQuest(questId)) return {};
+        return encodeQuestQuery(questId);
+    }
+    void onQuestResponse(const QuestQueryResponse& r) {
+        questPending_.erase(r.questId);
+        quests_[r.questId] = r;
+    }
+
+    // ---- guild cache (by guild id) --------------------------------------
+    const GuildQueryResponse* guild(uint32_t guildId) const {
+        auto it = guilds_.find(guildId);
+        return it == guilds_.end() ? nullptr : &it->second;
+    }
+    bool wantGuild(uint32_t guildId) {
+        if (guilds_.count(guildId) || guildPending_.count(guildId)) return false;
+        guildPending_.insert(guildId);
+        return true;
+    }
+    std::vector<uint8_t> buildGuildQuery(uint32_t guildId) {
+        if (!wantGuild(guildId)) return {};
+        return encodeGuildQuery(guildId);
+    }
+    void onGuildResponse(const GuildQueryResponse& r) {
+        guildPending_.erase(r.guildId);
+        guilds_[r.guildId] = r;
+    }
+
     // ---- diagnostics ----------------------------------------------------
     size_t nameCount() const { return names_.size(); }
     size_t creatureCount() const { return creatures_.size(); }
     size_t gameObjectCount() const { return gameObjects_.size(); }
+    size_t itemCount() const { return items_.size(); }
+    size_t questCount() const { return quests_.size(); }
+    size_t guildCount() const { return guilds_.size(); }
     size_t pendingCount() const {
-        return namePending_.size() + creaturePending_.size() + goPending_.size();
+        return namePending_.size() + creaturePending_.size() + goPending_.size()
+             + itemPending_.size() + questPending_.size() + guildPending_.size();
     }
     void clear() {
         names_.clear(); creatures_.clear(); gameObjects_.clear();
+        items_.clear(); quests_.clear(); guilds_.clear();
         namePending_.clear(); creaturePending_.clear(); goPending_.clear();
+        itemPending_.clear(); questPending_.clear(); guildPending_.clear();
     }
 
 private:
     std::unordered_map<uint64_t, NameQueryResponse>       names_;
     std::unordered_map<uint32_t, CreatureQueryResponse>   creatures_;
     std::unordered_map<uint32_t, GameObjectQueryResponse> gameObjects_;
+    std::unordered_map<uint32_t, ItemQueryResponse>       items_;
+    std::unordered_map<uint32_t, QuestQueryResponse>      quests_;
+    std::unordered_map<uint32_t, GuildQueryResponse>      guilds_;
     std::unordered_set<uint64_t> namePending_;
     std::unordered_set<uint32_t> creaturePending_;
     std::unordered_set<uint32_t> goPending_;
+    std::unordered_set<uint32_t> itemPending_;
+    std::unordered_set<uint32_t> questPending_;
+    std::unordered_set<uint32_t> guildPending_;
 };
 
 }  // namespace wf

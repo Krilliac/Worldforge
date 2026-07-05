@@ -64,9 +64,36 @@ void test_query_cache() {
     CHECK(cache.gameObject(goEntry) && cache.gameObject(goEntry)->name == "Battered Chest");
     CHECK(cache.gameObjectCount() == 1 && cache.pendingCount() == 0);
 
+    // --- item / quest / guild (fleet codecs, same lifecycle) ----------------
+    {
+        // Item: keyed by entry; the query carries the seen instance guid too.
+        CHECK(cache.item(1234) == nullptr);
+        CHECK(!cache.buildItemQuery(1234, 0xF1000000ull).empty());
+        CHECK(cache.buildItemQuery(1234, 0).empty());          // in flight
+        ItemQueryResponse ir; ir.entry = 1234; ir.name = "Sword"; ir.quality = 3;
+        cache.onItemResponse(ir);
+        CHECK(cache.item(1234) && cache.item(1234)->name == "Sword");
+        CHECK(cache.itemCount() == 1);
+
+        // Quest: keyed by quest id.
+        CHECK(!cache.buildQuestQuery(60).empty());
+        CHECK(cache.buildQuestQuery(60).empty());
+        QuestQueryResponse qr; qr.questId = 60; qr.level = 5;
+        cache.onQuestResponse(qr);
+        CHECK(cache.quest(60) && cache.quest(60)->level == 5 && cache.questCount() == 1);
+
+        // Guild: keyed by guild id.
+        CHECK(!cache.buildGuildQuery(7).empty());
+        GuildQueryResponse gr; gr.guildId = 7; gr.name = "Reckoning";
+        cache.onGuildResponse(gr);
+        CHECK(cache.guild(7) && cache.guild(7)->name == "Reckoning");
+        CHECK(cache.guildCount() == 1 && cache.pendingCount() == 0);
+    }
+
     // Distinct keys are independent; clear() empties everything.
     CHECK(cache.name(g + 1) == nullptr && cache.creature(entry + 1) == nullptr);
     cache.clear();
+    CHECK(cache.itemCount() == 0 && cache.questCount() == 0 && cache.guildCount() == 0);
     CHECK(cache.nameCount() == 0 && cache.creatureCount() == 0);
     CHECK(!cache.buildNameQuery(g).empty());         // after clear it re-queries
 }
