@@ -13,6 +13,19 @@ std::string f(float v) {
     os << v;
     return os.str();
 }
+
+// SQL string literal: single quotes doubled ('O'Neill' -> 'O''Neill').
+std::string quoted(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 2);
+    out += '\'';
+    for (char c : s) {
+        if (c == '\'') out += "''";
+        else           out += c;
+    }
+    out += '\'';
+    return out;
+}
 } // namespace
 
 std::string creatureInsert(const CreatureSpawn& c) {
@@ -58,6 +71,42 @@ std::string waypointInserts(uint32_t creatureGuid, const std::vector<Vec3>& path
            << f(path[i].x) << ", " << f(path[i].y) << ", " << f(path[i].z) << ", "
            << waitTimeMs << ");";
         if (i + 1 < path.size()) os << "\n";
+    }
+    return os.str();
+}
+
+std::string waypointSql(const WaypointPath& path, uint32_t idOrEntry, bool asTemplate) {
+    const char* table = asTemplate ? "creature_movement_template" : "creature_movement";
+    std::ostringstream os;
+    os.imbue(std::locale::classic());
+    // Delete-then-insert keeps the rewrite atomic: the whole path is always
+    // re-emitted, so node removal/reorder renumbers Point for free.
+    os << "DELETE FROM " << table << " WHERE Id = " << idOrEntry << ";";
+    if (path.nodes.empty()) return os.str();     // empty path = clear the patrol
+
+    os << "\nINSERT INTO " << table
+       << " (Id, Point, PositionX, PositionY, PositionZ, Orientation, "
+          "WaitTime, ScriptId, Comment) VALUES";
+    for (size_t i = 0; i < path.nodes.size(); ++i) {
+        const WaypointNode& n = path.nodes[i];
+        os << "\n(" << idOrEntry << ", " << (i + 1) << ", "
+           << f(n.pos.x) << ", " << f(n.pos.y) << ", " << f(n.pos.z) << ", "
+           << f(n.orientation) << ", " << n.waitTimeMs << ", " << n.scriptId << ", "
+           << quoted(n.comment) << ")"
+           << (i + 1 < path.nodes.size() ? "," : ";");
+    }
+    return os.str();
+}
+
+std::string movementTypeUpdateSql(uint32_t guid, int movementType, bool nodel) {
+    std::ostringstream os;
+    os.imbue(std::locale::classic());
+    os << "UPDATE creature SET MovementType = " << movementType
+       << " WHERE guid = " << guid << ";";
+    // Leaving waypoint motion normally drops the spawn's path rows; NODEL
+    // keeps them so the patrol can be re-enabled later.
+    if (movementType != 2 && !nodel) {
+        os << "\nDELETE FROM creature_movement WHERE Id = " << guid << ";";
     }
     return os.str();
 }

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "math.hpp"
+#include "waypoint_path.hpp"
 
 namespace wf {
 
@@ -49,5 +50,29 @@ std::string gameObjectInsert(const GameObjectSpawn& g);
 // Also returns the UPDATE that flips the spawn's MovementType to 2 (waypoint).
 std::string waypointInserts(uint32_t creatureGuid, const std::vector<Vec3>& path,
                             uint32_t waitTimeMs = 0);
+
+// ---------------------------------------------------------------------------
+// Waypoint path persistence (WaypointPath -> mangos-zero SQL). Two storage
+// tiers, chosen per creature:
+//   creature_movement          -- keyed by spawn GUID: this one spawn patrols.
+//   creature_movement_template -- keyed by creature ENTRY: every spawn of the
+//                                 template shares the patrol.
+// Both share the node columns Id, Point (1-based), PositionX/Y/Z, Orientation,
+// WaitTime (ms), ScriptId, Comment with PK (Id, Point).
+// ---------------------------------------------------------------------------
+
+// Atomic rewrite of a whole path: DELETE FROM <table> WHERE Id = idOrEntry;
+// followed by ONE bulk INSERT of every node (never half-applies -- removing or
+// reordering nodes just re-emits, so the implicit Point renumber is free).
+// idOrEntry is the spawn GUID (asTemplate = false) or the template entry
+// (asTemplate = true). Single quotes in Comment are escaped. An empty path
+// emits just the DELETE (clears the patrol).
+std::string waypointSql(const WaypointPath& path, uint32_t idOrEntry, bool asTemplate);
+
+// UPDATE creature SET MovementType = <movementType> for one spawn
+// (0 idle, 1 random, 2 waypoint). When switching AWAY from waypoint motion the
+// spawn's creature_movement rows are deleted too -- unless `nodel` is set (the
+// `.npc set movetype ... NODEL` semantic: keep the path rows for later reuse).
+std::string movementTypeUpdateSql(uint32_t guid, int movementType, bool nodel);
 
 } // namespace wf
