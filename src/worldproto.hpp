@@ -54,6 +54,8 @@ enum Opcode : uint32_t {
     SMSG_LOOT_RESPONSE              = 0x160,
     CMSG_PAGE_TEXT_QUERY            = 0x05A,
     SMSG_PAGE_TEXT_QUERY_RESPONSE   = 0x05B,
+    CMSG_LIST_INVENTORY             = 0x19E,
+    SMSG_LIST_INVENTORY             = 0x19F,
 
     // Player movement (MSG_* = same opcode both ways: client sends its own move,
     // server relays other players'). Vanilla 1.12.1 values, cross-checked vs
