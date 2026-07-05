@@ -211,8 +211,11 @@ public:
     // Out-of-range index or an open action: no-op.
     void jumpTo(size_t index, const ApplyFns& fns);
 
-    // Cap the deque; the oldest actions are discarded from the front (their
-    // edits become permanent). Never invalidates the cursor.
+    // Cap the deque; the oldest APPLIED actions are discarded from the front
+    // (their edits become permanent). Unapplied actions ahead of the cursor
+    // are never front-trimmed -- redo would otherwise replay history with a
+    // hole -- so any remaining overflow drops from the back of the redo tail.
+    // Never invalidates the cursor.
     void setLimit(size_t n = 30);
     size_t limit() const { return limit_; }
 

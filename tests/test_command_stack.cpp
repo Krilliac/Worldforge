@@ -183,6 +183,48 @@ void test_command_stack() {
         CHECK(world.chunks[key].areaId == 2u);         // state after (discarded) a1
     }
 
+    // --- setLimit while fully undone: the redo tail trims from the BACK -----
+    // Front-trimming an unapplied action would leave redo() replaying history
+    // with a hole; instead the furthest redo future is discarded and the
+    // remaining tail stays contiguous from the cursor.
+    {
+        FakeWorld world;
+        CommandStack stack;
+        world.chunks[key].areaId = 0;
+        for (uint32_t i = 1; i <= 3; ++i) {
+            stack.begin(AF_AreaId, "a" + std::to_string(i));
+            stack.touchChunk(key, world.cap());
+            world.chunks[key].areaId = i;
+            stack.commit(world.cap());
+        }
+        stack.undo(world.app());
+        stack.undo(world.app());
+        stack.undo(world.app());
+        CHECK(stack.cursor() == 0);                    // fully undone
+        CHECK(world.chunks[key].areaId == 0u);
+
+        stack.setLimit(2);                             // trims a3 (back), not a1
+        CHECK(stack.size() == 2);
+        CHECK(stack.cursor() == 0);
+        CHECK(stack.at(0).label == "a1");
+        CHECK(stack.at(1).label == "a2");
+
+        CHECK(stack.redo(world.app()));                // replay is hole-free
+        CHECK(world.chunks[key].areaId == 1u);
+        CHECK(stack.redo(world.app()));
+        CHECK(world.chunks[key].areaId == 2u);
+        CHECK(!stack.redo(world.app()));               // a3 was discarded
+
+        // Partially undone: applied actions front-trim first, then the tail.
+        stack.undo(world.app());                       // cursor 1: a1 applied, a2 redo
+        stack.setLimit(1);                             // drops applied a1, keeps a2
+        CHECK(stack.size() == 1);
+        CHECK(stack.cursor() == 0);
+        CHECK(stack.at(0).label == "a2");
+        CHECK(stack.redo(world.app()));
+        CHECK(world.chunks[key].areaId == 2u);
+    }
+
     // --- MergeMode::Ends: 5 same-key commits -> 1 action, undo -> original --
     {
         FakeWorld world;

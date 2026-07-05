@@ -192,10 +192,16 @@ void CommandStack::mergeInto(EditAction& top, EditAction&& incoming) const {
 }
 
 void CommandStack::trimToLimit() {
-    while (actions_.size() > limit_) {
+    // Front-trim only ever drops APPLIED actions (their edits become
+    // permanent). An UNAPPLIED front action (setLimit while undone) is redo
+    // tail: dropping it from the front would leave redo() replaying history
+    // with a hole, so the overflow comes off the BACK instead -- the furthest
+    // redo future is discarded, keeping the remaining tail contiguous.
+    while (actions_.size() > limit_ && cursor_ > 0) {
         actions_.pop_front();
-        if (cursor_ > 0) --cursor_;    // the dropped action is now permanent
+        --cursor_;                     // the dropped action is now permanent
     }
+    while (actions_.size() > limit_) actions_.pop_back();
 }
 
 } // namespace wf
