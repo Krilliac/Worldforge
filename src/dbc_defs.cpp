@@ -145,6 +145,58 @@ std::string normalizeModelPath(const std::string& dbcPath) {
     return dbcPath;
 }
 
+FactionTemplateEntry factionTemplateEntry(const Dbc& dbc, uint32_t rec) {
+    FactionTemplateEntry e;
+    e.id         = dbc.getU32(rec, 0);
+    e.faction    = dbc.getU32(rec, 1);
+    e.flags      = dbc.getU32(rec, 2);
+    e.ourMask    = dbc.getU32(rec, 3);
+    e.friendMask = dbc.getU32(rec, 4);
+    e.enemyMask  = dbc.getU32(rec, 5);
+    for (int i = 0; i < 4; ++i) e.enemies[i] = dbc.getU32(rec, 6 + i);
+    for (int i = 0; i < 4; ++i) e.friends[i] = dbc.getU32(rec, 10 + i);
+    return e;
+}
+
+bool factionIsHostile(const FactionTemplateEntry& a, const FactionTemplateEntry& b) {
+    if (b.faction) {
+        for (uint32_t e : a.enemies) if (e && e == b.faction) return true;
+        for (uint32_t f : a.friends) if (f && f == b.faction) return false;
+    }
+    return (a.enemyMask & b.ourMask) != 0;
+}
+
+bool factionIsFriendly(const FactionTemplateEntry& a, const FactionTemplateEntry& b) {
+    if (b.faction) {
+        for (uint32_t e : a.enemies) if (e && e == b.faction) return false;
+        for (uint32_t f : a.friends) if (f && f == b.faction) return true;
+    }
+    return (a.friendMask & b.ourMask) != 0;
+}
+
+FactionReaction factionReaction(const FactionTemplateEntry& a, const FactionTemplateEntry& b) {
+    if (factionIsHostile(a, b))  return FactionReaction::Hostile;   // hostile wins
+    if (factionIsFriendly(a, b)) return FactionReaction::Friendly;
+    return FactionReaction::Neutral;
+}
+
+void FactionTemplateDb::build(const Dbc& dbc) {
+    for (uint32_t r = 0; r < dbc.recordCount(); ++r) {
+        FactionTemplateEntry e = factionTemplateEntry(dbc, r);
+        byId_[e.id] = e;
+    }
+}
+const FactionTemplateEntry* FactionTemplateDb::get(uint32_t id) const {
+    auto it = byId_.find(id);
+    return it == byId_.end() ? nullptr : &it->second;
+}
+FactionReaction FactionTemplateDb::reaction(uint32_t aId, uint32_t bId) const {
+    const FactionTemplateEntry* a = get(aId);
+    const FactionTemplateEntry* b = get(bId);
+    if (!a || !b) return FactionReaction::Neutral;
+    return factionReaction(*a, *b);
+}
+
 SpellCastTimesEntry spellCastTimesEntry(const Dbc& dbc, uint32_t rec) {
     SpellCastTimesEntry e;
     e.id       = dbc.getU32(rec, 0);

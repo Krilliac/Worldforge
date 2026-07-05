@@ -115,6 +115,44 @@ struct CharHairGeosetEntry {
     bool     showScalp = false; // field 5 (bald scalp vs hair mesh)
 };
 
+// ---- FactionTemplate.dbc: creature reaction system -------------------------
+// Layout verified vs the owned 1.12.1 client (dbc_probe: 239 rec x 14 x 56):
+// id, faction, flags, ourMask (our faction-group bits), friendMask/enemyMask
+// (group bits we like/hate), then enemies[4] + friends[4] (specific faction ids).
+// Two units' reaction is decided by comparing their templates (see below) -- the
+// alpha ObjectClient reaction path.
+struct FactionTemplateEntry {
+    uint32_t id         = 0;   // field 0
+    uint32_t faction    = 0;   // field 1 (Faction.dbc id; 0 = none)
+    uint32_t flags      = 0;   // field 2
+    uint32_t ourMask    = 0;   // field 3 (faction-group bits WE belong to)
+    uint32_t friendMask = 0;   // field 4 (groups we're friendly toward)
+    uint32_t enemyMask  = 0;   // field 5 (groups we're hostile toward)
+    std::array<uint32_t, 4> enemies{};   // fields 6..9  (specific enemy factions)
+    std::array<uint32_t, 4> friends{};   // fields 10..13 (specific friend factions)
+};
+FactionTemplateEntry factionTemplateEntry(const Dbc& dbc, uint32_t rec);
+
+// Reaction of template `a` toward template `b` (asymmetric, like the client).
+// Specific enemy/friend lists win over the group masks; hostile is checked before
+// friendly. Reproduces mangos FactionTemplateEntry::IsHostileTo/IsFriendlyTo.
+bool factionIsHostile(const FactionTemplateEntry& a, const FactionTemplateEntry& b);
+bool factionIsFriendly(const FactionTemplateEntry& a, const FactionTemplateEntry& b);
+enum class FactionReaction { Hostile, Neutral, Friendly };
+FactionReaction factionReaction(const FactionTemplateEntry& a, const FactionTemplateEntry& b);
+
+// Index over FactionTemplate.dbc by id; reaction(aId, bId) resolves both and
+// answers Neutral if either id is unknown.
+class FactionTemplateDb {
+public:
+    void build(const Dbc& factionTemplate);
+    const FactionTemplateEntry* get(uint32_t id) const;
+    FactionReaction reaction(uint32_t aId, uint32_t bId) const;
+    size_t size() const { return byId_.size(); }
+private:
+    std::unordered_map<uint32_t, FactionTemplateEntry> byId_;
+};
+
 // ---- spell-support DBCs (the tables Spell.dbc indexes by *Index) ------------
 // Small fixed-layout tables verified against the owned 1.12.1 client (dbc_probe):
 // each is ID + three values, all 16 bytes / 4 fields (SpellRange is wider but we

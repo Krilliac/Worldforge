@@ -190,6 +190,53 @@ void test_dbc_defs() {
     CHECK(normalizeModelPath("a.MDL") == "a.m2");
     CHECK(normalizeModelPath("z.wmo") == "z.wmo");
 
+    // --- FactionTemplate reaction (real 1.12.1 layout: 14 fields x 56) ------
+    {
+        // Real rec1 shape: id 188, faction 148, flags 1025, ourMask 0,
+        // friendMask 8, enemyMask 0, enemies[4]=0, friends[4]=(148,28,0,0).
+        DbcBuilder ft(14);
+        ft.addRecord({ 188, 148, 1025, 0, 8, 0,  0,0,0,0,  148,28,0,0 });
+        Dbc ftDbc = Dbc::parse(ft.build());
+        FactionTemplateEntry e = factionTemplateEntry(ftDbc, 0);
+        CHECK(e.id == 188 && e.faction == 148 && e.friendMask == 8);
+        CHECK(e.friends[0] == 148 && e.friends[1] == 28 && e.enemies[0] == 0);
+
+        // Reaction logic (pure). Set up: A hates group bit 0x1 and specifically
+        // likes faction 50; B is in group 0x1 with faction 50.
+        FactionTemplateEntry A{}; A.id = 1; A.enemyMask = 0x1; A.friends = {50,0,0,0};
+        FactionTemplateEntry B{}; B.id = 2; B.faction = 50; B.ourMask = 0x1;
+        // Specific friend (50) wins over the enemy mask -> friendly, not hostile.
+        CHECK(!factionIsHostile(A, B));
+        CHECK(factionIsFriendly(A, B));
+        CHECK(factionReaction(A, B) == FactionReaction::Friendly);
+
+        // Same masks but B's faction is a specific ENEMY -> hostile (and hostile
+        // beats any friend-mask overlap).
+        FactionTemplateEntry C{}; C.id = 3; C.enemies = {50,0,0,0}; C.friendMask = 0x1;
+        CHECK(factionIsHostile(C, B));
+        CHECK(factionReaction(C, B) == FactionReaction::Hostile);
+
+        // Pure group masks, no specific lists: enemy mask overlap -> hostile.
+        FactionTemplateEntry D{}; D.id = 4; D.enemyMask = 0x2;
+        FactionTemplateEntry E{}; E.id = 5; E.ourMask = 0x2;   // faction 0 -> masks only
+        CHECK(factionReaction(D, E) == FactionReaction::Hostile);
+        // No overlap at all -> neutral.
+        FactionTemplateEntry F{}; F.id = 6; F.ourMask = 0x4;
+        CHECK(factionReaction(D, F) == FactionReaction::Neutral);
+
+        // FactionTemplateDb: reaction by id; unknown id -> neutral.
+        DbcBuilder ft2(14);
+        ft2.addRecord({ 1, 0, 0, 0, 0, 0x1,  0,0,0,0,  0,0,0,0 });   // id1: hates group1
+        ft2.addRecord({ 2, 0, 0, 0x1, 0, 0,   0,0,0,0,  0,0,0,0 });  // id2: in group1
+        Dbc ft2Dbc = Dbc::parse(ft2.build());
+        FactionTemplateDb db;
+        db.build(ft2Dbc);
+        CHECK(db.size() == 2);
+        CHECK(db.reaction(1, 2) == FactionReaction::Hostile);
+        CHECK(db.reaction(2, 1) == FactionReaction::Neutral);   // asymmetric
+        CHECK(db.reaction(1, 999) == FactionReaction::Neutral); // unknown id
+    }
+
     // --- spell-support DBCs (real 1.12.1 layouts: 4 fields x 16 bytes) ------
     {
         // SpellCastTimes: id, base(ms), perLevel, min(ms). Real rec0 = 153,3400,0,3400.
