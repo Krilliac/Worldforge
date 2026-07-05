@@ -35,6 +35,27 @@ struct M2Submesh {       // a draw range within view 0
     uint16_t indexCount  = 0;
 };
 
+// One view-0 texture unit / render batch: which submesh it draws and the
+// indices tying it to material state (render flags, color, texture, texture
+// weight, texture transform). `priorityPlane` is a SIGNED int8 on disk and is
+// the primary sort key for translucent batches (ascending; ties broken by
+// view depth, farthest first) -- see scene.cpp's blended-pass ordering.
+struct M2Batch {
+    uint8_t  flags         = 0;
+    int8_t   priorityPlane = 0;
+    uint16_t shaderId      = 0;
+    uint16_t submeshIndex  = 0;      // skinSectionIndex into `submeshes`
+    uint16_t geosetIndex   = 0;
+    uint16_t colorIndex    = 0xFFFF; // into M2Animation::colors (0xFFFF = none)
+    uint16_t materialIndex = 0;      // render-flag record (blend mode + flags)
+    uint16_t materialLayer = 0;
+    uint16_t textureCount  = 0;
+    uint16_t textureComboIndex          = 0; // via the texture lookup table
+    uint16_t textureCoordComboIndex     = 0;
+    uint16_t textureWeightComboIndex    = 0; // via transparencyLookup
+    uint16_t textureTransformComboIndex = 0; // via textureTransformLookup
+};
+
 // Static (bind-pose) attachment point: a hardpoint on a bone where items, weapon
 // trails, etc. are anchored. Only the leading id/bone/position fields are kept;
 // the per-record AnimationBlock (animate-attached flag) is skipped.
@@ -94,6 +115,7 @@ struct M2Model {
     std::vector<uint16_t>  vertexLookup;
     std::vector<uint16_t>  triangles;
     std::vector<M2Submesh> submeshes;
+    std::vector<M2Batch>   batches;   // view-0 texture units (one+ per submesh)
 
     // Static fields of the attachment / camera / light arrays. Parsed additively
     // and guarded: a model lacking these arrays leaves them empty.
@@ -127,20 +149,32 @@ struct M2Sequence {
     uint16_t subId  = 0;
     uint32_t length = 0;   // milliseconds
     uint32_t flags  = 0;
+    // Cross-fade duration (ms) when transitioning into/out of this sequence
+    // (observed 0..500; 0 = instant switch) and the index of the next variation
+    // of the same AnimationID (-1 = none). See the 0x40-byte record layout in
+    // m2.cpp for the verified field offsets.
+    uint32_t blendTime     = 0;
+    int16_t  variationNext = -1;
 };
 
 template <typename T>
 struct RawChannel {
-    uint16_t interp = 1;
+    uint16_t interp = 1;   // M2Interp (anim.hpp): 0 step, 1 linear, 2 bezier, 3 hermite
     int16_t  globalSeq = -1;
     std::vector<std::pair<uint32_t, uint32_t>> ranges; // per-animation [first,last] into times/values
     std::vector<uint32_t> times;
     std::vector<T>        values;
+    // Spline tangents, parallel to `values` for bezier/hermite tracks (the
+    // on-disk values array is then 3x the timestamp count, {value, inTan,
+    // outTan} per key). Empty for step/linear tracks.
+    std::vector<T>        inTan;
+    std::vector<T>        outTan;
 };
 
 struct M2BoneRaw {
-    int  parent = -1;
-    Vec3 pivot;
+    int      parent = -1;
+    uint32_t flags  = 0;   // M2BoneFlagBit mask (billboards; see anim.hpp)
+    Vec3     pivot;
     RawChannel<Vec3> translation;
     RawChannel<Quat> rotation;
     RawChannel<Vec3> scale;
@@ -160,6 +194,18 @@ struct M2TextureWeightRaw {         // ModelTransDef (28 bytes = 1 AnimationBloc
     RawChannel<float> weight;       // value type = fixed16 -> float (0..1)
 };
 
+// ---- UV (texture) transform animation ----------------------------------------
+// M2TextureTransform = three tracks: translation (Vec3, only x/y used),
+// rotation (a quaternion applied as a 2D rotation about the texture plane's
+// normal -- vanilla files carry only a Z component) and scaling (Vec3). The
+// pivot is the texture CENTER: M = T(0.5,0.5) * R * S * T(-0.5,-0.5), with the
+// animated translation added on top. Drives flowing water / portal swirls.
+struct M2TextureTransformRaw {      // ModelTexAnimDef (84 bytes = 3 AnimationBlocks)
+    RawChannel<Vec3> translation;
+    RawChannel<Quat> rotation;
+    RawChannel<Vec3> scaling;
+};
+
 struct M2Animation {
     std::vector<M2Sequence> sequences;
     std::vector<M2BoneRaw>  bones;
@@ -170,6 +216,11 @@ struct M2Animation {
     std::vector<M2ColorRaw>        colors;            // ModelColorDef[]   (nColors @ 0x44)
     std::vector<M2TextureWeightRaw> textureWeights;   // ModelTransDef[]   (nTransparency @ 0x54)
     std::vector<uint16_t>          transparencyLookup; // transparency_lookup_table (@ 0x8C)
+
+    // UV transform records + their lookup table. A lookup value of -1 means
+    // "no transform" (identity). Parsed additively like the arrays above.
+    std::vector<M2TextureTransformRaw> textureTransforms;       // ModelTexAnimDef[]
+    std::vector<int16_t>               textureTransformLookup;  // -1 = identity
 };
 
 // Parse sequences + bones from an M2 buffer.
@@ -205,6 +256,15 @@ float sampleM2TextureWeight(const M2Animation& anim, int weightIndex,
 // Pass the raw batch indices (colorIndex / textureWeightIndex, -1 if none).
 M2Tint sampleM2Tint(const M2Animation& anim, int colorIndex, int weightIndex,
                     int animIndex, uint32_t animTimeMs, uint32_t globalTimeMs);
+
+// Sample a UV transform at the given times, returning the matrix to apply to a
+// (u, v, 0, 1) texture coordinate (only the upper-left 2x2 + the x/y translation
+// are meaningful; a Mat4 is used so the raster path needs no new matrix type).
+// `transformIndex` is redirected through textureTransformLookup when present
+// (batch textureTransformComboIndex); a lookup value of -1, or an out-of-range
+// index, yields the identity. Pivot handling per M2TextureTransformRaw above.
+Mat4 sampleM2TextureTransform(const M2Animation& anim, int transformIndex,
+                              int animIndex, uint32_t animTimeMs, uint32_t globalTimeMs);
 
 // ---- material blend modes (M2 render-flag `blendingMode`) -------------------
 // Vanilla M2 render-flag records carry a blendingMode (0..6) + flag bits. The

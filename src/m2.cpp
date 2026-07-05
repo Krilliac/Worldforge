@@ -15,6 +15,7 @@ constexpr size_t kOffTextures   = 0x05C; // M2Array<M2Texture>
 constexpr size_t kVertexStride  = 48;    // M2Vertex
 constexpr size_t kTextureStride = 16;    // M2Texture (type, flags, M2Array name)
 constexpr size_t kSubmeshStride = 32;    // vanilla M2SkinSection (no sort centre)
+constexpr size_t kBatchStride   = 24;    // texture unit: flags/priority + 11 uint16
 
 // --- attachments / cameras / lights (static fields only) -------------------
 // VERIFY-FLAGGED (vanilla 0x100): these M2Array header offsets sit AFTER the
@@ -147,7 +148,8 @@ M2Model parseM2(const std::vector<uint8_t>& buf, const ClientProfile& profile) {
             Arr tris  = { vr.u32(), vr.u32() }; // indices (triangles)
             vr.u32(); vr.u32();                 // bones (per-vertex bone indices)
             Arr subs  = { vr.u32(), vr.u32() }; // submeshes
-            // (batches + boneCountMax follow; not needed for static geometry)
+            Arr bats  = { vr.u32(), vr.u32() }; // batches (texture units)
+            // (boneCountMax follows; not needed)
 
             requireRange(buf, vlook.offset, static_cast<size_t>(vlook.count) * 2, "view vertices");
             m.vertexLookup.reserve(vlook.count);
@@ -170,6 +172,33 @@ M2Model parseM2(const std::vector<uint8_t>& buf, const ClientProfile& profile) {
                 s.indexStart  = sr.u16();
                 s.indexCount  = sr.u16();
                 m.submeshes.push_back(s);
+            }
+
+            // batches (texture units): flags(u8) + priorityPlane(i8) + 11 uint16
+            // material/lookup indices. priorityPlane is SIGNED -- it is the
+            // primary sort key for translucent draw ordering. Guarded like the
+            // additive arrays: a count of 0 or an out-of-range offset leaves the
+            // vector empty (older fixtures/models parse as before).
+            if (bats.count && static_cast<size_t>(bats.offset) +
+                              static_cast<size_t>(bats.count) * kBatchStride <= buf.size()) {
+                for (uint32_t i = 0; i < bats.count; ++i) {
+                    ByteReader br(buf.data() + bats.offset + i * kBatchStride, kBatchStride);
+                    M2Batch b;
+                    b.flags         = br.u8();
+                    b.priorityPlane = static_cast<int8_t>(br.u8());
+                    b.shaderId      = br.u16();
+                    b.submeshIndex  = br.u16();
+                    b.geosetIndex   = br.u16();
+                    b.colorIndex    = br.u16();
+                    b.materialIndex = br.u16();
+                    b.materialLayer = br.u16();
+                    b.textureCount  = br.u16();
+                    b.textureComboIndex          = br.u16();
+                    b.textureCoordComboIndex     = br.u16();
+                    b.textureWeightComboIndex    = br.u16();
+                    b.textureTransformComboIndex = br.u16();
+                    m.batches.push_back(b);
+                }
             }
         }
     }
@@ -291,6 +320,17 @@ constexpr size_t kOffTransLookup  = 0x08C; // nTransparencyLookup, ofs (uint16[]
 constexpr size_t kColorStride = 0x38;      // ModelColorDef: 2 * AnimationBlock = 56
 constexpr size_t kTransStride = 0x1C;      // ModelTransDef:  1 * AnimationBlock = 28
 
+// VERIFY-FLAGGED (vanilla 0x100): UV texture-transform arrays. Following this
+// parser's shifted-vanilla scheme (colors @ 0x44, transparency @ 0x54), the
+// texture-transform records sit one slot past the unknown 0x5C field and their
+// lookup table directly after the transparency lookup (@ 0x8C). Both reads are
+// range-guarded, so a model whose real layout differs (or which lacks these
+// arrays) parses with empty vectors. Confirm against a real 1.12 .m2.
+constexpr size_t kOffTexTransforms      = 0x064; // nTexAnims, ofs (ModelTexAnimDef[])
+constexpr size_t kOffTexTransformLookup = 0x094; // nTexAnimLookup, ofs (int16[])
+
+constexpr size_t kTexXformStride = 0x54;   // ModelTexAnimDef: 3 * AnimationBlock = 84
+
 // VERIFY-AGAINST-REAL-FILE constants (vanilla specifics that differ across
 // sources). The parser logic below is independent of these; only the byte
 // strides depend on them, so a single real 1.12 .m2 confirms/adjusts them:
@@ -300,7 +340,10 @@ constexpr size_t kAnimBlock   = 0x1C;    // AnimationBlock: 28 bytes
 constexpr size_t kRotStride   = 16;      // rotation quaternion as 4 floats (vanilla)
 
 // Read a vanilla AnimationBlock at `at` into a RawChannel<T>. `readValue`
-// decodes one value of stride `valStride` from a ByteReader.
+// decodes one value of stride `valStride` from a ByteReader. For spline tracks
+// (interp 2 = bezier / 3 = hermite) the on-disk values array is 3x the
+// timestamp count, laid out per key as {value, inTan, outTan}; those are parsed
+// into the parallel inTan/outTan vectors.
 template <typename T, typename F>
 RawChannel<T> readChannel(const std::vector<uint8_t>& buf, size_t at,
                           size_t valStride, F readValue) {
@@ -323,10 +366,16 @@ RawChannel<T> readChannel(const std::vector<uint8_t>& buf, size_t at,
         ByteReader r(buf.data() + ofsTimes, nTimes * 4);
         for (uint32_t i = 0; i < nTimes; ++i) ch.times.push_back(r.u32());
     }
-    if (nKeys && static_cast<size_t>(ofsKeys) + nKeys * valStride <= buf.size()) {
+    const bool spline = ch.interp >= M2_INTERP_BEZIER;   // 2 or 3
+    const size_t keyStride = spline ? valStride * 3 : valStride;
+    if (nKeys && static_cast<size_t>(ofsKeys) + nKeys * keyStride <= buf.size()) {
         for (uint32_t i = 0; i < nKeys; ++i) {
-            ByteReader r(buf.data() + ofsKeys + i * valStride, valStride);
+            ByteReader r(buf.data() + ofsKeys + i * keyStride, keyStride);
             ch.values.push_back(readValue(r));
+            if (spline) {
+                ch.inTan.push_back(readValue(r));
+                ch.outTan.push_back(readValue(r));
+            }
         }
     }
     return ch;
@@ -346,6 +395,10 @@ M2Animation parseM2Animation(const std::vector<uint8_t>& buf) {
         r.seek(kOffAnimations);
         uint32_t n = r.u32(), ofs = r.u32();
         if (static_cast<size_t>(ofs) + static_cast<size_t>(n) * kSeqStride <= buf.size()) {
+            // 0x40-byte record layout this stride implies: id/subId @ 0x00,
+            // length @ 0x04, moveSpeed @ 0x08, flags @ 0x0C, frequency+pad
+            // @ 0x10, replay range @ 0x14, blendTime @ 0x1C, bounds+radius
+            // @ 0x20..0x3B, variationNext @ 0x3C, aliasNext @ 0x3E.
             for (uint32_t i = 0; i < n; ++i) {
                 ByteReader s(buf.data() + ofs + i * kSeqStride, kSeqStride);
                 M2Sequence seq;
@@ -353,6 +406,8 @@ M2Animation parseM2Animation(const std::vector<uint8_t>& buf) {
                 seq.subId  = s.u16();
                 seq.length = s.u32();
                 s.seek(0x0C); seq.flags = s.u32();   // flags location within record
+                s.seek(0x1C); seq.blendTime = s.u32();
+                s.seek(0x3C); seq.variationNext = static_cast<int16_t>(s.u16());
                 out.sequences.push_back(seq);
             }
         }
@@ -370,7 +425,7 @@ M2Animation parseM2Animation(const std::vector<uint8_t>& buf) {
             ByteReader b(buf.data() + base, kBoneStride);
             M2BoneRaw bone;
             b.u32();                                  // keyBoneId
-            b.u32();                                  // flags
+            bone.flags = b.u32();                     // billboard bits (anim.hpp)
             bone.parent = static_cast<int16_t>(b.u16());
             b.u16();                                  // submeshId
             bone.translation = readChannel<Vec3>(buf, base + 0x0C,                12, readVec3);
@@ -439,6 +494,34 @@ M2Animation parseM2Animation(const std::vector<uint8_t>& buf) {
         }
     }
 
+    // UV texture transforms: ModelTexAnimDef[] = { AnimationBlock translation
+    // (Vec3); AnimationBlock rotation (Quat, 4 floats); AnimationBlock scaling
+    // (Vec3) } -- plus their int16 lookup table (-1 = identity).
+    {
+        auto readQuat = [](ByteReader& b){ return Quat{ b.f32(), b.f32(), b.f32(), b.f32() }; };
+        r.seek(kOffTexTransforms);
+        uint32_t n = r.u32(), ofs = r.u32();
+        if (n && static_cast<size_t>(ofs) + static_cast<size_t>(n) * kTexXformStride <= buf.size()) {
+            for (uint32_t i = 0; i < n; ++i) {
+                size_t base = ofs + i * kTexXformStride;
+                M2TextureTransformRaw x;
+                x.translation = readChannel<Vec3>(buf, base,                12,         readVec3);
+                x.rotation    = readChannel<Quat>(buf, base + kAnimBlock,   kRotStride, readQuat);
+                x.scaling     = readChannel<Vec3>(buf, base + kAnimBlock*2, 12,         readVec3);
+                out.textureTransforms.push_back(x);
+            }
+        }
+    }
+    {
+        r.seek(kOffTexTransformLookup);
+        uint32_t n = r.u32(), ofs = r.u32();
+        if (n && static_cast<size_t>(ofs) + static_cast<size_t>(n) * 2 <= buf.size()) {
+            ByteReader l(buf.data() + ofs, n * 2);
+            for (uint32_t i = 0; i < n; ++i)
+                out.textureTransformLookup.push_back(static_cast<int16_t>(l.u16()));
+        }
+    }
+
     return out;
 }
 
@@ -482,6 +565,37 @@ M2Tint sampleM2Tint(const M2Animation& anim, int colorIndex, int weightIndex,
     return t;
 }
 
+Mat4 sampleM2TextureTransform(const M2Animation& anim, int transformIndex,
+                              int animIndex, uint32_t animTimeMs, uint32_t globalTimeMs) {
+    if (transformIndex < 0) return Mat4::identity();
+    // Redirect through the texture-transform lookup table when present (the
+    // batch carries a combo index; -1 in the table means "no transform").
+    int idx = transformIndex;
+    if (!anim.textureTransformLookup.empty()) {
+        if (static_cast<size_t>(transformIndex) >= anim.textureTransformLookup.size())
+            return Mat4::identity();
+        idx = anim.textureTransformLookup[transformIndex];
+    }
+    if (idx < 0 || static_cast<size_t>(idx) >= anim.textureTransforms.size())
+        return Mat4::identity();
+    const M2TextureTransformRaw& x = anim.textureTransforms[idx];
+
+    Vec3 tr = sampleChannel<RawChannel<Vec3>, Vec3>(
+                  x.translation, animIndex, animTimeMs, globalTimeMs, anim.globalSeqs, Vec3{0,0,0});
+    Quat ro = sampleChannel<RawChannel<Quat>, Quat>(
+                  x.rotation, animIndex, animTimeMs, globalTimeMs, anim.globalSeqs, Quat::identity());
+    Vec3 sc = sampleChannel<RawChannel<Vec3>, Vec3>(
+                  x.scaling, animIndex, animTimeMs, globalTimeMs, anim.globalSeqs, Vec3{1,1,1});
+
+    // Rotate/scale about the texture centre; the animated translation (only
+    // x/y are used) scrolls on top:  M = T(tx,ty) * T(.5,.5) * R * S * T(-.5,-.5).
+    return Mat4::translate(Vec3{ tr.x, tr.y, 0.0f })
+         * Mat4::translate(Vec3{ 0.5f, 0.5f, 0.0f })
+         * ro.toMat4()
+         * Mat4::scale(sc)
+         * Mat4::translate(Vec3{ -0.5f, -0.5f, 0.0f });
+}
+
 // Slice each bone's raw channels down to one animation, producing pose-ready
 // Bones for the animation core. Uses the per-animation interpolation range when
 // present; otherwise (global sequence / no ranges) uses the whole track.
@@ -489,42 +603,36 @@ std::vector<Bone> buildBonesForAnimation(const M2Animation& anim, int animIndex)
     std::vector<Bone> bones;
     bones.reserve(anim.bones.size());
 
-    auto sliceVec3 = [&](const RawChannel<Vec3>& ch) -> KeyTrack<Vec3> {
-        KeyTrack<Vec3> kt; kt.interp = ch.interp;
-        if (ch.times.empty()) return kt;
+    // Slice one channel to the animation's key range, carrying the spline
+    // tangents along when the track has them (bezier/hermite).
+    auto slice = [&](const auto& ch, auto& kt) {
+        kt.interp = ch.interp;
+        if (ch.times.empty()) return;
         size_t first = 0, last = ch.times.size() - 1;
         if (animIndex >= 0 && static_cast<size_t>(animIndex) < ch.ranges.size()) {
             first = ch.ranges[animIndex].first;
             last  = ch.ranges[animIndex].second;
         }
+        bool tangents = ch.inTan.size() == ch.values.size() &&
+                        ch.outTan.size() == ch.values.size();
         for (size_t i = first; i <= last && i < ch.times.size(); ++i) {
             kt.times.push_back(ch.times[i]);
             kt.values.push_back(ch.values[i]);
+            if (tangents) {
+                kt.inTan.push_back(ch.inTan[i]);
+                kt.outTan.push_back(ch.outTan[i]);
+            }
         }
-        return kt;
-    };
-    auto sliceQuat = [&](const RawChannel<Quat>& ch) -> KeyTrack<Quat> {
-        KeyTrack<Quat> kt; kt.interp = ch.interp;
-        if (ch.times.empty()) return kt;
-        size_t first = 0, last = ch.times.size() - 1;
-        if (animIndex >= 0 && static_cast<size_t>(animIndex) < ch.ranges.size()) {
-            first = ch.ranges[animIndex].first;
-            last  = ch.ranges[animIndex].second;
-        }
-        for (size_t i = first; i <= last && i < ch.times.size(); ++i) {
-            kt.times.push_back(ch.times[i]);
-            kt.values.push_back(ch.values[i]);
-        }
-        return kt;
     };
 
     for (const M2BoneRaw& rb : anim.bones) {
         Bone b;
         b.parent = rb.parent;
+        b.flags  = rb.flags;
         b.pivot  = rb.pivot;
-        b.translation = sliceVec3(rb.translation);
-        b.rotation    = sliceQuat(rb.rotation);
-        b.scale       = sliceVec3(rb.scale);
+        slice(rb.translation, b.translation);
+        slice(rb.rotation,    b.rotation);
+        slice(rb.scale,       b.scale);
         bones.push_back(b);
     }
     return bones;

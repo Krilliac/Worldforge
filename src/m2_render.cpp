@@ -82,6 +82,44 @@ TexMesh poseM2(const M2Model& model, const M2Animation& anim, int animIndex, uin
     return skinM2(model, pose);
 }
 
+float m2BlendWeight(uint32_t elapsedMs, uint32_t blendTimeMs) {
+    if (blendTimeMs == 0) return 1.0f;                  // instant switch
+    if (elapsedMs >= blendTimeMs) return 1.0f;
+    return static_cast<float>(elapsedMs) / static_cast<float>(blendTimeMs);
+}
+
+std::vector<Mat4> computePoseBlended(const M2Animation& anim,
+                                     int seqA, uint32_t timeA,
+                                     int seqB, uint32_t timeB, float w,
+                                     const Mat4* modelView) {
+    if (w < 0.0f) w = 0.0f;
+    if (w > 1.0f) w = 1.0f;
+    std::vector<Bone> bonesA = buildBonesForAnimation(anim, seqA);
+    std::vector<Bone> bonesB = buildBonesForAnimation(anim, seqB);
+
+    // Blend each bone's local TRS between the two sequences, then compose the
+    // hierarchy once from the blended locals (parents/pivots/flags are the same
+    // skeleton on both sides -- only the key ranges differ).
+    std::vector<Mat4> locals;
+    locals.reserve(bonesA.size());
+    for (size_t i = 0; i < bonesA.size(); ++i) {
+        const Bone& a = bonesA[i];
+        const Bone& b = bonesB[i];
+        Vec3 tr = interpolate(a.translation.sample(timeA, Vec3{0,0,0}),
+                              b.translation.sample(timeB, Vec3{0,0,0}), w);
+        Quat ro = slerp(a.rotation.sample(timeA, Quat::identity()),
+                        b.rotation.sample(timeB, Quat::identity()), w);
+        Vec3 sc = interpolate(a.scale.sample(timeA, Vec3{1,1,1}),
+                              b.scale.sample(timeB, Vec3{1,1,1}), w);
+        locals.push_back(Mat4::translate(a.pivot)
+                       * Mat4::translate(tr)
+                       * ro.toMat4()
+                       * Mat4::scale(sc)
+                       * Mat4::translate(Vec3{ -a.pivot.x, -a.pivot.y, -a.pivot.z }));
+    }
+    return composePose(bonesA, locals, modelView);
+}
+
 M2Tint submeshTint(const M2Animation& anim, int colorIndex, int weightIndex,
                    int animIndex, uint32_t animTimeMs, uint32_t globalTimeMs) {
     // Delegate to the material-animation sampler: color RGB * (colorAlpha *

@@ -34,6 +34,23 @@ TexMesh skinM2Geosets(const M2Model& model, const std::vector<Mat4>& bonePose,
 // (Builds the bones for that sequence and composes the pose.)
 TexMesh poseM2(const M2Model& model, const M2Animation& anim, int animIndex, uint32_t tMs);
 
+// ---- sequence blending -------------------------------------------------------
+// Cross-fade weight for a sequence transition: w = elapsed / blendTime, clamped
+// to [0,1]. A blendTime of 0 means an instant switch (w = 1).
+float m2BlendWeight(uint32_t elapsedMs, uint32_t blendTimeMs);
+
+// Two-sequence blended pose: sample both sequences' channels per bone, lerp
+// translation/scale and slerp rotation with weight `w` (0 = pure seqA, 1 = pure
+// seqB), then compose the skeleton -- so a Stand->Run transition eases over the
+// target sequence's blendTime instead of popping. An out-of-range sequence
+// index samples that side at the bind pose (identity channels' fallbacks).
+// With `modelView` (view * model placement), billboarded bones face the camera
+// (anim.hpp applyBoneBillboard); pass nullptr for a camera-agnostic pose.
+std::vector<Mat4> computePoseBlended(const M2Animation& anim,
+                                     int seqA, uint32_t timeA,
+                                     int seqB, uint32_t timeB, float w,
+                                     const Mat4* modelView = nullptr);
+
 // ---- per-submesh material tint (color/alpha + texture-weight animation) -----
 // A posed model's submeshes carry, in the embedded skin profile's batch records,
 // a colorIndex (-> ModelColorDef[]) and a textureWeightIndex (-> ModelTransDef[],

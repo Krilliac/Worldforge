@@ -14,6 +14,7 @@ void put16(std::vector<uint8_t>& b, uint16_t v){ b.push_back(v&0xFF); b.push_bac
 void putf (std::vector<uint8_t>& b, float f){ uint32_t v; std::memcpy(&v,&f,4); put32(b,v); }
 void align4(std::vector<uint8_t>& b){ while (b.size() % 4) b.push_back(0); }
 void patch32(std::vector<uint8_t>& b, size_t at, uint32_t v){ for(int i=0;i<4;i++) b[at+i]=(v>>(8*i))&0xFF; }
+void patch16(std::vector<uint8_t>& b, size_t at, uint16_t v){ b[at]=v&0xFF; b[at+1]=(v>>8)&0xFF; }
 } // namespace
 
 void test_m2() {
@@ -62,13 +63,30 @@ void test_m2() {
     put16(f,0); put16(f,3);                      // indexStart=0, indexCount=3
     for (int i=0;i<20;i++) f.push_back(0);       // pad to 32-byte stride
 
+    // batch (texture unit) record (24 bytes): flags(u8) + priorityPlane(i8,
+    // SIGNED) + 11 uint16 material/lookup indices.
+    uint32_t batOff = (uint32_t)f.size();
+    f.push_back(0x01);                           // flags
+    f.push_back((uint8_t)(int8_t)-3);            // priorityPlane = -3 (signed!)
+    put16(f, 0);                                 // shaderId
+    put16(f, 0);                                 // submeshIndex
+    put16(f, 0);                                 // geosetIndex
+    put16(f, 0xFFFF);                            // colorIndex (none)
+    put16(f, 2);                                 // materialIndex
+    put16(f, 0);                                 // materialLayer
+    put16(f, 1);                                 // textureCount
+    put16(f, 4);                                 // textureComboIndex
+    put16(f, 0);                                 // textureCoordComboIndex
+    put16(f, 1);                                 // textureWeightComboIndex
+    put16(f, 3);                                 // textureTransformComboIndex
+
     // view header (44 bytes): vertices, indices, bones, submeshes, batches, boneCountMax
     uint32_t viewOff = (uint32_t)f.size();
     put32(f,3); put32(f,lookupOff);              // vertices (lookup)
     put32(f,3); put32(f,triOff);                 // indices (triangles)
     put32(f,0); put32(f,0);                      // bones
     put32(f,1); put32(f,subOff);                 // submeshes
-    put32(f,0); put32(f,0);                      // batches
+    put32(f,1); put32(f,batOff);                 // batches
     put32(f,0);                                  // boneCountMax
 
     // attachment record (48 bytes): id, bone, pos, then a 28-byte M2Track (skipped)
@@ -140,6 +158,17 @@ void test_m2() {
 
     // The resolve chain (triangle -> lookup -> global vertex) is consistent.
     CHECK(m.resolveVertex(m.triangles[2]) == 2);
+
+    // ---- view-0 batch (texture unit): priorityPlane is parsed SIGNED ---------
+    CHECK(m.batches.size() == 1);
+    CHECK(m.batches[0].flags == 0x01);
+    CHECK(m.batches[0].priorityPlane == -3);       // int8 on disk, sign preserved
+    CHECK(m.batches[0].submeshIndex == 0);
+    CHECK(m.batches[0].colorIndex == 0xFFFF);
+    CHECK(m.batches[0].materialIndex == 2);
+    CHECK(m.batches[0].textureComboIndex == 4);
+    CHECK(m.batches[0].textureWeightComboIndex == 1);
+    CHECK(m.batches[0].textureTransformComboIndex == 3);
 
     // ---- attachments / cameras / lights (static leading fields) --------------
     CHECK(m.attachments.size() == 1);
@@ -238,5 +267,87 @@ void test_m2() {
         CHECK(ok);                                     // a profile allowing 0x104 parses it
 
         CHECK(parseM2(f).version == 0x100);            // vanilla model still parses by default
+    }
+
+    // ---- animation extras: sequence blendTime/variationNext + spline track ----
+    // A fresh fixture with known bytes at the verified 0x40-byte sequence-record
+    // offsets (blendTime @ 0x1C, variationNext @ 0x3C) and a hermite bone track
+    // whose on-disk values array is 3x the timestamp count ({value, inTan,
+    // outTan} per key), parsed into the parallel inTan/outTan vectors.
+    {
+        std::vector<uint8_t> g(0x150, 0);
+        g[0]='M'; g[1]='D'; g[2]='2'; g[3]='0';
+        patch32(g, 0x004, 0x100);
+
+        // two sequences: the same AnimationID (id 1), variation 0 -> 1 chained
+        // via variationNext (-1 = none).
+        uint32_t seqOff = (uint32_t)g.size();
+        g.insert(g.end(), 2 * 0x40, 0);
+        patch16(g, seqOff + 0x00, 1);             // seq0: id = 1
+        patch16(g, seqOff + 0x02, 0);             //       subId = 0
+        patch32(g, seqOff + 0x04, 2000);          //       length
+        patch32(g, seqOff + 0x0C, 0x20);          //       flags
+        patch32(g, seqOff + 0x1C, 150);           //       blendTime = 150 ms
+        patch16(g, seqOff + 0x3C, 1);             //       variationNext = 1
+        patch16(g, seqOff + 0x40 + 0x00, 1);      // seq1: id = 1
+        patch16(g, seqOff + 0x40 + 0x02, 1);      //       subId = 1
+        patch32(g, seqOff + 0x40 + 0x04, 800);    //       length
+        patch32(g, seqOff + 0x40 + 0x1C, 0);      //       blendTime 0 = instant
+        patch16(g, seqOff + 0x40 + 0x3C, 0xFFFF); //       variationNext = -1
+
+        // one bone whose translation track is HERMITE (interp 3).
+        uint32_t bonesOff = (uint32_t)g.size();
+        g.insert(g.end(), 0x6C, 0);
+        uint32_t timesOff = (uint32_t)g.size();
+        put32(g, 0); put32(g, 1000);              // timestamps
+        uint32_t valuesOff = (uint32_t)g.size();
+        putf(g, 0); putf(g, 0); putf(g, 0);       // key 0: value  (0,0,0)
+        putf(g, 1); putf(g, 1); putf(g, 1);       //        inTan  (1,1,1)
+        putf(g, 2); putf(g, 2); putf(g, 2);       //        outTan (2,2,2)
+        putf(g,10); putf(g, 0); putf(g, 0);       // key 1: value  (10,0,0)
+        putf(g, 3); putf(g, 3); putf(g, 3);       //        inTan  (3,3,3)
+        putf(g, 4); putf(g, 4); putf(g, 4);       //        outTan (4,4,4)
+
+        patch32(g, bonesOff + 0x00, 0xFFFFFFFF);  // keyBoneId = -1
+        patch16(g, bonesOff + 0x08, 0xFFFF);      // parent = -1
+        size_t tb = bonesOff + 0x0C;              // translation AnimationBlock
+        patch16(g, tb + 0x00, 3);                 // interp = hermite
+        patch16(g, tb + 0x02, 0xFFFF);            // globalSeq = -1
+        patch32(g, tb + 0x0C, 2); patch32(g, tb + 0x10, timesOff);   // timestamps
+        patch32(g, tb + 0x14, 2); patch32(g, tb + 0x18, valuesOff);  // keys (3x)
+
+        patch32(g, 0x01C, 2); patch32(g, 0x020, seqOff);    // animations
+        patch32(g, 0x034, 1); patch32(g, 0x038, bonesOff);  // bones
+
+        M2Animation anim = parseM2Animation(g);
+        CHECK(anim.sequences.size() == 2);
+        CHECK(anim.sequences[0].id == 1 && anim.sequences[0].subId == 0);
+        CHECK(anim.sequences[0].length == 2000);
+        CHECK(anim.sequences[0].flags == 0x20);
+        CHECK(anim.sequences[0].blendTime == 150);
+        CHECK(anim.sequences[0].variationNext == 1);
+        CHECK(anim.sequences[1].blendTime == 0);
+        CHECK(anim.sequences[1].variationNext == -1);
+
+        CHECK(anim.bones.size() == 1);
+        const RawChannel<Vec3>& tr = anim.bones[0].translation;
+        CHECK(tr.interp == M2_INTERP_HERMITE);
+        CHECK(tr.times.size() == 2);
+        CHECK(tr.values.size() == 2);
+        CHECK(tr.inTan.size() == 2 && tr.outTan.size() == 2);
+        CHECK_APPROX(tr.values[1].x, 10.0f);
+        CHECK_APPROX(tr.inTan[0].x,   1.0f);
+        CHECK_APPROX(tr.outTan[0].y,  2.0f);
+        CHECK_APPROX(tr.inTan[1].z,   3.0f);
+        CHECK_APPROX(tr.outTan[1].x,  4.0f);
+
+        // The sliced KeyTrack keeps the tangents, so the pose path samples the
+        // spline (NOT a straight lerp: linear at 500 ms would be 5.0).
+        std::vector<Bone> bones = buildBonesForAnimation(anim, 0);
+        CHECK(bones[0].translation.inTan.size() == 2);
+        float mid = bones[0].translation.sample(500, Vec3{0,0,0}).x;
+        // hermite: 0.5*0 + 0.5*10 + 0.125*outTan0.x + (-0.125)*inTan1.x
+        //        = 5 + 0.125*2 - 0.125*3 = 4.875
+        CHECK_APPROX(mid, 4.875f);
     }
 }

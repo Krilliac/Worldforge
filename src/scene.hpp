@@ -23,6 +23,20 @@ struct ModelInstance {
     const Image*   texture = nullptr;   // BLP-decoded RGBA
     Mat4           transform = Mat4::identity();   // local -> world placement
     bool           isWmo   = false;     // WMO (long draw distance) vs M2 doodad
+
+    // Translucent-batch state (M2 blend modes 2..6, resolveM2Material). A
+    // translucent instance is deferred past every opaque draw and rendered
+    // alpha-blended with depth-test ON but depth-write OFF, ordered by
+    // (priorityPlane ascending, then view depth FARTHEST first) so overlapping
+    // translucency composites identically regardless of submission order.
+    bool translucent   = false;
+    int  priorityPlane = 0;             // from M2Batch::priorityPlane (int8)
+
+    // Optional animated UV transform (M2 texture transform, e.g. flowing
+    // water); sampled per frame via sampleM2TextureTransform and applied in the
+    // rasteriser's texel fetch when useUvTransform is set.
+    bool useUvTransform = false;
+    Mat4 uvTransform = Mat4::identity();
 };
 
 // A translucent liquid (MCLQ) surface in world space: the flat water/lava mesh
@@ -60,8 +74,10 @@ struct Scene {
 };
 
 // Render the scene into `fb` through `viewProj`: terrain first (lit/shaded),
-// then every textured instance (placement baked via viewProj * transform), then
-// the debug overlay on top.
+// then every opaque textured instance (placement baked via viewProj *
+// transform), then the translucent instances sorted by (priorityPlane asc,
+// centroid depth farthest-first) with depth-write off, then liquids, then the
+// debug overlay on top.
 void renderScene(Framebuffer& fb, const Scene& scene, const Mat4& viewProj);
 
 } // namespace wf

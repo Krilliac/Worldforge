@@ -151,7 +151,18 @@ void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
 
 void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                    const Image& tex, const ShadeLight& light, bool alphaBlend, float alphaMul) {
+    // Legacy behaviour: the blended path never writes depth, the opaque one does.
+    TexDrawOptions opt;
+    opt.alphaBlend = alphaBlend;
+    opt.alphaMul   = alphaMul;
+    opt.depthWrite = !alphaBlend;
+    rasterTexMesh(fb, mesh, mvp, tex, light, opt);
+}
+
+void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
+                   const Image& tex, const ShadeLight& light, const TexDrawOptions& opt) {
     int W = fb.color.width, H = fb.color.height;
+    float alphaMul = opt.alphaMul;
     if (alphaMul < 0.0f) alphaMul = 0.0f;
     if (alphaMul > 1.0f) alphaMul = 1.0f;
     Vec3 L = normalize(light.dir);
@@ -206,6 +217,11 @@ void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                 float iw = l0*iw0 + l1*iw1 + l2*iw2;
                 float u = (l0*V0.uv.x*iw0 + l1*V1.uv.x*iw1 + l2*V2.uv.x*iw2) / iw;
                 float v = (l0*V0.uv.y*iw0 + l1*V1.uv.y*iw1 + l2*V2.uv.y*iw2) / iw;
+                if (opt.useUvTransform) {
+                    // Animated UV matrix (texture transform): (u,v,0,1) row.
+                    Vec4 uv = opt.uvTransform * Vec4(u, v, 0.0f, 1.0f);
+                    u = uv.x; v = uv.y;
+                }
                 Rgba texel = sampleTextureWrap(tex, u, v);
                 if (texel.a < 8) continue;                 // alpha-test cutout
 
@@ -223,10 +239,10 @@ void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                 c.r = clamp8(texel.r * lf.x * vr);
                 c.g = clamp8(texel.g * lf.y * vg);
                 c.b = clamp8(texel.b * lf.z * vb);
-                if (alphaBlend) {
-                    // Composite over the framebuffer; translucent -> no depth write.
-                    // alphaMul fades the whole object (distance fade) atop the
-                    // texel's own alpha.
+                if (opt.alphaBlend) {
+                    // Composite over the framebuffer (translucent). alphaMul
+                    // fades the whole object (distance fade) atop the texel's
+                    // own alpha.
                     float a = (texel.a / 255.0f) * alphaMul;
                     Rgba& d = fb.color.at(px, py);
                     d.r = clamp8(c.r * a + d.r * (1.0f - a));
@@ -234,9 +250,9 @@ void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                     d.b = clamp8(c.b * a + d.b * (1.0f - a));
                 } else {
                     c.a = 255;
-                    dref = z;
                     fb.color.at(px, py) = c;
                 }
+                if (opt.depthWrite) dref = z;
             }
         }
     }

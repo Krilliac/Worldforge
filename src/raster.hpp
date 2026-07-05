@@ -72,6 +72,26 @@ struct TexMesh   { std::vector<TexVertex> vertices; std::vector<uint32_t> indice
 // terrain texturing paths.
 Rgba sampleTextureWrap(const Image& tex, float u, float v);
 
+// Per-draw state for the textured path, beyond lighting. Defaults reproduce the
+// legacy opaque behaviour exactly.
+//   * alphaBlend: composite texels over the framebuffer by their alpha
+//     (translucent surfaces) instead of the opaque alpha-tested path.
+//   * alphaMul:   scales the composite alpha (whole-object distance fade);
+//     blended path only.
+//   * depthWrite: whether covered pixels update the z-buffer. Translucent M2
+//     batches draw depth-testED but not depth-writING (sorted back-to-front in
+//     scene.cpp), so nearer translucency composites over them correctly.
+//   * uvTransform + useUvTransform: an animated UV matrix (M2 texture
+//     transform, sampleM2TextureTransform) applied to the interpolated (u, v)
+//     as (u, v, 0, 1) before texel fetch -- flowing water / portal swirls.
+struct TexDrawOptions {
+    bool  alphaBlend = false;
+    float alphaMul   = 1.0f;
+    bool  depthWrite = true;
+    bool  useUvTransform = false;
+    Mat4  uvTransform = Mat4::identity();
+};
+
 // Render a textured mesh: perspective-correct UV interpolation, nearest texel
 // sampling (UV wraps/repeats), modulated by directional + ambient lighting.
 // Texels with alpha < 8 are discarded (alpha-test) so cutout textures (foliage)
@@ -88,6 +108,11 @@ void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
 void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                    const Image& texture, const ShadeLight& light, bool alphaBlend = false,
                    float alphaMul = 1.0f);
+// Full-state overload: the two above delegate here (alphaBlend implies
+// depthWrite off, matching the historical behaviour).
+void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
+                   const Image& texture, const ShadeLight& light,
+                   const TexDrawOptions& opt);
 
 // Render an untextured mesh as a single flat-tinted, alpha-blended surface --
 // the translucent liquid pass (ADT MCLQ water/ocean/magma/slime). `tint` is the
