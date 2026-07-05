@@ -23,6 +23,18 @@ std::string getStr(ByteReader& r) {
     r.skip(n);
     return s;
 }
+
+// Bounds-checked string read for the safe decoders: validates the length
+// prefix against the remaining bytes BEFORE touching the data (getStr's
+// string construction would over-read on a corrupt frame).
+bool getStrChecked(ByteReader& r, std::string& out) {
+    if (r.remaining() < 2) return false;
+    uint16_t n = r.u16();
+    if (n > r.remaining()) return false;
+    out.assign(reinterpret_cast<const char*>(r.ptr()), n);
+    r.skip(n);
+    return true;
+}
 } // namespace
 
 DebugCategory categoryFor(DebugVisType t) {
@@ -86,6 +98,23 @@ std::vector<uint8_t> encode(const OverrideLight& o) {
     w.u8(static_cast<uint8_t>(o.scope)); w.u64(o.targetGuid); w.u32(o.zoneId); w.u32(o.opId);
     return frame(EDITOR_OVERRIDE_LIGHT, w.data());
 }
+std::vector<uint8_t> encode(const ReloadGrid& g) {
+    ByteWriter w; w.u32(g.mapId); w.i32(g.gx); w.i32(g.gy); w.u32(g.opId);
+    return frame(EDITOR_RELOAD_GRID, w.data());
+}
+std::vector<uint8_t> encode(const MarkPoints& m) {
+    ByteWriter w; w.u32(static_cast<uint32_t>(m.points.size()));
+    for (const Vec3& p : m.points) putVec3(w, p);
+    w.u32(m.ttlMs); w.u32(m.opId);
+    return frame(EDITOR_MARK_POINTS, w.data());
+}
+std::vector<uint8_t> encode(const SqlApply& s) {
+    // NB: both the string length prefixes (u16) and the frame size field (u16,
+    // counting opcode + payload) cap a statement at ~64 KiB -- BridgeClient
+    // rejects oversized entries before encoding rather than truncating SQL.
+    ByteWriter w; putStr(w, s.sql); putStr(w, s.reloadCommand); w.u32(s.opId);
+    return frame(EDITOR_SQL_APPLY, w.data());
+}
 
 // ---- decode ----
 MoveObject decodeMoveObject(const std::vector<uint8_t>& p) {
@@ -119,6 +148,78 @@ OverrideLight decodeOverrideLight(const std::vector<uint8_t>& p) {
     o.scope = static_cast<FxScope>(r.u8()); o.targetGuid = r.u64();
     o.zoneId = r.u32(); o.opId = r.u32();
     return o;
+}
+
+// ---- safe decoders (truncated/corrupt payload -> false, never a throw) ----
+bool decodeReloadGrid(const std::vector<uint8_t>& p, ReloadGrid& out) {
+    if (p.size() < 16) return false;
+    ByteReader r(p); ReloadGrid g;
+    g.mapId = r.u32(); g.gx = r.i32(); g.gy = r.i32(); g.opId = r.u32();
+    out = g;
+    return true;
+}
+bool decodeMarkPoints(const std::vector<uint8_t>& p, MarkPoints& out) {
+    ByteReader r(p); MarkPoints m;
+    if (r.remaining() < 4) return false;
+    uint32_t n = r.u32();
+    // The declared point count (12 bytes each) plus the ttl+opId tail must fit
+    // in what actually arrived; a lying count is a corrupt frame.
+    if (n > r.remaining() / 12 || r.remaining() < static_cast<size_t>(n) * 12 + 8) return false;
+    m.points.reserve(n);
+    for (uint32_t i = 0; i < n; ++i) m.points.push_back(getVec3(r));
+    m.ttlMs = r.u32(); m.opId = r.u32();
+    out = std::move(m);
+    return true;
+}
+bool decodeSqlApply(const std::vector<uint8_t>& p, SqlApply& out) {
+    ByteReader r(p); SqlApply s;
+    if (!getStrChecked(r, s.sql)) return false;
+    if (!getStrChecked(r, s.reloadCommand)) return false;
+    if (r.remaining() < 4) return false;
+    s.opId = r.u32();
+    out = std::move(s);
+    return true;
+}
+
+const char* reloadCommandFor(std::string_view worldTable) {
+    struct Mapping { std::string_view table; const char* command; };
+    // The mangos-zero ".reload" family, keyed by world-DB table. nullptr means
+    // "no reload needed/available": the spawn tables materialise their rows on
+    // the next grid load (pair the SQL with EDITOR_RELOAD_GRID instead).
+    static constexpr Mapping kReloads[] = {
+        { "areatrigger_involvedrelation",  ".reload areatrigger_involvedrelation" },
+        { "areatrigger_tavern",            ".reload areatrigger_tavern" },
+        { "areatrigger_teleport",          ".reload areatrigger_teleport" },
+        { "command",                       ".reload command" },
+        { "creature",                      nullptr },   // spawn row: next grid load
+        { "creature_involvedrelation",     ".reload creature_involvedrelation" },
+        { "creature_loot_template",        ".reload creature_loot_template" },
+        { "creature_questrelation",        ".reload creature_questrelation" },
+        { "creature_template",             ".reload creature_template" },
+        { "disenchant_loot_template",      ".reload disenchant_loot_template" },
+        { "fishing_loot_template",         ".reload fishing_loot_template" },
+        { "game_graveyard_zone",           ".reload game_graveyard_zone" },
+        { "game_tele",                     ".reload game_tele" },
+        { "gameobject",                    nullptr },   // spawn row: next grid load
+        { "gameobject_involvedrelation",   ".reload gameobject_involvedrelation" },
+        { "gameobject_loot_template",      ".reload gameobject_loot_template" },
+        { "gameobject_questrelation",      ".reload gameobject_questrelation" },
+        { "item_loot_template",            ".reload item_loot_template" },
+        { "mail_loot_template",            ".reload mail_loot_template" },
+        { "npc_gossip",                    ".reload npc_gossip" },
+        { "npc_text",                      ".reload npc_text" },
+        { "npc_trainer",                   ".reload npc_trainer" },
+        { "npc_vendor",                    ".reload npc_vendor" },
+        { "page_text",                     ".reload page_text" },
+        { "pickpocketing_loot_template",   ".reload pickpocketing_loot_template" },
+        { "quest_template",                ".reload quest_template" },
+        { "reference_loot_template",       ".reload reference_loot_template" },
+        { "reserved_name",                 ".reload reserved_name" },
+        { "skinning_loot_template",        ".reload skinning_loot_template" },
+    };
+    for (const Mapping& m : kReloads)
+        if (m.table == worldTable) return m.command;
+    return nullptr;   // unknown table: no reload we know of
 }
 
 // ---- debug stream encode ----

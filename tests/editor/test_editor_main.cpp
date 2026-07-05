@@ -21,6 +21,9 @@ void test_asset_browser();
 void test_outliner();
 void test_terrain_tool();
 void test_texture_paint();
+void test_dbc_browser();
+void test_selectors();
+void test_waypoint_panel();
 
 static void setupHeadlessImGui() {
     IMGUI_CHECKVERSION();
@@ -56,6 +59,9 @@ int main() {
     test_outliner();
     test_terrain_tool();
     test_texture_paint();
+    test_dbc_browser();
+    test_selectors();
+    test_waypoint_panel();
     ImGui::DestroyContext();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);

@@ -15,6 +15,7 @@
 // ---------------------------------------------------------------------------
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "image.hpp"     // Rgba
@@ -33,6 +34,9 @@ enum EditorOpcode : uint32_t {
     EDITOR_SET_WAYPOINTS  = 0x4004,  // install a patrol path
     EDITOR_ACK            = 0x4005,  // server -> editor op result
     EDITOR_OVERRIDE_LIGHT = 0x4006,  // drive server-handled override-light (custom)
+    EDITOR_RELOAD_GRID    = 0x4007,  // force-unload a 64x64 grid (derived-file hot-swap)
+    EDITOR_MARK_POINTS    = 0x4008,  // realise points as temp VISUAL_WAYPOINT creatures
+    EDITOR_SQL_APPLY      = 0x4009,  // run SQL on the world DB + a .reload command
 
     // Atmosphere / World "client-FX" override ops (editor -> server). Each is a
     // scope-aware request; the server realises it into the matching clientfx
@@ -133,6 +137,31 @@ struct Despawn      { uint64_t guid = 0; uint32_t opId = 0; };
 struct SetWaypoints { uint64_t guid = 0; std::vector<Vec3> path; uint32_t opId = 0; };
 struct Ack          { uint32_t opId = 0; uint8_t status = 0; }; // status: 0 ok, !=0 error
 
+// Force-unload one 64x64 grid so its next activation re-reads .map/.vmtile/
+// .mmtile from disk. mangos loads all three lazily per grid and caches nothing
+// across an unload, so overwrite-derived-file + this op = live terrain /
+// collision / navmesh hot-swap. The mangos-side handler marshals the unload
+// onto the map thread (docs/EDITOR_RESEARCH.md part D.1).
+struct ReloadGrid { uint32_t mapId = 0; int32_t gx = 0; int32_t gy = 0; uint32_t opId = 0; };
+
+// Realise each point as a temporary VISUAL_WAYPOINT creature (vanilla
+// creature_template entry 1, 'Waypoint (Only GM can see it)') despawning after
+// ttlMs -- debug geometry an unmodified 1.12 client renders with zero protocol
+// changes. Zero points is a valid no-op (still acked).
+struct MarkPoints { std::vector<Vec3> points; uint32_t ttlMs = 30000; uint32_t opId = 0; };
+
+// Execute SQL against the world DB, then run the chat-command reload that makes
+// it live (e.g. ".reload creature_loot_template"). Either string may be empty
+// to skip that half (SQL only / reload only).
+struct SqlApply { std::string sql; std::string reloadCommand; uint32_t opId = 0; };
+
+// The mangos-zero ".reload" chat command that makes an edit to `worldTable`
+// live, or nullptr when none is needed or available -- notably the spawn tables
+// (creature/gameobject): a new row simply materialises on the next grid load,
+// so overwrite + EDITOR_RELOAD_GRID covers them. Unknown table -> nullptr.
+// Pure data, exported for tests.
+const char* reloadCommandFor(std::string_view worldTable);
+
 // Recipient scope for client-FX override ops (matches the server's
 // live-override-commands plan: who the resulting effect targets).
 enum class FxScope : uint8_t { Self = 0, Target = 1, Zone = 2, Server = 3 };
@@ -174,6 +203,9 @@ std::vector<uint8_t> encode(const Despawn&);
 std::vector<uint8_t> encode(const SetWaypoints&);
 std::vector<uint8_t> encode(const Ack&);
 std::vector<uint8_t> encode(const OverrideLight&);
+std::vector<uint8_t> encode(const ReloadGrid&);
+std::vector<uint8_t> encode(const MarkPoints&);
+std::vector<uint8_t> encode(const SqlApply&);
 
 // ---- decode (from a frame's payload) ----
 MoveObject    decodeMoveObject(const std::vector<uint8_t>& payload);
@@ -182,6 +214,13 @@ Despawn       decodeDespawn(const std::vector<uint8_t>& payload);
 SetWaypoints  decodeSetWaypoints(const std::vector<uint8_t>& payload);
 Ack           decodeAck(const std::vector<uint8_t>& payload);
 OverrideLight decodeOverrideLight(const std::vector<uint8_t>& payload);
+
+// Safe decoders for the newer mutating ops: a truncated or corrupt payload
+// returns false instead of throwing (ByteReader is bounds-checked), so the
+// server can reject a bad frame cleanly and error-ack it.
+bool decodeReloadGrid(const std::vector<uint8_t>& payload, ReloadGrid& out);
+bool decodeMarkPoints(const std::vector<uint8_t>& payload, MarkPoints& out);
+bool decodeSqlApply(const std::vector<uint8_t>& payload, SqlApply& out);
 
 // ---- debug stream encode / decode ----
 std::vector<uint8_t> encode(const DebugMarker&);

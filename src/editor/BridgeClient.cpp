@@ -1,5 +1,6 @@
 #include "editor/BridgeClient.hpp"
 
+#include <chrono>
 #include <cstring>
 
 #if defined(_WIN32)
@@ -82,8 +83,107 @@ bool BridgeClient::send(const std::vector<uint8_t>& framed) {
 std::vector<EditorFrame> BridgeClient::poll() {
     std::vector<EditorFrame> out;
     std::lock_guard<std::mutex> g(mtx_);
+    out.swap(deferred_);                    // frames waitForAck set aside first
     while (!inbox_.empty()) { out.push_back(std::move(inbox_.front())); inbox_.pop(); }
+    // Any ack passing through resolves its pending entry (5 = u32 opId + u8 status).
+    for (const EditorFrame& f : out)
+        if (f.opcode == EDITOR_ACK && f.payload.size() >= 5)
+            pending_.erase(decodeAck(f.payload).opId);
     return out;
+}
+
+// ---- op send helpers ----
+uint32_t BridgeClient::trackedSend(const std::vector<uint8_t>& framed, uint32_t opId) {
+    { std::lock_guard<std::mutex> g(mtx_); pending_.insert(opId); }
+    if (!send(framed)) {
+        std::lock_guard<std::mutex> g(mtx_);
+        pending_.erase(opId);
+        return 0;
+    }
+    return opId;
+}
+
+uint32_t BridgeClient::sendReloadGrid(uint32_t mapId, int32_t gx, int32_t gy) {
+    ReloadGrid op; op.mapId = mapId; op.gx = gx; op.gy = gy; op.opId = nextOpId_++;
+    return trackedSend(encode(op), op.opId);
+}
+
+uint32_t BridgeClient::sendMarkPoints(const std::vector<Vec3>& points, uint32_t ttlMs) {
+    MarkPoints op; op.points = points; op.ttlMs = ttlMs; op.opId = nextOpId_++;
+    return trackedSend(encode(op), op.opId);
+}
+
+uint32_t BridgeClient::sendSqlApply(const std::string& sql, const std::string& reloadCommand) {
+    SqlApply op; op.sql = sql; op.reloadCommand = reloadCommand; op.opId = nextOpId_++;
+    return trackedSend(encode(op), op.opId);
+}
+
+size_t BridgeClient::pendingAckCount() const {
+    std::lock_guard<std::mutex> g(mtx_);
+    return pending_.size();
+}
+
+bool BridgeClient::waitForAck(uint32_t opId, Ack& out, int timeoutMs) {
+    const int stepMs = 5;
+    for (int waited = 0;; waited += stepMs) {
+        bool found = false;
+        std::vector<EditorFrame> leftovers;
+        for (EditorFrame& f : poll()) {
+            if (!found && f.opcode == EDITOR_ACK && f.payload.size() >= 5) {
+                Ack a = decodeAck(f.payload);
+                if (a.opId == opId) { out = a; found = true; continue; }
+            }
+            leftovers.push_back(std::move(f));   // not ours: next poll() gets it
+        }
+        if (!leftovers.empty()) {
+            std::lock_guard<std::mutex> g(mtx_);
+            deferred_.insert(deferred_.end(),
+                             std::make_move_iterator(leftovers.begin()),
+                             std::make_move_iterator(leftovers.end()));
+        }
+        if (found) return true;
+        if (waited >= timeoutMs) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(stepMs));
+    }
+}
+
+BridgeClient::ApplyResult BridgeClient::applyChangeset(const Changeset& cs, int ackTimeoutMs) {
+    // The frame size field is a uint16 counting opcode + payload, so one
+    // statement caps out just under 64 KiB; reject locally instead of letting
+    // the string encoder truncate live SQL.
+    constexpr size_t kMaxSqlBytes = 60000;
+
+    ApplyResult res;
+    const std::vector<ChangeEntry>& entries = cs.entries();
+    auto shipAckGated = [&](const std::string& sql, const std::string& reload,
+                            size_t reportIndex) {
+        if (sql.size() > kMaxSqlBytes || reload.size() > kMaxSqlBytes) {
+            res.failedIndex = reportIndex; res.ackStatus = kStatusTooLarge;
+            return false;
+        }
+        uint32_t opId = sendSqlApply(sql, reload);
+        Ack ack;
+        if (opId == 0 || !waitForAck(opId, ack, ackTimeoutMs)) {
+            res.failedIndex = reportIndex; res.timedOut = true;
+            return false;
+        }
+        if (ack.status != 0) {
+            res.failedIndex = reportIndex; res.ackStatus = ack.status;
+            return false;
+        }
+        return true;
+    };
+
+    for (size_t i = 0; i < entries.size(); ++i) {
+        if (!shipAckGated(entries[i].sql, /*reload*/{}, i)) return res;
+        ++res.applied;
+    }
+    std::vector<std::string> reloads = cs.reloadCommands();
+    for (size_t i = 0; i < reloads.size(); ++i)
+        if (!shipAckGated(/*sql*/{}, reloads[i], entries.size() + i)) return res;
+
+    res.ok = true;
+    return res;
 }
 
 void BridgeClient::recvLoop() {

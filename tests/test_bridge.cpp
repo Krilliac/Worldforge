@@ -2,6 +2,7 @@
 #include "editor_bridge.hpp"
 #include "db_export.hpp"
 #include "debugdraw.hpp"
+#include "server/world_sim.hpp"
 
 #include <string>
 #include <vector>
@@ -171,6 +172,123 @@ void test_bridge() {
     CHECK(sstb.lastSound == 8960 && sstb.lastCinematic == 81 && sstb.lastOverrideLight == 396);
     CHECK(sstb.weatherCount == 3 && sstb.soundCount == 5 && sstb.cinematicCount == 1);
     CHECK(sstb.worldStateCount == 4 && sstb.lightCount == 2);
+
+    // --- ReloadGrid: the derived-file hot-swap op (negative grid coords) -----
+    ReloadGrid rg; rg.mapId = 1; rg.gx = -3; rg.gy = 60; rg.opId = 21;
+    CHECK(readFrame(encode(rg), fr, used) && fr.opcode == EDITOR_RELOAD_GRID);
+    ReloadGrid rgb;
+    CHECK(decodeReloadGrid(fr.payload, rgb));
+    CHECK(rgb.mapId == 1 && rgb.gx == -3 && rgb.gy == 60 && rgb.opId == 21);
+    CHECK(!decodeReloadGrid(std::vector<uint8_t>(fr.payload.begin(),
+                                                 fr.payload.end() - 1), rgb));
+
+    // --- MarkPoints: a 100-point batch round-trips ----------------------------
+    MarkPoints mp; mp.ttlMs = 15000; mp.opId = 22;
+    for (int i = 0; i < 100; ++i)
+        mp.points.push_back({ (float)i, (float)-i, 0.5f * (float)i });
+    CHECK(readFrame(encode(mp), fr, used) && fr.opcode == EDITOR_MARK_POINTS);
+    std::vector<uint8_t> mpPayload = fr.payload;      // kept for truncation tests
+    MarkPoints mpb;
+    CHECK(decodeMarkPoints(mpPayload, mpb));
+    CHECK(mpb.points.size() == 100 && mpb.ttlMs == 15000 && mpb.opId == 22);
+    CHECK_APPROX(mpb.points[99].x, 99.0f);
+    CHECK_APPROX(mpb.points[99].z, 49.5f);
+
+    // zero points is a valid encoding (a no-op the server still acks)
+    MarkPoints none; none.ttlMs = 1000; none.opId = 23;
+    CHECK(readFrame(encode(none), fr, used));
+    MarkPoints noneb;
+    CHECK(decodeMarkPoints(fr.payload, noneb));
+    CHECK(noneb.points.empty() && noneb.ttlMs == 1000 && noneb.opId == 23);
+
+    // a truncated payload fails cleanly instead of throwing / over-reading
+    MarkPoints junk;
+    CHECK(!decodeMarkPoints(std::vector<uint8_t>(mpPayload.begin(),
+                                                 mpPayload.begin() + mpPayload.size() / 2), junk));
+    CHECK(!decodeMarkPoints(std::vector<uint8_t>(mpPayload.begin(),
+                                                 mpPayload.begin() + 4), junk));   // count only
+    CHECK(!decodeMarkPoints({}, junk));                                            // empty
+
+    // --- SqlApply: SQL + reload command round-trip ----------------------------
+    SqlApply sq;
+    sq.sql = "UPDATE creature_template SET minlevel = 5 WHERE entry = 299;";
+    sq.reloadCommand = ".reload creature_template";
+    sq.opId = 24;
+    CHECK(readFrame(encode(sq), fr, used) && fr.opcode == EDITOR_SQL_APPLY);
+    SqlApply sqb;
+    CHECK(decodeSqlApply(fr.payload, sqb));
+    CHECK(sqb.sql == sq.sql && sqb.reloadCommand == sq.reloadCommand && sqb.opId == 24);
+    SqlApply sqjunk;
+    CHECK(!decodeSqlApply(std::vector<uint8_t>{ 9, 0, 'x' }, sqjunk));   // lying length
+    CHECK(!decodeSqlApply({}, sqjunk));
+
+    // --- reload-command mapping (pure data) -----------------------------------
+    CHECK(std::string(reloadCommandFor("creature_loot_template")) ==
+          ".reload creature_loot_template");
+    CHECK(std::string(reloadCommandFor("creature_template")) == ".reload creature_template");
+    CHECK(std::string(reloadCommandFor("quest_template")) == ".reload quest_template");
+    CHECK(reloadCommandFor("creature") == nullptr);      // spawn row: next grid load
+    CHECK(reloadCommandFor("gameobject") == nullptr);    // spawn row: next grid load
+    CHECK(reloadCommandFor("no_such_table") == nullptr);
+    CHECK(reloadCommandFor("") == nullptr);
+
+    // --- the WorldSim end of the new ops: frames in, logs + acks out ----------
+    // (the verifiable core the stub server -- and, in spirit, the mangos-side
+    // handlers -- sits on)
+    WorldSim sim;
+    ack = Ack{};
+
+    // ReloadGrid lands in the reloadedGrids log and acks with the op's id.
+    rg = ReloadGrid{}; rg.mapId = 0; rg.gx = 31; rg.gy = 48; rg.opId = 100;
+    CHECK(readFrame(encode(rg), fr, used));
+    CHECK(sim.handleEditorFrame(fr, ack));
+    CHECK(ack.opId == 100 && ack.status == 0);
+    CHECK(sim.reloadedGrids().size() == 1);
+    CHECK(sim.reloadedGrids()[0].mapId == 0);
+    CHECK(sim.reloadedGrids()[0].gx == 31 && sim.reloadedGrids()[0].gy == 48);
+
+    // SqlApply lands in the appliedSql log.
+    sq = SqlApply{}; sq.sql = "DELETE FROM creature WHERE guid = 7;";
+    sq.opId = 101;
+    CHECK(readFrame(encode(sq), fr, used));
+    CHECK(sim.handleEditorFrame(fr, ack));
+    CHECK(ack.opId == 101 && ack.status == 0);
+    CHECK(sim.appliedSql().size() == 1);
+    CHECK(sim.appliedSql()[0].sql == sq.sql);
+    CHECK(sim.appliedSql()[0].reloadCommand.empty());
+
+    // MarkPoints materialise as markers that expire against the sim clock.
+    MarkPoints mk; mk.ttlMs = 1000; mk.opId = 102;
+    mk.points = { {1,2,3}, {4,5,6} };
+    CHECK(readFrame(encode(mk), fr, used));
+    CHECK(sim.handleEditorFrame(fr, ack));
+    CHECK(ack.opId == 102 && ack.status == 0);
+    CHECK(sim.markers().size() == 2);
+    CHECK_APPROX(sim.markers()[1].pos.y, 5.0f);
+    sim.tick(0.5f);
+    CHECK(sim.markers().size() == 2);        // 500 ms in: still alive
+    sim.tick(0.6f);
+    CHECK(sim.markers().empty());            // 1100 ms: past the 1 s ttl
+
+    // Zero points: still handled + acked ok, adds nothing.
+    MarkPoints zero; zero.ttlMs = 500; zero.opId = 103;
+    CHECK(readFrame(encode(zero), fr, used));
+    CHECK(sim.handleEditorFrame(fr, ack));
+    CHECK(ack.opId == 103 && ack.status == 0);
+    CHECK(sim.markers().empty());
+
+    // A truncated MarkPoints payload is handled but error-acked, applying nothing.
+    MarkPoints big; big.ttlMs = 1000; big.opId = 104;
+    big.points = { {1,1,1}, {2,2,2}, {3,3,3} };
+    CHECK(readFrame(encode(big), fr, used));
+    fr.payload.resize(fr.payload.size() / 2);
+    CHECK(sim.handleEditorFrame(fr, ack));
+    CHECK(ack.status != 0);
+    CHECK(sim.markers().empty());
+
+    // Frames the sim doesn't own fall through to the caller.
+    EditorFrame other; other.opcode = EDITOR_HELLO;
+    CHECK(!sim.handleEditorFrame(other, ack));
 }
 
 void test_db_export() {

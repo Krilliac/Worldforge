@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "editor_bridge.hpp"
+
 namespace wf {
 
 uint64_t WorldSim::spawnCreature(uint32_t entry, uint32_t mapId, const Vec3& pos, float o) {
@@ -79,6 +81,11 @@ size_t WorldSim::tick(float dt) {
     if (dt < 0.0f) dt = 0.0f;
     simTimeMs_ += static_cast<uint64_t>(dt * 1000.0f + 0.5f);
 
+    // Expire debug markers whose ttl elapsed (TEMPSPAWN_TIMED_DESPAWN's analog).
+    markers_.erase(std::remove_if(markers_.begin(), markers_.end(),
+                       [this](const SimMarker& m) { return m.expireAtMs <= simTimeMs_; }),
+                   markers_.end());
+
     size_t moved = 0;
     for (auto& kv : objects_) {
         SimObject& o = kv.second;
@@ -131,6 +138,50 @@ std::vector<uint64_t> WorldSim::guids() const {
     out.reserve(objects_.size());
     for (const auto& kv : objects_) out.push_back(kv.first);
     return out;
+}
+
+// ---- bridge ops beyond the object store ----
+void WorldSim::reloadGrid(uint32_t mapId, int32_t gx, int32_t gy) {
+    reloadedGrids_.push_back({ mapId, gx, gy });
+}
+
+void WorldSim::markPoints(const std::vector<Vec3>& points, uint32_t ttlMs) {
+    markers_.reserve(markers_.size() + points.size());
+    for (const Vec3& p : points)
+        markers_.push_back({ p, simTimeMs_ + ttlMs });
+}
+
+void WorldSim::applySql(const std::string& sql, const std::string& reloadCommand) {
+    appliedSql_.push_back({ sql, reloadCommand });
+}
+
+bool WorldSim::handleEditorFrame(const EditorFrame& frame, Ack& ack) {
+    ack = Ack{};
+    switch (frame.opcode) {
+        case EDITOR_RELOAD_GRID: {
+            ReloadGrid op;
+            if (!decodeReloadGrid(frame.payload, op)) { ack.status = 1; return true; }
+            ack.opId = op.opId;
+            reloadGrid(op.mapId, op.gx, op.gy);
+            return true;
+        }
+        case EDITOR_MARK_POINTS: {
+            MarkPoints op;
+            if (!decodeMarkPoints(frame.payload, op)) { ack.status = 1; return true; }
+            ack.opId = op.opId;
+            markPoints(op.points, op.ttlMs);       // zero points: a valid no-op
+            return true;
+        }
+        case EDITOR_SQL_APPLY: {
+            SqlApply op;
+            if (!decodeSqlApply(frame.payload, op)) { ack.status = 1; return true; }
+            ack.opId = op.opId;
+            applySql(op.sql, op.reloadCommand);
+            return true;
+        }
+        default:
+            return false;                          // not ours: caller dispatches
+    }
 }
 
 std::vector<SimObject> WorldSim::snapshot() const {

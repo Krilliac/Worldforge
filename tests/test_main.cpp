@@ -64,6 +64,9 @@ void test_gridmap_writer();
 void test_liquid_edit();
 void test_texture_layers();
 void test_minimap_gen();
+void test_adt_writer();
+void test_changeset();
+void test_waypoint_path();
 
 int main() {
     test_math();
@@ -130,6 +133,9 @@ int main() {
     test_liquid_edit();
     test_texture_layers();
     test_minimap_gen();
+    test_adt_writer();
+    test_changeset();
+    test_waypoint_path();
 
     std::printf("\n%d checks, %d failures\n", test::g_checks, test::g_failures);
     return test::g_failures == 0 ? 0 : 1;

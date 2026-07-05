@@ -15,6 +15,9 @@
 
 namespace wf {
 
+struct EditorFrame;   // editor_bridge.hpp
+struct Ack;
+
 // What an object is, so the engine can pick an icon/model + colour. Wire values
 // are stable (streamed in EntityState); mirrors the high-guid families that
 // matter to the editor.
@@ -36,6 +39,20 @@ struct SimObject {
     std::vector<Vec3> waypoints;
     size_t      wpIndex = 0;                // current target waypoint
 };
+
+// One EDITOR_RELOAD_GRID the sim has honoured. The real server force-unloads
+// the grid so its next activation re-reads .map/.vmtile/.mmtile from disk (the
+// derived-file hot-swap); the sim just logs it so tests can assert the loop.
+struct GridReload { uint32_t mapId = 0; int32_t gx = 0; int32_t gy = 0; };
+
+// One EDITOR_SQL_APPLY the sim has honoured. The real server runs the SQL on
+// the world DB then executes the ".reload" chat command; the sim logs both.
+struct SqlRecord { std::string sql; std::string reloadCommand; };
+
+// A temporary debug marker from EDITOR_MARK_POINTS. The real server realises
+// each as a VISUAL_WAYPOINT creature with a timed despawn; the sim stores the
+// point and expires it against the sim clock on tick().
+struct SimMarker { Vec3 pos; uint64_t expireAtMs = 0; };
 
 // A log of the last applied client-FX (what the real server would broadcast).
 struct FxLog {
@@ -77,12 +94,31 @@ public:
     FxLog&       fx()       { return fx_; }
     const FxLog& fx() const { return fx_; }
 
+    // --- bridge ops beyond the object store (logged so the e2e tests can
+    //     assert the full editor -> socket -> server -> ack loop) ---
+    void reloadGrid(uint32_t mapId, int32_t gx, int32_t gy);
+    void markPoints(const std::vector<Vec3>& points, uint32_t ttlMs);
+    void applySql(const std::string& sql, const std::string& reloadCommand);
+
+    // Decode + apply one editor frame if it is an op this sim owns
+    // (RELOAD_GRID / MARK_POINTS / SQL_APPLY). Returns true when handled,
+    // filling `ack` (the op's opId; status 0 ok, 1 malformed payload). Any
+    // other opcode returns false so the caller dispatches it itself.
+    bool handleEditorFrame(const EditorFrame& frame, Ack& ack);
+
+    const std::vector<GridReload>& reloadedGrids() const { return reloadedGrids_; }
+    const std::vector<SqlRecord>&  appliedSql()    const { return appliedSql_; }
+    const std::vector<SimMarker>&  markers()       const { return markers_; }
+
 private:
     std::unordered_map<uint64_t, SimObject> objects_;
     uint64_t nextGuid_       = 0xF130000000000001ull;   // UNIT high-guid base
     uint64_t nextPlayerGuid_ = 0x0000000000000001ull;   // PLAYER guids are low
     uint64_t simTimeMs_      = 0;
     FxLog    fx_;
+    std::vector<GridReload> reloadedGrids_;
+    std::vector<SqlRecord>  appliedSql_;
+    std::vector<SimMarker>  markers_;
 };
 
 } // namespace wf
