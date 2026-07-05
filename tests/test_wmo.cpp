@@ -403,6 +403,31 @@ void test_wmo() {
         CHECK(ok);                                           // a profile allowing v18 parses it
     }
 
+    // --- MOCV -> WmoRenderPart.hasVertexColors (flat-lit interior signal) ----
+    {
+        auto oneTriGroup = [](bool withMocv) {
+            WmoGroup g;
+            g.vertices = { {0,0,0}, {1,0,0}, {0,1,0} };
+            g.normals  = { {0,0,1}, {0,0,1}, {0,0,1} };
+            g.uvs      = { {0,0}, {1,0}, {0,1} };
+            g.indices  = { 0, 1, 2 };
+            g.triMaterial = { 0 };
+            if (withMocv) g.vertexColors = { Rgba{100,100,100,255}, Rgba{100,100,100,255},
+                                             Rgba{100,100,100,255} };
+            return g;
+        };
+        WmoModel withCv;  withCv.groups.push_back(oneTriGroup(true));
+        WmoModel noCv;    noCv.groups.push_back(oneTriGroup(false));
+
+        auto pc = wmoRenderParts(withCv);
+        auto pn = wmoRenderParts(noCv);
+        CHECK(!pc.empty() && pc[0].hasVertexColors);   // MOCV present -> flat-lit
+        CHECK(!pn.empty() && !pn[0].hasVertexColors);  // no MOCV -> normal shade
+        // The baked colour reached the mesh vertices.
+        CHECK(pc[0].mesh.vertices[0].color.r == 100);
+        CHECK(pn[0].mesh.vertices[0].color.r == 255);  // default white
+    }
+
     // --- collision raycast (T2.4): brute-force, BSP, and their equivalence ---
     {
         // Two triangles facing -X: a "near" wall at x=10, a "far" wall at x=50.

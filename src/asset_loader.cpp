@@ -116,9 +116,17 @@ void TileScene::renderLit(Framebuffer& fb, const Mat4& viewProj, Vec3 lightDir) 
         rasterTexMesh(fb, meshes[in.mesh], viewProj * in.transform, *textures[in.tex], lightDir);
     for (const Inst& in : wmoRenderInstances) {
         ShadeLight wl = tl;
-        wl.ambient = Vec3{ std::min(1.0f, tl.ambient.x + in.ambientBoost.x),
-                           std::min(1.0f, tl.ambient.y + in.ambientBoost.y),
-                           std::min(1.0f, tl.ambient.z + in.ambientBoost.z) };
+        if (in.bakedLight) {
+            // MOCV baked interior light: the per-vertex colour already carries the
+            // full lighting, so shade flat (full ambient, no directional term) and
+            // let the vertex colour alone light it -- no double-darkening.
+            wl.ambient = Vec3{ 1, 1, 1 };
+            wl.diffuse = Vec3{ 0, 0, 0 };
+        } else {
+            wl.ambient = Vec3{ std::min(1.0f, tl.ambient.x + in.ambientBoost.x),
+                               std::min(1.0f, tl.ambient.y + in.ambientBoost.y),
+                               std::min(1.0f, tl.ambient.z + in.ambientBoost.z) };
+        }
         rasterTexMesh(fb, meshes[in.mesh], viewProj * in.transform, *textures[in.tex],
                       wl, in.blend);
     }
@@ -454,10 +462,11 @@ TileScene AssetLoader::buildTileScene(const std::string& map, int x, int y,
             for (WmoRenderPart& part : wmoRenderParts(*wm)) {
                 if (part.mesh.indices.empty()) continue;
                 bool blended = part.blendMode >= 2;        // alpha-blended material
+                bool baked   = part.hasVertexColors;       // MOCV -> flat-lit
                 ts.meshes.push_back(std::move(part.mesh));
                 ts.textures.push_back(part.texture.empty() ? fallback() : texture(part.texture));
                 ts.wmoRenderInstances.push_back(
-                    { ts.meshes.size() - 1, ts.textures.size() - 1, xform, blended, boost });
+                    { ts.meshes.size() - 1, ts.textures.size() - 1, xform, blended, boost, baked });
             }
             addWmoLiquids(ts, *wm, xform);   // interior water/lava (MLIQ)
         }
@@ -500,10 +509,11 @@ size_t AssetLoader::placeWmo(TileScene& ts, const std::string& wmoPath, Vec3 wor
     for (WmoRenderPart& part : wmoRenderParts(*wm)) {
         if (part.mesh.indices.empty()) continue;
         bool blended = part.blendMode >= 2;
+        bool baked   = part.hasVertexColors;
         ts.meshes.push_back(std::move(part.mesh));
         ts.textures.push_back(part.texture.empty() ? fallback() : texture(part.texture));
         ts.wmoRenderInstances.push_back(
-            { ts.meshes.size() - 1, ts.textures.size() - 1, xform, blended, boost });
+            { ts.meshes.size() - 1, ts.textures.size() - 1, xform, blended, boost, baked });
     }
     addWmoLiquids(ts, *wm, xform);   // interior water/lava (MLIQ)
     return instIdx;

@@ -20,6 +20,8 @@ struct WmoRenderPart {
     std::string texture;       // diffuse BLP name ("" -> caller uses a fallback)
     uint32_t    blendMode = 0; // MOMT blend: 0 opaque, 1 alpha-test, >=2 alpha-blend
     uint32_t    flags     = 0; // MOMT material flags
+    bool        hasVertexColors = false; // any triangle carried MOCV baked light
+                                         // -> render flat-lit (vertex colour IS the light)
 };
 
 // Split a WMO's group geometry into one TexMesh per material, resolving each to

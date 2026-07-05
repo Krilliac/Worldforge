@@ -84,7 +84,9 @@ struct TileScene {
     std::vector<TexMesh>                      meshes;     // doodad/WMO meshes (owned)
     std::vector<std::shared_ptr<const Image>> textures;   // their textures (keep-alive)
     struct Inst { size_t mesh; size_t tex; Mat4 transform; bool blend = false;
-                  Vec3 ambientBoost{0,0,0}; };   // WMO MOLT interior lift (0 = none)
+                  Vec3 ambientBoost{0,0,0};        // WMO MOLT interior lift (0 = none)
+                  bool bakedLight = false; };      // MOCV: the vertex colour IS the
+                                                   // light -> render flat, not sun-lit
     std::vector<Inst> instances;            // placed M2 doodads
     std::vector<Inst> wmoRenderInstances;   // textured WMO parts (index into meshes/textures)
 

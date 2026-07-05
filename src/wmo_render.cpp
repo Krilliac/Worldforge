@@ -35,6 +35,11 @@ std::vector<WmoRenderPart> wmoRenderParts(const WmoModel& wmo) {
     for (auto& kv : byMaterial) {
         WmoRenderPart part;
         part.mesh = std::move(kv.second);
+        // MOCV present if any vertex carries a non-white baked colour (set above).
+        for (const TexVertex& v : part.mesh.vertices)
+            if (v.color.r != 255 || v.color.g != 255 || v.color.b != 255) {
+                part.hasVertexColors = true; break;
+            }
         if (kv.first < wmo.root.materials.size()) {
             const WmoMaterial& m = wmo.root.materials[kv.first];
             part.texture   = m.diffuseTexture;
