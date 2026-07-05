@@ -178,7 +178,7 @@ std::shared_ptr<const Image> AssetLoader::texture(const std::string& path) {
 
     std::shared_ptr<const Image> result;
     std::vector<uint8_t> buf;
-    if (mpq_.readFile(path, buf)) {
+    if (readFileOverlaid(path, buf)) {
         try {
             result = std::make_shared<Image>(decodeBlp(buf));
         } catch (...) {
@@ -193,14 +193,14 @@ std::shared_ptr<const Image> AssetLoader::texture(const std::string& path) {
 
 bool AssetLoader::loadWdt(const std::string& map, Wdt& out) {
     std::vector<uint8_t> buf;
-    if (!mpq_.readFile(wdtPath(map), buf)) return false;
+    if (!readFileOverlaid(wdtPath(map), buf)) return false;
     out = parseWdt(buf);
     return true;
 }
 
 bool AssetLoader::loadWdl(const std::string& map, Wdl& out) {
     std::vector<uint8_t> buf;
-    if (!mpq_.readFile(wdlPath(map), buf)) return false;
+    if (!readFileOverlaid(wdlPath(map), buf)) return false;
     out = parseWdl(buf);
     return true;
 }
@@ -208,7 +208,7 @@ bool AssetLoader::loadWdl(const std::string& map, Wdl& out) {
 bool AssetLoader::loadAdt(const std::string& map, int x, int y,
                           Adt& adt, std::vector<MapChunk>& chunks) {
     std::vector<uint8_t> buf;
-    if (!mpq_.readFile(adtPath(map, x, y), buf)) return false;
+    if (!readFileOverlaid(adtPath(map, x, y), buf)) return false;
     adt = parseAdt(buf);
     chunks = parseChunks(buf);
     return true;
@@ -239,7 +239,7 @@ std::shared_ptr<const M2Model> AssetLoader::model(const std::string& rawPath) {
 
     std::shared_ptr<const M2Model> result;  // nullptr == missing/malformed
     std::vector<uint8_t> buf;
-    if (mpq_.readFile(path, buf)) {
+    if (readFileOverlaid(path, buf)) {
         try {
             result = std::make_shared<M2Model>(parseM2(buf));
         } catch (...) {
@@ -280,13 +280,13 @@ std::shared_ptr<const WmoModel> AssetLoader::wmo(const std::string& path) {
 
     std::shared_ptr<const WmoModel> result;   // nullptr == missing/malformed root
     std::vector<uint8_t> buf;
-    if (mpq_.readFile(path, buf)) {
+    if (readFileOverlaid(path, buf)) {
         try {
             auto m = std::make_shared<WmoModel>();
             m->root = parseWmoRoot(buf);
             for (uint32_t g = 0; g < m->root.nGroups; ++g) {
                 std::vector<uint8_t> gbuf;
-                if (!mpq_.readFile(wmoGroupPath(path, g), gbuf)) continue;  // skip missing
+                if (!readFileOverlaid(wmoGroupPath(path, g), gbuf)) continue;  // skip missing
                 try { m->groups.push_back(parseWmoGroup(gbuf)); }
                 catch (...) { /* skip a malformed group, keep the rest */ }
             }
@@ -300,12 +300,12 @@ std::shared_ptr<const WmoModel> AssetLoader::wmo(const std::string& path) {
 }
 
 bool AssetLoader::sound(const std::string& path, std::vector<uint8_t>& out) const {
-    return mpq_.readFile(path, out);
+    return readFileOverlaid(path, out);
 }
 
 AudioClip AssetLoader::soundClip(const std::string& path) const {
     std::vector<uint8_t> buf;
-    if (!mpq_.readFile(path, buf)) return AudioClip{};   // empty (codec None)
+    if (!readFileOverlaid(path, buf)) return AudioClip{};   // empty (codec None)
     return makeClip(path, buf);
 }
 
@@ -392,10 +392,61 @@ bool AssetLoader::rebuildTileTerrain(TileScene& ts) {
     return true;
 }
 
+bool AssetLoader::readFileOverlaid(const std::string& archivedPath,
+                                   std::vector<uint8_t>& out) const {
+    // Loose project files shadow the archives, the way the client's own
+    // loose-file resolution beats its MPQs.
+    if (readOverlayFile(overlayDir_, archivedPath, out)) return true;
+    return mpq_.readFile(archivedPath, out);
+}
+
+bool AssetLoader::saveTile(const std::string& map, int x, int y,
+                           const ParsedTileState& state) {
+    if (overlayDir_.empty()) return false;   // no project folder to save into
+    return writeOverlayFile(overlayDir_, adtPath(map, x, y), writeAdtFull(state));
+}
+
+bool AssetLoader::saveTileScene(const TileScene& ts) {
+    if (!ts.hasSource || overlayDir_.empty()) return false;
+    return writeOverlayFile(overlayDir_, adtPath(ts.sourceMap, ts.sourceX, ts.sourceY),
+                            writeAdtFull(ts.sourceAdt, ts.sourceChunks));
+}
+
+int AssetLoader::saveDirtyTiles(const std::string& map, DirtyTiles& dirty,
+                                const TileStateFn& provider) {
+    if (!provider) return 0;
+    int saved = 0;
+    for (auto it = dirty.tiles.begin(); it != dirty.tiles.end(); ) {
+        ParsedTileState state;
+        if (provider(it->first, it->second, state) &&
+            saveTile(map, it->first, it->second, state)) {
+            it = dirty.tiles.erase(it);   // saved: clear the mark
+            ++saved;
+        } else {
+            ++it;                         // not loaded / failed: stays dirty
+        }
+    }
+    return saved;
+}
+
+int AssetLoader::saveAllTiles(const std::string& map,
+                              const std::vector<std::pair<int, int>>& tiles,
+                              const TileStateFn& provider) {
+    if (!provider) return 0;
+    int saved = 0;
+    for (const std::pair<int, int>& t : tiles) {
+        ParsedTileState state;
+        if (provider(t.first, t.second, state) &&
+            saveTile(map, t.first, t.second, state))
+            ++saved;
+    }
+    return saved;
+}
+
 std::vector<uint8_t> AssetLoader::exportTileAdt(const TileScene& ts) {
     if (!ts.hasSource) return {};
     std::vector<uint8_t> buf;
-    if (!mpq_.readFile(adtPath(ts.sourceMap, ts.sourceX, ts.sourceY), buf)) return {};
+    if (!readFileOverlaid(adtPath(ts.sourceMap, ts.sourceX, ts.sourceY), buf)) return {};
     // The retained chunks' offsets index into exactly these (re-read) bytes, so
     // patch heights then the matching normals over the original ADT.
     buf = writeAdtHeights(buf, ts.sourceChunks);

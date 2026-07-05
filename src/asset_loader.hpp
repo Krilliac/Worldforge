@@ -9,12 +9,17 @@
 // Tested headlessly by writing synthetic ADT/BLP files into an MPQ with
 // writeMpqArchive, then loading them back -- no copyrighted assets needed.
 // ---------------------------------------------------------------------------
+#include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
+#include "adt_writer.hpp"
+#include "client_data.hpp"
 #include "mpq.hpp"
 #include "wow_files.hpp"
 #include "terrain.hpp"
@@ -200,6 +205,42 @@ public:
     // buffer (offset overrun) -- the caller should guard with try/catch.
     std::vector<uint8_t> exportTileAdt(const TileScene& ts);
 
+    // --- project overlay + save pipeline -------------------------------------
+    // Point the loader at a project folder that SHADOWS the archive chain:
+    // any archived path present as a loose file under the overlay ('\' -> '/')
+    // is served from there in preference to the MPQs, mirroring the client's
+    // own loose-file resolution. Saves land here too, so the original client
+    // data is NEVER touched. Set it before loading a map: already-cached
+    // textures/models are not invalidated by a later overlay change.
+    void setOverlayDir(std::filesystem::path dir) { overlayDir_ = std::move(dir); }
+    const std::filesystem::path& overlayDir() const { return overlayDir_; }
+
+    // Read `archivedPath` through the overlay first, then the MPQ chain.
+    // Every loader read path resolves through this.
+    bool readFileOverlaid(const std::string& archivedPath, std::vector<uint8_t>& out) const;
+
+    // Re-serialize one tile (writeAdtFull) into the overlay at
+    // <overlay>/World/Maps/<map>/<map>_<x>_<y>.adt. False when no overlay
+    // dir is set or the write fails.
+    bool saveTile(const std::string& map, int x, int y, const ParsedTileState& state);
+
+    // Save-current: one TileScene's retained source (sourceAdt/sourceChunks,
+    // which the editor mutates in place). False for a scene with no retained
+    // source, or when saveTile would fail.
+    bool saveTileScene(const TileScene& ts);
+
+    // Save-changed driver: re-serialize every marked tile. `provider` fills
+    // the tile's current parsed state (return false for a tile that is not
+    // loaded -- it stays marked). Successfully saved tiles have their mark
+    // cleared; returns how many tiles were written.
+    using TileStateFn = std::function<bool(int x, int y, ParsedTileState& out)>;
+    int saveDirtyTiles(const std::string& map, DirtyTiles& dirty, const TileStateFn& provider);
+
+    // Save-all driver: every tile in `tiles`, dirty or not. Returns how many
+    // were written (tiles the provider declines are skipped).
+    int saveAllTiles(const std::string& map, const std::vector<std::pair<int, int>>& tiles,
+                     const TileStateFn& provider);
+
     // --- interactive placement (click-to-place into a live scene) ------------
     // Place an M2 doodad `m2Path` into `ts` at world position `world`, rotated
     // `rotZ` radians about Z and uniformly scaled. Appends the mesh/texture/
@@ -233,6 +274,7 @@ private:
     bool resolveBigAlpha(const std::string& map, std::optional<bool> override_);
 
     const MpqManager& mpq_;
+    std::filesystem::path overlayDir_;   // empty == no overlay (archive-only)
     std::unordered_map<std::string, std::shared_ptr<const Image>>   texCache_;
     std::unordered_map<std::string, std::shared_ptr<const M2Model>> modelCache_;
     std::unordered_map<std::string, Aabb>                          boundsCache_;

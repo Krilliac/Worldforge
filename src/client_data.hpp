@@ -59,4 +59,29 @@ size_t mountWowClient(MpqManager& mpq, const std::filesystem::path& dataDir,
                       const std::string& locale,
                       const std::function<void(const std::string&, bool)>& onMount = {});
 
+// ===========================================================================
+// Loose-file overlay: a project directory that SHADOWS the archive chain.
+// The client itself resolves a loose file under Data\ before any MPQ; the
+// editor mirrors that so saves land as loose files in a project folder and
+// the original archives are never touched. Path mapping is pure; the two IO
+// helpers are thin std::filesystem/iostream wrappers (UTF-8 paths).
+// ===========================================================================
+
+// Map an archived path ("World\\Maps\\X\\X_1_2.adt") to its loose location
+// under `overlayDir` -- backslashes become directory separators.
+std::filesystem::path overlayFilePath(const std::filesystem::path& overlayDir,
+                                      const std::string& archivedPath);
+
+// Read the overlay copy of `archivedPath` into `out`. False when overlayDir
+// is empty, the file is absent, or it cannot be read -- the caller then falls
+// back to the archive chain.
+bool readOverlayFile(const std::filesystem::path& overlayDir,
+                     const std::string& archivedPath, std::vector<uint8_t>& out);
+
+// Write `bytes` as the overlay copy of `archivedPath`, creating directories
+// as needed. False when overlayDir is empty or the write fails.
+bool writeOverlayFile(const std::filesystem::path& overlayDir,
+                      const std::string& archivedPath,
+                      const std::vector<uint8_t>& bytes);
+
 } // namespace wf

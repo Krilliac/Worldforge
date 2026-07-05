@@ -83,6 +83,9 @@ add_library(wforge STATIC
   src/bounds.cpp
   src/scene_pick.cpp
   src/wmo_render.cpp
+  src/adt_writer.cpp
+  src/changeset.cpp
+  src/waypoint_path.cpp
 )
 target_include_directories(wforge PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -181,6 +184,9 @@ add_executable(wforge-tests
   tests/test_bounds.cpp
   tests/test_wmo_pick.cpp
   tests/test_client_version.cpp
+  tests/test_adt_writer.cpp
+  tests/test_changeset.cpp
+  tests/test_waypoint_path.cpp
 )
 target_link_libraries(wforge-tests PRIVATE wforge)
 target_include_directories(wforge-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
@@ -297,6 +303,10 @@ if(WFORGE_EDITOR)
     src/editor/OutlinerPanel.cpp
     src/editor/TerrainToolPanel.cpp
     src/editor/TexturePaintPanel.cpp
+    src/editor/ThumbnailCache.cpp
+    src/editor/DbcBrowserPanel.cpp
+    src/editor/Selectors.cpp
+    src/editor/WaypointPanel.cpp
   )
   target_include_directories(wforge-editor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(wforge-editor PUBLIC wforge imgui)
@@ -326,6 +336,9 @@ if(WFORGE_EDITOR)
     tests/editor/test_outliner.cpp
     tests/editor/test_terrain_tool.cpp
     tests/editor/test_texture_paint.cpp
+    tests/editor/test_dbc_browser.cpp
+    tests/editor/test_selectors.cpp
+    tests/editor/test_waypoint_panel.cpp
   )
   target_link_libraries(wforge-editor-tests PRIVATE wforge-editor wforge-server)
   target_include_directories(wforge-editor-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)

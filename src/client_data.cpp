@@ -1,5 +1,8 @@
 #include "client_data.hpp"
 
+#include <fstream>
+#include <iterator>
+
 namespace fs = std::filesystem;
 
 namespace wf {
@@ -82,6 +85,42 @@ size_t mountWowClient(MpqManager& mpq, const fs::path& dataDir, const std::strin
         if (onMount) onMount(path, ok);
     }
     return mpq.archiveCount() - before;
+}
+
+fs::path overlayFilePath(const fs::path& overlayDir, const std::string& archivedPath) {
+    // Archived paths use backslashes ("World\\Maps\\..."); map them to
+    // directory separators so the overlay mirrors the archive tree on any
+    // filesystem. u8path keeps non-ASCII bytes intact on Windows.
+    std::string rel = archivedPath;
+    for (char& c : rel)
+        if (c == '\\') c = '/';
+    return overlayDir / fs::u8path(rel);
+}
+
+bool readOverlayFile(const fs::path& overlayDir, const std::string& archivedPath,
+                     std::vector<uint8_t>& out) {
+    if (overlayDir.empty()) return false;
+    std::error_code ec;
+    const fs::path p = overlayFilePath(overlayDir, archivedPath);
+    if (!fs::is_regular_file(p, ec)) return false;
+    std::ifstream f(p, std::ios::binary);
+    if (!f) return false;
+    out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    return true;
+}
+
+bool writeOverlayFile(const fs::path& overlayDir, const std::string& archivedPath,
+                      const std::vector<uint8_t>& bytes) {
+    if (overlayDir.empty()) return false;
+    std::error_code ec;
+    const fs::path p = overlayFilePath(overlayDir, archivedPath);
+    fs::create_directories(p.parent_path(), ec);
+    std::ofstream f(p, std::ios::binary | std::ios::trunc);
+    if (!f) return false;
+    if (!bytes.empty())
+        f.write(reinterpret_cast<const char*>(bytes.data()),
+                static_cast<std::streamsize>(bytes.size()));
+    return f.good();
 }
 
 } // namespace wf
