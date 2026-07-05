@@ -8,8 +8,10 @@
 // the locale string arrays are 8 slots + 1 flags, enUS = slot 0.
 // ---------------------------------------------------------------------------
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -37,6 +39,62 @@ private:
     std::unordered_map<std::string, uint32_t> stringOffsets_;
 };
 
+// ===========================================================================
+// Generic column schemas -- machine-readable metadata for the 1.12.1 tables the
+// typed views below parse (WDBX / WoWDBDefs pattern; layout facts from
+// wowdev.wiki + the owned client). Drives a generic DBC grid: column names and
+// types for the headers, isId for the key column, fkTable/fkColumn for
+// click-through (e.g. CreatureDisplayInfo.ModelID -> CreatureModelData.ID).
+// A schema either covers the FULL record (schemaFieldCount == the client's
+// fieldCount) or a verified leading prefix where the tail is not yet confirmed;
+// columns mirroring a VERIFY-FLAGGED comment carry verified == false.
+// ===========================================================================
+enum class ColType : uint8_t { U32, I32, F32, Str, LocStr };
+
+struct ColumnDef {
+    const char* name;                // WoWDBDefs-style column name
+    ColType     type;
+    bool        isId     = false;    // the primary-key column
+    const char* fkTable  = nullptr;  // foreign key: target table dbcName ...
+    const char* fkColumn = nullptr;  //   ... and column (grid click-through)
+    uint8_t     arrayLen = 1;        // consecutive fields (e.g. LiquidTypeID[4])
+    bool        verified = true;     // false == mirrors a VERIFY-FLAGGED comment
+};
+
+struct TableSchema {
+    const char*      dbcName;   // e.g. "AreaTable" (no path / extension)
+    const ColumnDef* cols;
+    size_t           colCount;
+};
+
+// Registry lookup (case-insensitive dbcName match); nullptr if unknown.
+const TableSchema* findSchema(std::string_view dbcName);
+// Iteration over every registered schema (for a table browser / tests).
+size_t             schemaCount();
+const TableSchema& schemaAt(size_t i);
+
+// 4-byte record fields one column spans: LocStr is 8 locale slots + 1 flags
+// field; everything else is one field per array element.
+constexpr size_t columnFieldSpan(const ColumnDef& c) {
+    return size_t(c.arrayLen) * (c.type == ColType::LocStr ? 9 : 1);
+}
+// Total 4-byte record fields the schema spans (== fieldCount for full schemas).
+constexpr size_t schemaFieldCount(const TableSchema& s) {
+    size_t n = 0;
+    for (size_t i = 0; i < s.colCount; ++i) n += columnFieldSpan(s.cols[i]);
+    return n;
+}
+// First 4-byte field index of the column named `colName`, or -1 if absent.
+// This is the cross-check that a schema agrees with the typed readers' indices.
+constexpr int schemaFieldOffsetOf(const TableSchema& s, std::string_view colName) {
+    int off = 0;
+    for (size_t i = 0; i < s.colCount; ++i) {
+        if (colName == s.cols[i].name) return off;
+        off += static_cast<int>(columnFieldSpan(s.cols[i]));
+    }
+    return -1;
+}
+
 struct MapEntry {
     uint32_t    id           = 0;   // field 0
     std::string directory;          // field 1 (string) -- e.g. "Azeroth"
@@ -44,22 +102,49 @@ struct MapEntry {
     std::string name;               // field 4 (string, enUS)
 };
 
+// AreaTable.dbc, full 1.12.1.5875 record (28 fields; fields 5..9 are the sound/
+// music refs the schema names but no typed member consumes yet). Rows from
+// older builds can be shorter -- Dbc::getU32 reads a missing field as 0, so the
+// trailing members simply stay at their defaults.
 struct AreaEntry {
     uint32_t    id               = 0;   // field 0
-    uint32_t    mapId            = 0;   // field 1 (ContinentID)
-    uint32_t    parentAreaId     = 0;   // field 2
+    uint32_t    mapId            = 0;   // field 1 (ContinentID -> Map)
+    uint32_t    parentAreaId     = 0;   // field 2 (-> AreaTable, recursive)
     uint32_t    areaBit          = 0;   // field 3 (explore flag)
     uint32_t    flags            = 0;   // field 4
     int32_t     explorationLevel = 0;   // field 10
-    std::string name;                   // field 11 (string, enUS)
+    std::string name;                   // fields 11..19 (locstring; enUS slot 11)
+    uint32_t    factionGroupMask = 0;   // field 20 (0 contested, 2 Alliance, 4 Horde)
+    // fields 21..24: per-area liquid override -> LiquidType, one slot per class:
+    // [0] water, [1] ocean, [2] magma, [3] slime.
+    std::array<uint32_t, 4> liquidTypeId{};
+    float       minElevation      = 0;  // field 25
+    float       ambientMultiplier = 0;  // field 26 (0..1)
+    uint32_t    lightId           = 0;  // field 27 (-> Light)
 };
 
+// LiquidType.dbc, full 1.12 record: just { id, name, type, spellId } -- the
+// table exists so a liquid can apply a spell (Naxxramas slime). NOTE: the
+// oft-quoted 23/29/35/41 values in field 1 are NOT visual ids; they are the
+// STRING-BLOCK BYTE OFFSETS of the 6-byte names "Water\0" "Ocean\0" "Magma\0"
+// "Slime\0". We resolve the name and keep the raw offset (`liquidId`) for
+// consumers that print/round-trip it.
 struct LiquidTypeEntry {
-    uint32_t id       = 0;   // field 0
-    uint32_t liquidId = 0;   // field 1 (visual ref: 23 water,29 ocean,35 magma,41 slime)
-    uint32_t type     = 0;   // field 2 (0 magma,2 slime,3 water)
-    uint32_t spellId  = 0;   // field 3
+    uint32_t    id       = 0;   // field 0
+    std::string name;           // field 1 resolved ("Water"/"Ocean"/"Magma"/"Slime")
+    uint32_t    liquidId = 0;   // field 1 raw (string-block byte offset of name)
+    uint32_t    type     = 0;   // field 2 (vanilla enum: 0 magma, 2 slime, 3 water+ocean)
+    uint32_t    spellId  = 0;   // field 3 (spell applied while in the liquid)
 };
+
+// Vanilla <-> Wrath liquid-type enum translation, for ClientProfile-driven
+// consumers (client_version.hpp). Vanilla m_LiquidType: 0 magma, 2 slime,
+// 3 water -- ocean SHARES 3 (rows are told apart only by name/id), hence the
+// `ocean` disambiguator on the vanilla->wrath direction. Wrath (3.x) reordered
+// the enum to 0 water / 1 ocean / 2 magma / 3 slime -- the same order as the
+// AreaEntry::liquidTypeId slots. Unknown inputs map to water.
+uint32_t liquidTypeVanillaToWrath(uint32_t vanillaType, bool ocean = false);
+uint32_t liquidTypeWrathToVanilla(uint32_t wrathType);
 
 struct LightEntry {
     uint32_t id           = 0;   // field 0
@@ -67,11 +152,79 @@ struct LightEntry {
     float    x = 0, y = 0, z = 0;          // fields 2,3,4 (game coords)
     float    falloffStart = 0;   // field 5
     float    falloffEnd   = 0;   // field 6
-    // fields 7..11 -- 5 LightParams.dbc refs (clear-weather, fog, rain, ...).
+    // fields 7..11 -- 5 LightParams.dbc refs, one per condition: [0] clear,
+    // [1] clear-underwater, [2] storm, [3] storm-underwater, [4] death.
     // Vanilla 1.12 Light.dbc has exactly 12 fields, so there are 5 params, NOT 8;
     // reading 8 walks past the record and the string block (verified vs real dbc).
+    // Global lights (the continent default) sit at x=y=z=0.
     std::array<uint32_t, 5> lightParams{};
 };
+
+// ---- Light support tables (1.12 layouts per wowdev.wiki) --------------------
+// LightParams.dbc row, full 8-field 1.12 record. Named *Record (not *Entry)
+// because lighting.hpp already owns the name LightParamsEntry for its minimal
+// id-only view -- do not collide (both live in namespace wf).
+struct LightParamsRecord {
+    uint32_t id                = 0;   // field 0
+    uint32_t highlightSky      = 0;   // field 1 (bool: sunshafts highlight)
+    uint32_t skyboxId          = 0;   // field 2 -> LightSkybox
+    float    glow              = 0;   // field 3
+    float    waterShallowAlpha = 0;   // field 4
+    float    waterDeepAlpha    = 0;   // field 5
+    float    oceanShallowAlpha = 0;   // field 6
+    float    oceanDeepAlpha    = 0;   // field 7
+};
+
+// LightIntBand.dbc / LightFloatBand.dbc rows: keyframed day curves. `num` keys
+// of (time, value); times are half-minutes 0..2880 (0 = midnight, 1440 = noon)
+// and the curve wraps across midnight. Int-band values are packed 0x00RRGGBB
+// colours (B in the low byte); float-band values are float bit patterns.
+struct LightIntBandEntry {
+    uint32_t id  = 0;                    // field 0
+    uint32_t num = 0;                    // field 1 (used keys, clamped to 16)
+    std::array<uint32_t, 16> times{};    // fields 2..17
+    std::array<uint32_t, 16> colors{};   // fields 18..33 (packed 0x00RRGGBB)
+};
+struct LightFloatBandEntry {
+    uint32_t id  = 0;                    // field 0
+    uint32_t num = 0;                    // field 1 (used keys, clamped to 16)
+    std::array<uint32_t, 16> times{};    // fields 2..17
+    std::array<float, 16>    values{};   // fields 18..33
+};
+
+// LightSkybox.dbc: the skybox model a LightParams row selects.
+struct LightSkyboxEntry {
+    uint32_t    id = 0;      // field 0
+    std::string path;        // field 1 (string) -- skybox .mdx model path
+    uint32_t    flags = 0;   // field 2 -- TBC+; vanilla rows read as 0 (VERIFY-FLAGGED)
+};
+
+// Band rows are keyed off their LightParams id: params id P (P >= 1) owns the
+// 18 int bands with ids P*18-17 .. P*18 and the 6 float bands with ids
+// P*6-5 .. P*6. Float band 0 is fogEnd (in 36-yard units, see lighting.hpp
+// kFogDistScale), float band 1 is fogStartScaler.
+constexpr uint32_t kLightIntBandsPerParam   = 18;
+constexpr uint32_t kLightFloatBandsPerParam = 6;
+constexpr uint32_t lightIntBandFirstId(uint32_t paramId) {
+    return paramId * kLightIntBandsPerParam - (kLightIntBandsPerParam - 1);
+}
+constexpr uint32_t lightFloatBandFirstId(uint32_t paramId) {
+    return paramId * kLightFloatBandsPerParam - (kLightFloatBandsPerParam - 1);
+}
+
+// Half-minute ticks in a game day (times in the band tables live in [0,2880)).
+constexpr uint32_t kHalfMinutesPerDay = 2880;
+
+// Sample a colour band at `timeHalfMin` (wraps modulo 2880): piecewise-linear
+// lerp of each packed byte channel between the bracketing keys, wrapping the
+// last key -> first key segment across midnight. num == 0 returns 0 (black);
+// a single key is a constant; a time exactly on a key returns that key.
+uint32_t sampleIntBand(const LightIntBandEntry& band, uint32_t timeHalfMin);
+// Same keyframe rules for a float band; num == 0 returns 0.0f.
+float    sampleFloatBand(const LightFloatBandEntry& band, uint32_t timeHalfMin);
+// Distance weight of a positioned light: 1 inside falloffStart, 0 at/beyond
+// falloffEnd, linear in between. (Multi-light blending stays in lighting.cpp.)
+float    lightWeight(float dist, float falloffStart, float falloffEnd);
 
 struct CreatureModelDataEntry {
     uint32_t    id        = 0;   // field 0
@@ -281,6 +434,10 @@ CharHairGeosetEntry charHairGeosetEntry(const Dbc& dbc, uint32_t rec);
 AreaEntry       areaEntry(const Dbc& dbc, uint32_t rec);
 LiquidTypeEntry liquidTypeEntry(const Dbc& dbc, uint32_t rec);
 LightEntry      lightEntry(const Dbc& dbc, uint32_t rec);
+LightParamsRecord   lightParamsRecord(const Dbc& dbc, uint32_t rec);
+LightIntBandEntry   lightIntBandEntry(const Dbc& dbc, uint32_t rec);
+LightFloatBandEntry lightFloatBandEntry(const Dbc& dbc, uint32_t rec);
+LightSkyboxEntry    lightSkyboxEntry(const Dbc& dbc, uint32_t rec);
 CreatureModelDataEntry     creatureModelDataEntry(const Dbc& dbc, uint32_t rec);
 CreatureDisplayInfoEntry   creatureDisplayInfoEntry(const Dbc& dbc, uint32_t rec);
 GameObjectDisplayInfoEntry gameObjectDisplayInfoEntry(const Dbc& dbc, uint32_t rec);
