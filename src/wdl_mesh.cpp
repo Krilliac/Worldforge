@@ -70,10 +70,15 @@ Mesh buildWdlTileMesh(const Wdl& wdl, int tileX, int tileY) {
     }
 
     // 16x16 quads, two triangles each. Wind so the front face is +Z up (CCW seen
-    // from above), matching buildLiquidMesh's TL,TR,BR / TL,BR,BL order.
+    // from above), matching buildLiquidMesh's TL,TR,BR / TL,BR,BL order. The cell
+    // grid maps 1:1 onto the tile's 16x16 MCNK grid (cell (i,j) spans chunk
+    // row i, col j -- see the vertex/corner note above), so a chunk holed in
+    // MAHO simply emits no quad: the horizon terrain shows the same hole the
+    // full-res ADT does.
     mesh.indices.reserve(static_cast<size_t>(O - 1) * (O - 1) * 2 * 3);
     for (int i = 0; i < O - 1; ++i) {
         for (int j = 0; j < O - 1; ++j) {
+            if (wdlChunkIsHole(wdl, tileX, tileY, i, j)) continue;   // holed MCNK
             uint32_t TL = static_cast<uint32_t>(idx(i,     j));
             uint32_t TR = static_cast<uint32_t>(idx(i,     j + 1));
             uint32_t BL = static_cast<uint32_t>(idx(i + 1, j));

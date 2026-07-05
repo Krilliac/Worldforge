@@ -86,4 +86,83 @@ void test_wdl() {
         CHECK(w2.height(bx, by, 0, 0) == 1000);
         CHECK(w2.height(bx, by, 1, 0) == 1017);                     // row1col0 = 1000+17
     }
+
+    // --- no MAHO (pre-WotLK writer): zero holes, offset 0, patcher skips ---
+    {
+        CHECK(!wdlChunkIsHole(w, tx, ty, 3, 5));
+        CHECK(w.mahoOffset[idx] == 0);
+        Wdl edited = w;
+        setWdlHole(edited, tx, ty, 3, 5, true);                     // edit sticks in memory...
+        CHECK(wdlChunkIsHole(edited, tx, ty, 3, 5));
+        std::vector<uint8_t> out = writeWdlHoles(file, edited);     // ...but there is no chunk
+        CHECK(out == file);                                         // to patch: byte-identical
+    }
+
+    // --- MAHO: parse, query, edit, patch back, re-parse ---
+    {
+        std::vector<uint8_t> mare2;
+        for (int i = 0; i < Wdl::N; ++i) put16(mare2, (uint16_t)(int16_t)i);
+        for (int i = 0; i < 16 * 16; ++i) put16(mare2, 0);
+        std::vector<uint8_t> maho(32, 0);
+        maho[3 * 2] = 1 << 5;                       // row 3, col 5 holed (LE low byte)
+
+        std::vector<uint8_t> f;
+        chunk(f, "MVER", mver);
+        std::vector<uint8_t> maofh(64 * 64 * 4, 0);
+        const size_t maofStart = f.size();
+        chunk(f, "MAOF", maofh);
+        const size_t mareStart2 = f.size();
+        chunk(f, "MARE", mare2);
+        chunk(f, "MAHO", maho);
+        for (int i = 0; i < 4; ++i) f[maofStart + 8 + (size_t)idx * 4 + i] = (uint8_t)((mareStart2 >> (8 * i)) & 0xFF);
+
+        Wdl h = parseWdl(f);
+        CHECK(h.tilePresent(tx, ty));
+        // MAHO payload = MARE start + header + payload + MAHO header.
+        const size_t mahoPayload = mareStart2 + 8 + mare2.size() + 8;
+        CHECK(h.mahoOffset[idx] == mahoPayload);
+        CHECK(wdlChunkIsHole(h, tx, ty, 3, 5));
+        bool othersClear = true;                    // every other bit reads clear
+        for (int r = 0; r < 16; ++r)
+            for (int c = 0; c < 16; ++c)
+                if (!(r == 3 && c == 5) && wdlChunkIsHole(h, tx, ty, r, c)) othersClear = false;
+        CHECK(othersClear);
+        // Out-of-range row/col and absent tiles read as "not a hole".
+        CHECK(!wdlChunkIsHole(h, tx, ty, -1, 5));
+        CHECK(!wdlChunkIsHole(h, tx, ty, 3, 16));
+        CHECK(!wdlChunkIsHole(h, 63, 63, 3, 5));
+
+        // Edit: clear (3,5), set (0,0) and (15,15); out-of-range edits ignored.
+        setWdlHole(h, tx, ty, 3, 5, false);
+        setWdlHole(h, tx, ty, 0, 0, true);
+        setWdlHole(h, tx, ty, 15, 15, true);
+        setWdlHole(h, tx, ty, -1, 0, true);
+        setWdlHole(h, tx, ty, 0, 16, true);
+        std::vector<uint8_t> out = writeWdlHoles(f, h);
+        CHECK(out.size() == f.size());
+        bool outsideSame = true;                    // only the 32 MAHO bytes may differ
+        for (size_t i = 0; i < f.size(); ++i)
+            if ((i < mahoPayload || i >= mahoPayload + 32) && out[i] != f[i]) outsideSame = false;
+        CHECK(outsideSame);
+
+        Wdl h2 = parseWdl(out);                     // re-parse round-trips the edits
+        CHECK(h2.holes == h.holes);
+        CHECK(!wdlChunkIsHole(h2, tx, ty, 3, 5));
+        CHECK(wdlChunkIsHole(h2, tx, ty, 0, 0));
+        CHECK(wdlChunkIsHole(h2, tx, ty, 15, 15));
+    }
+
+    // --- ADT->WDL sync rule: WDL bit set iff the chunk is FULLY holed ---
+    {
+        CHECK(adtChunkFullyHoled(0xFFFF));
+        CHECK(!adtChunkFullyHoled(0xFFFE));
+        CHECK(!adtChunkFullyHoled(0x0000));
+
+        Wdl s;                                      // hand-built, mask unallocated
+        CHECK(!wdlChunkIsHole(s, 2, 2, 4, 4));
+        syncWdlFromAdt(s, 2, 2, 4, 4, 0xFFFF);      // fully holed -> set
+        CHECK(wdlChunkIsHole(s, 2, 2, 4, 4));
+        syncWdlFromAdt(s, 2, 2, 4, 4, 0xFFFE);      // one bit intact -> clear
+        CHECK(!wdlChunkIsHole(s, 2, 2, 4, 4));
+    }
 }

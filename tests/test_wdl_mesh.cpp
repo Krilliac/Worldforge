@@ -121,4 +121,54 @@ void test_wdl_mesh() {
         CHECK(wm.vertices.empty());
         CHECK(wm.indices.empty());
     }
+
+    // --- MAHO hole: exactly the holed chunk's quad vanishes, rest identical ---
+    {
+        Wdl hw = makeWdl({{30, 30}}, /*base*/100);
+        Mesh full = buildWdlTileMesh(hw, 30, 30);
+        setWdlHole(hw, 30, 30, /*row*/3, /*col*/5, true);
+        Mesh holed = buildWdlTileMesh(hw, 30, 30);
+
+        // Vertex grid unchanged (positions AND normals), only quads drop.
+        CHECK(holed.vertices.size() == full.vertices.size());
+        bool vSame = true;
+        for (size_t k = 0; k < full.vertices.size(); ++k) {
+            const Vertex& a = full.vertices[k];
+            const Vertex& b = holed.vertices[k];
+            if (a.position.x != b.position.x || a.position.y != b.position.y ||
+                a.position.z != b.position.z || a.normal.x != b.normal.x ||
+                a.normal.y != b.normal.y || a.normal.z != b.normal.z) vSame = false;
+        }
+        CHECK(vSame);
+
+        // One holed chunk = one quad = two triangles = 6 indices fewer.
+        CHECK(holed.indices.size() == full.indices.size() - 6);
+
+        // Cells emit row-major, so the holed stream must equal the full one
+        // with cell (3,5)'s six indices spliced out and nothing else moved.
+        const size_t cut = static_cast<size_t>(3 * 16 + 5) * 6;
+        bool restSame = true;
+        for (size_t k = 0; k < holed.indices.size(); ++k) {
+            const size_t src = (k < cut) ? k : k + 6;
+            if (holed.indices[k] != full.indices[src]) restSame = false;
+        }
+        CHECK(restSame);
+
+        // And none of the surviving triangles touch ONLY the hole's quad: the
+        // spliced-out 6 indices are exactly full's cell-(3,5) block.
+        CHECK(full.indices[cut]     == 3u * 17u + 5u);          // TL of cell (3,5)
+        CHECK(full.indices[cut + 1] == 3u * 17u + 6u);          // TR
+
+        // The world mesh sees the hole too.
+        Mesh world = buildWdlWorldMesh(hw);
+        CHECK(world.indices.size() == full.indices.size() - 6);
+
+        // Fully holing the tile leaves the grid but no geometry at all.
+        for (int r = 0; r < 16; ++r)
+            for (int c = 0; c < 16; ++c)
+                setWdlHole(hw, 30, 30, r, c, true);
+        Mesh gone = buildWdlTileMesh(hw, 30, 30);
+        CHECK(gone.vertices.size() == 17u * 17u);
+        CHECK(gone.indices.empty());
+    }
 }

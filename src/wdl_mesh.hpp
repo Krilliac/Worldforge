@@ -7,7 +7,9 @@
 // the SAME world XY footprint as buildTileMesh() so a WDL tile sits exactly
 // under its ADT tile (only the resolution differs). Heights are the int16 yard
 // values straight out of MARE's outer grid; per-vertex normals come from the
-// cross of the grid tangents so the distant terrain still lights.
+// cross of the grid tangents so the distant terrain still lights. Cells whose
+// MCNK is holed in MAHO (wdlChunkIsHole) emit no quad, keeping the horizon
+// consistent with the ADT's holes.
 // ---------------------------------------------------------------------------
 #include "math.hpp"
 #include "terrain.hpp"   // Mesh / Vertex
