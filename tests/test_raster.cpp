@@ -160,4 +160,35 @@ void test_raster() {
         CHECK(fa.color.at(16,16).r == 235);            // emissive == raw tint
         CHECK(fb2.color.at(16,16).r < fa.color.at(16,16).r);   // shaded is darker
     }
+
+    // ---- per-vertex colour (MOCV baked light): modulates the texel ----------
+    {
+        Image white(1,1); white.at(0,0) = Rgba{255,255,255,255};
+        // A flat-facing quad under a full-ambient light (no directional falloff),
+        // so any dimming comes purely from the vertex colour.
+        ShadeLight flat; flat.ambient = {1,1,1}; flat.diffuse = {0,0,0}; flat.dir = {0,0,1};
+        auto quad = [](Rgba c) {
+            TexMesh m;
+            m.vertices = { {{-8,-8,0},{0,0,1},{0,0}, c}, {{8,-8,0},{0,0,1},{1,0}, c},
+                           {{8,8,0},{0,0,1},{1,1}, c},   {{-8,8,0},{0,0,1},{0,1}, c} };
+            m.indices = { 0,1,2, 0,2,3 };
+            return m;
+        };
+        Mat4 view = Mat4::lookAt({0,0,20}, {0,0,0}, {0,1,0});
+        Mat4 mvp  = Mat4::perspective(60.0, 1.0, 0.1, 100.0) * view;
+
+        // White vertex colour: the texel passes through at full brightness.
+        Framebuffer fw(32,32); fw.clear(Rgba{0,0,0,255});
+        rasterTexMesh(fw, quad(Rgba{255,255,255,255}), mvp, white, flat);
+        CHECK(fw.color.at(16,16).r == 255);
+
+        // Half-grey vertex colour halves it; a red vertex colour kills g/b.
+        Framebuffer fh(32,32); fh.clear(Rgba{0,0,0,255});
+        rasterTexMesh(fh, quad(Rgba{128,128,128,255}), mvp, white, flat);
+        CHECK(fh.color.at(16,16).r > 120 && fh.color.at(16,16).r < 135);
+
+        Framebuffer fr(32,32); fr.clear(Rgba{0,0,0,255});
+        rasterTexMesh(fr, quad(Rgba{255,0,0,255}), mvp, white, flat);
+        CHECK(fr.color.at(16,16).r == 255 && fr.color.at(16,16).g == 0 && fr.color.at(16,16).b == 0);
+    }
 }

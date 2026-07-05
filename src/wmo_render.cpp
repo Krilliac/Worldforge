@@ -21,8 +21,11 @@ std::vector<WmoRenderPart> wmoRenderParts(const WmoModel& wmo) {
                 Vec3 p  = g.vertices[vi];
                 Vec3 n  = vi < g.normals.size() ? g.normals[vi] : Vec3{0, 0, 1};
                 Vec2 uv = vi < g.uvs.size()     ? g.uvs[vi]     : Vec2{0, 0};
+                // MOCV baked interior lighting, if present (else white = no tint).
+                Rgba col = vi < g.vertexColors.size() ? g.vertexColors[vi]
+                                                      : Rgba{255, 255, 255, 255};
                 tm.indices.push_back(static_cast<uint32_t>(tm.vertices.size()));
-                tm.vertices.push_back(TexVertex{ p, n, uv });
+                tm.vertices.push_back(TexVertex{ p, n, uv, col });
             }
         }
     }

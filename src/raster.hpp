@@ -62,7 +62,10 @@ void rasterMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp, Vec3 lightDi
 void rasterMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& mvp, const ShadeLight& light);
 
 // A textured mesh vertex: position + normal + a texture coordinate.
-struct TexVertex { Vec3 position; Vec3 normal; Vec2 uv; };
+// `color` is a per-vertex multiplier (default white = no effect). WMO interiors
+// use it to carry MOCV baked vertex lighting; the rasteriser modulates the texel
+// by the interpolated vertex colour after texturing.
+struct TexVertex { Vec3 position; Vec3 normal; Vec2 uv; Rgba color{255, 255, 255, 255}; };
 struct TexMesh   { std::vector<TexVertex> vertices; std::vector<uint32_t> indices; };
 
 // Nearest-sample a texture with UV repeat (wrap). Shared by the model and

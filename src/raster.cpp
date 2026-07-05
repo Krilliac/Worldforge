@@ -213,10 +213,16 @@ void rasterTexMesh(Framebuffer& fb, const TexMesh& mesh, const Mat4& mvp,
                 n = normalize(n);
                 Vec3 lf = light.shade(n, L);
 
+                // Perspective-correct per-vertex colour (default white -> 1.0, no
+                // effect). WMO interiors carry MOCV baked light here.
+                float vr = (l0*V0.color.r*iw0 + l1*V1.color.r*iw1 + l2*V2.color.r*iw2) / (iw*255.0f);
+                float vg = (l0*V0.color.g*iw0 + l1*V1.color.g*iw1 + l2*V2.color.g*iw2) / (iw*255.0f);
+                float vb = (l0*V0.color.b*iw0 + l1*V1.color.b*iw1 + l2*V2.color.b*iw2) / (iw*255.0f);
+
                 Rgba c;
-                c.r = clamp8(texel.r * lf.x);
-                c.g = clamp8(texel.g * lf.y);
-                c.b = clamp8(texel.b * lf.z);
+                c.r = clamp8(texel.r * lf.x * vr);
+                c.g = clamp8(texel.g * lf.y * vg);
+                c.b = clamp8(texel.b * lf.z * vb);
                 if (alphaBlend) {
                     // Composite over the framebuffer; translucent -> no depth write.
                     // alphaMul fades the whole object (distance fade) atop the
