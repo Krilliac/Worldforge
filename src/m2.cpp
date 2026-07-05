@@ -334,7 +334,7 @@ constexpr size_t kTexXformStride = 0x54;   // ModelTexAnimDef: 3 * AnimationBloc
 // VERIFY-AGAINST-REAL-FILE constants (vanilla specifics that differ across
 // sources). The parser logic below is independent of these; only the byte
 // strides depend on them, so a single real 1.12 .m2 confirms/adjusts them:
-constexpr size_t kSeqStride   = 0x40;    // ModelAnimation record size
+constexpr size_t kSeqStride   = 0x44;    // ModelAnimation record size (vanilla)
 constexpr size_t kBoneStride  = 0x6C;    // ModelBoneDef: 12 hdr + 3*28 tracks + 12 pivot = 108
 constexpr size_t kAnimBlock   = 0x1C;    // AnimationBlock: 28 bytes
 constexpr size_t kRotStride   = 16;      // rotation quaternion as 4 floats (vanilla)
@@ -395,19 +395,23 @@ M2Animation parseM2Animation(const std::vector<uint8_t>& buf) {
         r.seek(kOffAnimations);
         uint32_t n = r.u32(), ofs = r.u32();
         if (static_cast<size_t>(ofs) + static_cast<size_t>(n) * kSeqStride <= buf.size()) {
-            // 0x40-byte record layout this stride implies: id/subId @ 0x00,
-            // length @ 0x04, moveSpeed @ 0x08, flags @ 0x0C, frequency+pad
-            // @ 0x10, replay range @ 0x14, blendTime @ 0x1C, bounds+radius
-            // @ 0x20..0x3B, variationNext @ 0x3C, aliasNext @ 0x3E.
+            // Vanilla (pre-WotLK) 0x44-byte record layout: id @ 0x00, subId
+            // @ 0x02, startTimestamp @ 0x04, endTimestamp @ 0x08 (explicit
+            // timestamps, no stored duration), moveSpeed @ 0x0C, flags @ 0x10,
+            // frequency+pad @ 0x14, replay min/max @ 0x18/0x1C, blendTime
+            // @ 0x20, bounds+radius @ 0x24..0x3F, variationNext @ 0x40,
+            // aliasNext @ 0x42.
             for (uint32_t i = 0; i < n; ++i) {
                 ByteReader s(buf.data() + ofs + i * kSeqStride, kSeqStride);
                 M2Sequence seq;
                 seq.id     = s.u16();
                 seq.subId  = s.u16();
-                seq.length = s.u32();
-                s.seek(0x0C); seq.flags = s.u32();   // flags location within record
-                s.seek(0x1C); seq.blendTime = s.u32();
-                s.seek(0x3C); seq.variationNext = static_cast<int16_t>(s.u16());
+                uint32_t start = s.u32();
+                uint32_t end   = s.u32();
+                seq.length = (end > start) ? end - start : 0;   // duration
+                s.seek(0x10); seq.flags = s.u32();
+                s.seek(0x20); seq.blendTime = s.u32();
+                s.seek(0x40); seq.variationNext = static_cast<int16_t>(s.u16());
                 out.sequences.push_back(seq);
             }
         }
@@ -607,15 +611,19 @@ std::vector<Bone> buildBonesForAnimation(const M2Animation& anim, int animIndex)
     // tangents along when the track has them (bezier/hermite).
     auto slice = [&](const auto& ch, auto& kt) {
         kt.interp = ch.interp;
-        if (ch.times.empty()) return;
-        size_t first = 0, last = ch.times.size() - 1;
+        // Truncated files can leave times/values with different lengths (each
+        // array is bounds-checked independently); copy only the shared prefix.
+        const size_t n = ch.times.size() < ch.values.size() ? ch.times.size()
+                                                            : ch.values.size();
+        if (n == 0) return;
+        size_t first = 0, last = n - 1;
         if (animIndex >= 0 && static_cast<size_t>(animIndex) < ch.ranges.size()) {
             first = ch.ranges[animIndex].first;
             last  = ch.ranges[animIndex].second;
         }
         bool tangents = ch.inTan.size() == ch.values.size() &&
                         ch.outTan.size() == ch.values.size();
-        for (size_t i = first; i <= last && i < ch.times.size(); ++i) {
+        for (size_t i = first; i <= last && i < n; ++i) {
             kt.times.push_back(ch.times[i]);
             kt.values.push_back(ch.values[i]);
             if (tangents) {

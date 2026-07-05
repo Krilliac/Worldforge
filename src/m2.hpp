@@ -151,8 +151,9 @@ struct M2Sequence {
     uint32_t flags  = 0;
     // Cross-fade duration (ms) when transitioning into/out of this sequence
     // (observed 0..500; 0 = instant switch) and the index of the next variation
-    // of the same AnimationID (-1 = none). See the 0x40-byte record layout in
-    // m2.cpp for the verified field offsets.
+    // of the same AnimationID (-1 = none). See the vanilla 0x44-byte record
+    // layout in m2.cpp for the verified field offsets; `length` is derived as
+    // endTimestamp - startTimestamp (vanilla stores explicit timestamps).
     uint32_t blendTime     = 0;
     int16_t  variationNext = -1;
 };

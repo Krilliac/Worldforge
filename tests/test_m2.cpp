@@ -270,10 +270,11 @@ void test_m2() {
     }
 
     // ---- animation extras: sequence blendTime/variationNext + spline track ----
-    // A fresh fixture with known bytes at the verified 0x40-byte sequence-record
-    // offsets (blendTime @ 0x1C, variationNext @ 0x3C) and a hermite bone track
-    // whose on-disk values array is 3x the timestamp count ({value, inTan,
-    // outTan} per key), parsed into the parallel inTan/outTan vectors.
+    // A fresh fixture with known bytes at the vanilla 0x44-byte sequence-record
+    // offsets (start/end timestamps @ 0x04/0x08, flags @ 0x10, blendTime @ 0x20,
+    // variationNext @ 0x40) and a hermite bone track whose on-disk values array
+    // is 3x the timestamp count ({value, inTan, outTan} per key), parsed into
+    // the parallel inTan/outTan vectors.
     {
         std::vector<uint8_t> g(0x150, 0);
         g[0]='M'; g[1]='D'; g[2]='2'; g[3]='0';
@@ -282,18 +283,20 @@ void test_m2() {
         // two sequences: the same AnimationID (id 1), variation 0 -> 1 chained
         // via variationNext (-1 = none).
         uint32_t seqOff = (uint32_t)g.size();
-        g.insert(g.end(), 2 * 0x40, 0);
+        g.insert(g.end(), 2 * 0x44, 0);
         patch16(g, seqOff + 0x00, 1);             // seq0: id = 1
         patch16(g, seqOff + 0x02, 0);             //       subId = 0
-        patch32(g, seqOff + 0x04, 2000);          //       length
-        patch32(g, seqOff + 0x0C, 0x20);          //       flags
-        patch32(g, seqOff + 0x1C, 150);           //       blendTime = 150 ms
-        patch16(g, seqOff + 0x3C, 1);             //       variationNext = 1
-        patch16(g, seqOff + 0x40 + 0x00, 1);      // seq1: id = 1
-        patch16(g, seqOff + 0x40 + 0x02, 1);      //       subId = 1
-        patch32(g, seqOff + 0x40 + 0x04, 800);    //       length
-        patch32(g, seqOff + 0x40 + 0x1C, 0);      //       blendTime 0 = instant
-        patch16(g, seqOff + 0x40 + 0x3C, 0xFFFF); //       variationNext = -1
+        patch32(g, seqOff + 0x04, 500);           //       startTimestamp
+        patch32(g, seqOff + 0x08, 2500);          //       endTimestamp (len 2000)
+        patch32(g, seqOff + 0x10, 0x20);          //       flags
+        patch32(g, seqOff + 0x20, 150);           //       blendTime = 150 ms
+        patch16(g, seqOff + 0x40, 1);             //       variationNext = 1
+        patch16(g, seqOff + 0x44 + 0x00, 1);      // seq1: id = 1
+        patch16(g, seqOff + 0x44 + 0x02, 1);      //       subId = 1
+        patch32(g, seqOff + 0x44 + 0x04, 0);      //       startTimestamp
+        patch32(g, seqOff + 0x44 + 0x08, 800);    //       endTimestamp (len 800)
+        patch32(g, seqOff + 0x44 + 0x20, 0);      //       blendTime 0 = instant
+        patch16(g, seqOff + 0x44 + 0x40, 0xFFFF); //       variationNext = -1
 
         // one bone whose translation track is HERMITE (interp 3).
         uint32_t bonesOff = (uint32_t)g.size();
@@ -322,10 +325,11 @@ void test_m2() {
         M2Animation anim = parseM2Animation(g);
         CHECK(anim.sequences.size() == 2);
         CHECK(anim.sequences[0].id == 1 && anim.sequences[0].subId == 0);
-        CHECK(anim.sequences[0].length == 2000);
+        CHECK(anim.sequences[0].length == 2000);   // derived: end 2500 - start 500
         CHECK(anim.sequences[0].flags == 0x20);
         CHECK(anim.sequences[0].blendTime == 150);
         CHECK(anim.sequences[0].variationNext == 1);
+        CHECK(anim.sequences[1].length == 800);    // derived: end 800 - start 0
         CHECK(anim.sequences[1].blendTime == 0);
         CHECK(anim.sequences[1].variationNext == -1);
 

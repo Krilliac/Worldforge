@@ -98,7 +98,7 @@ struct KeyTrack {
     bool empty() const { return times.empty(); }
 
     T sample(uint32_t t, const T& fallback) const {
-        if (times.empty())          return fallback;
+        if (times.empty() || values.size() < times.size()) return fallback;
         if (times.size() == 1)      return values[0];
         if (t <= times.front())     return values.front();
         if (t >= times.back())      return values.back();
@@ -133,9 +133,14 @@ template <typename Channel, typename T>
 T sampleChannel(const Channel& ch, int animIndex, uint32_t animTimeMs,
                 uint32_t globalTimeMs, const std::vector<uint32_t>& globalSeqs,
                 const T& fallback) {
-    if (ch.times.empty()) return fallback;
+    // A truncated M2 can leave `times` and `values` with different lengths
+    // (the reader bounds-checks each array independently): only ever index
+    // the prefix both arrays cover.
+    const size_t n = ch.times.size() < ch.values.size() ? ch.times.size()
+                                                        : ch.values.size();
+    if (n == 0) return fallback;
 
-    size_t first = 0, last = ch.times.size() - 1;
+    size_t first = 0, last = n - 1;
     uint32_t t = animTimeMs;
 
     if (ch.globalSeq >= 0) {
@@ -147,8 +152,8 @@ T sampleChannel(const Channel& ch, int animIndex, uint32_t animTimeMs,
         first = ch.ranges[animIndex].first;
         last  = ch.ranges[animIndex].second;
     }
-    if (first >= ch.times.size()) return fallback;
-    if (last >= ch.times.size()) last = ch.times.size() - 1;
+    if (first >= n) return fallback;
+    if (last >= n) last = n - 1;
     if (last < first) return ch.values[first];
 
     if (first == last)                 return ch.values[first];

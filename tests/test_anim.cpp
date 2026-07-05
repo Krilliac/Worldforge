@@ -135,17 +135,47 @@ void test_anim() {
         CHECK_NEAR(c2.z, -1.0f, 1e-4);
     }
 
+    // ---------- truncated channel: times/values length mismatch ----------
+    // A corrupt/truncated M2 can produce non-empty times with empty or short
+    // values (the reader bounds-checks the two arrays independently); sampling
+    // must stay within the prefix both arrays cover instead of reading OOB.
+    {
+        const std::vector<uint32_t> noGlobals;
+        RawChannel<float> ch;
+        ch.interp    = 1;
+        ch.globalSeq = -1;
+        ch.times  = {0, 500, 1000};                // 3 timestamps...
+        ch.values = {2.0f};                        // ...but a single value survived
+        // Only values[0] exists: sampling anywhere returns it, never values[1+].
+        CHECK_APPROX((sampleChannel<RawChannel<float>, float>(
+                          ch, 0, 750, 0, noGlobals, 9.0f)), 2.0f);
+        // A range pointing past the surviving values is clamped the same way.
+        ch.ranges = { {0, 2} };
+        CHECK_APPROX((sampleChannel<RawChannel<float>, float>(
+                          ch, 0, 750, 0, noGlobals, 9.0f)), 2.0f);
+        // No values at all -> fallback.
+        ch.values.clear();
+        CHECK_APPROX((sampleChannel<RawChannel<float>, float>(
+                          ch, 0, 750, 0, noGlobals, 9.0f)), 9.0f);
+
+        // The KeyTrack path bails to the fallback on short values too.
+        KeyTrack<float> kt; kt.interp = 1;
+        kt.times = {0, 1000}; kt.values = {1.0f};
+        CHECK_APPROX(kt.sample(500, 7.0f), 7.0f);
+    }
+
     // ---------- M2 vanilla animation parse ----------
     {
         std::vector<uint8_t> f(0x150, 0);
         f[0]='M'; f[1]='D'; f[2]='2'; f[3]='0';
         patch32(f, 0x004, 0x100);
 
-        // sequence block (kSeqStride = 0x40)
+        // sequence block (kSeqStride = 0x44, vanilla)
         uint32_t seqOff = (uint32_t)f.size();
-        { std::vector<uint8_t> s(0x40, 0);
-          // id=0, subId=0 at 0x00/0x02; length=1000 at 0x04; flags=0 at 0x0C
-          s[0x04]=(1000)&0xFF; s[0x05]=(1000>>8)&0xFF;
+        { std::vector<uint8_t> s(0x44, 0);
+          // id=0, subId=0 at 0x00/0x02; start=0 at 0x04, end=1000 at 0x08
+          // (duration = end - start = 1000); flags=0 at 0x10
+          s[0x08]=(1000)&0xFF; s[0x09]=(1000>>8)&0xFF;
           f.insert(f.end(), s.begin(), s.end()); }
 
         // bones block: 2 * 0x6C
