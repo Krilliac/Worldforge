@@ -190,6 +190,53 @@ void test_dbc_defs() {
     CHECK(normalizeModelPath("a.MDL") == "a.m2");
     CHECK(normalizeModelPath("z.wmo") == "z.wmo");
 
+    // --- spell-support DBCs (real 1.12.1 layouts: 4 fields x 16 bytes) ------
+    {
+        // SpellCastTimes: id, base(ms), perLevel, min(ms). Real rec0 = 153,3400,0,3400.
+        DbcBuilder ct(4);
+        ct.addRecord({ 153, 3400, 0, 3400 });
+        ct.addRecord({ 2, 250, 0, 250 });
+        Dbc ctDbc = Dbc::parse(ct.build());
+        SpellCastTimesEntry ce = spellCastTimesEntry(ctDbc, 0);
+        CHECK(ce.id == 153 && ce.baseMs == 3400 && ce.minMs == 3400);
+
+        // SpellDuration: id, base, perLevel, max. Real rec2 = 285,1000,0,6000.
+        DbcBuilder dur(4);
+        dur.addRecord({ 285, 1000, 0, 6000 });
+        Dbc durDbc = Dbc::parse(dur.build());
+        SpellDurationEntry de = spellDurationEntry(durDbc, 0);
+        CHECK(de.id == 285 && de.baseMs == 1000 && de.maxMs == 6000);
+
+        // SpellRadius: id + three floats. Real rec0 = 15, 3.0, 0, 3.0.
+        auto fbits = [](float f){ uint32_t u; std::memcpy(&u, &f, 4); return u; };
+        DbcBuilder rad(4);
+        rad.addRecord({ 15, fbits(3.0f), fbits(0.0f), fbits(3.0f) });
+        Dbc radDbc = Dbc::parse(rad.build());
+        SpellRadiusEntry re = spellRadiusEntry(radDbc, 0);
+        CHECK(re.id == 15);
+        CHECK_APPROX(re.radius, 3.0f);
+        CHECK_APPROX(re.maxRadius, 3.0f);
+
+        // SpellRange: id, minRange(f), maxRange(f), flags, then (unused) name cols.
+        DbcBuilder rng(22);
+        rng.addRecord({ 114, fbits(8.0f), fbits(35.0f), 0 });   // rest padded to 0
+        Dbc rngDbc = Dbc::parse(rng.build());
+        SpellRangeEntry ge = spellRangeEntry(rngDbc, 0);
+        CHECK(ge.id == 114);
+        CHECK_APPROX(ge.minRange, 8.0f);
+        CHECK_APPROX(ge.maxRange, 35.0f);
+
+        // SpellSupportDb indexes all four by id; misses return nullptr.
+        SpellSupportDb db;
+        db.build(&ctDbc, &durDbc, &radDbc, &rngDbc);
+        CHECK(db.castTime(153) && db.castTime(153)->baseMs == 3400);
+        CHECK(db.castTime(2)  && db.castTime(2)->baseMs == 250);
+        CHECK(db.duration(285) && db.duration(285)->maxMs == 6000);
+        CHECK(db.radius(15) && db.radius(15)->radius > 2.9f);
+        CHECK(db.range(114) && db.range(114)->maxRange > 34.0f);
+        CHECK(db.castTime(999) == nullptr && db.range(999) == nullptr);
+    }
+
     // --- Dbc::getU32 robustness: out-of-range FIELD -> 0, RECORD -> throw ----
     // Real/patched client DBCs can carry fewer fields than a reader expects; a
     // missing field must read as 0 (not crash the editor). An out-of-range

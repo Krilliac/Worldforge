@@ -115,6 +115,61 @@ struct CharHairGeosetEntry {
     bool     showScalp = false; // field 5 (bald scalp vs hair mesh)
 };
 
+// ---- spell-support DBCs (the tables Spell.dbc indexes by *Index) ------------
+// Small fixed-layout tables verified against the owned 1.12.1 client (dbc_probe):
+// each is ID + three values, all 16 bytes / 4 fields (SpellRange is wider but we
+// read only its leading numeric fields). These resolve a spell's rangeIndex /
+// castingTimeIndex / durationIndex / radius id to real numbers for tooltips.
+struct SpellCastTimesEntry {   // SpellCastTimes.dbc (50 rec x 4 x 16)
+    uint32_t id      = 0;      // field 0
+    int32_t  baseMs  = 0;      // field 1 (base cast time, ms)
+    int32_t  perLevel = 0;     // field 2 (per-level delta, ms)
+    int32_t  minMs   = 0;      // field 3 (minimum cast time, ms)
+};
+struct SpellDurationEntry {    // SpellDuration.dbc (70 rec x 4 x 16)
+    uint32_t id         = 0;   // field 0
+    int32_t  baseMs     = 0;   // field 1 (base duration, ms)
+    int32_t  perLevel   = 0;   // field 2 (per-level delta, ms)
+    int32_t  maxMs      = 0;   // field 3 (max duration, ms)
+};
+struct SpellRadiusEntry {      // SpellRadius.dbc (15 rec x 4 x 16), floats
+    uint32_t id        = 0;    // field 0
+    float    radius    = 0.0f; // field 1 (yards)
+    float    perLevel  = 0.0f; // field 2
+    float    maxRadius = 0.0f; // field 3
+};
+struct SpellRangeEntry {       // SpellRange.dbc (25 rec x 22 x 88), leading fields
+    uint32_t id       = 0;     // field 0
+    float    minRange = 0.0f;  // field 1 (yards)
+    float    maxRange = 0.0f;  // field 2 (yards)
+    uint32_t flags    = 0;     // field 3
+};
+
+SpellCastTimesEntry spellCastTimesEntry(const Dbc& dbc, uint32_t rec);
+SpellDurationEntry  spellDurationEntry(const Dbc& dbc, uint32_t rec);
+SpellRadiusEntry    spellRadiusEntry(const Dbc& dbc, uint32_t rec);
+SpellRangeEntry     spellRangeEntry(const Dbc& dbc, uint32_t rec);
+
+// Indexes the four spell-support tables by their id so a spell's *Index fields
+// resolve to real numbers. Build once from the parsed DBCs; missing ids return
+// a null pointer.
+class SpellSupportDb {
+public:
+    void build(const Dbc* castTimes, const Dbc* durations,
+               const Dbc* radii, const Dbc* ranges);
+    const SpellCastTimesEntry* castTime(uint32_t id) const;
+    const SpellDurationEntry*  duration(uint32_t id) const;
+    const SpellRadiusEntry*    radius(uint32_t id) const;
+    const SpellRangeEntry*     range(uint32_t id) const;
+    size_t size() const { return castTimes_.size() + durations_.size()
+                               + radii_.size() + ranges_.size(); }
+private:
+    std::unordered_map<uint32_t, SpellCastTimesEntry> castTimes_;
+    std::unordered_map<uint32_t, SpellDurationEntry>  durations_;
+    std::unordered_map<uint32_t, SpellRadiusEntry>    radii_;
+    std::unordered_map<uint32_t, SpellRangeEntry>     ranges_;
+};
+
 // Typed accessors. `rec` is a 0-based record index in `[0, dbc.recordCount())`.
 MapEntry        mapEntry(const Dbc& dbc, uint32_t rec);
 CharHairGeosetEntry charHairGeosetEntry(const Dbc& dbc, uint32_t rec);

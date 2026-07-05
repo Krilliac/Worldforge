@@ -145,6 +145,62 @@ std::string normalizeModelPath(const std::string& dbcPath) {
     return dbcPath;
 }
 
+SpellCastTimesEntry spellCastTimesEntry(const Dbc& dbc, uint32_t rec) {
+    SpellCastTimesEntry e;
+    e.id       = dbc.getU32(rec, 0);
+    e.baseMs   = static_cast<int32_t>(dbc.getU32(rec, 1));
+    e.perLevel = static_cast<int32_t>(dbc.getU32(rec, 2));
+    e.minMs    = static_cast<int32_t>(dbc.getU32(rec, 3));
+    return e;
+}
+
+SpellDurationEntry spellDurationEntry(const Dbc& dbc, uint32_t rec) {
+    SpellDurationEntry e;
+    e.id       = dbc.getU32(rec, 0);
+    e.baseMs   = static_cast<int32_t>(dbc.getU32(rec, 1));
+    e.perLevel = static_cast<int32_t>(dbc.getU32(rec, 2));
+    e.maxMs    = static_cast<int32_t>(dbc.getU32(rec, 3));
+    return e;
+}
+
+SpellRadiusEntry spellRadiusEntry(const Dbc& dbc, uint32_t rec) {
+    SpellRadiusEntry e;
+    e.id        = dbc.getU32(rec, 0);
+    e.radius    = fieldF32(dbc, rec, 1);
+    e.perLevel  = fieldF32(dbc, rec, 2);
+    e.maxRadius = fieldF32(dbc, rec, 3);
+    return e;
+}
+
+SpellRangeEntry spellRangeEntry(const Dbc& dbc, uint32_t rec) {
+    SpellRangeEntry e;
+    e.id       = dbc.getU32(rec, 0);
+    e.minRange = fieldF32(dbc, rec, 1);
+    e.maxRange = fieldF32(dbc, rec, 2);
+    e.flags    = dbc.getU32(rec, 3);
+    return e;
+}
+
+void SpellSupportDb::build(const Dbc* ct, const Dbc* dur, const Dbc* rad, const Dbc* rng) {
+    if (ct)  for (uint32_t r = 0; r < ct->recordCount();  ++r) { auto e = spellCastTimesEntry(*ct, r);  castTimes_[e.id] = e; }
+    if (dur) for (uint32_t r = 0; r < dur->recordCount(); ++r) { auto e = spellDurationEntry(*dur, r);  durations_[e.id] = e; }
+    if (rad) for (uint32_t r = 0; r < rad->recordCount(); ++r) { auto e = spellRadiusEntry(*rad, r);    radii_[e.id] = e; }
+    if (rng) for (uint32_t r = 0; r < rng->recordCount(); ++r) { auto e = spellRangeEntry(*rng, r);     ranges_[e.id] = e; }
+}
+
+const SpellCastTimesEntry* SpellSupportDb::castTime(uint32_t id) const {
+    auto it = castTimes_.find(id); return it == castTimes_.end() ? nullptr : &it->second;
+}
+const SpellDurationEntry* SpellSupportDb::duration(uint32_t id) const {
+    auto it = durations_.find(id); return it == durations_.end() ? nullptr : &it->second;
+}
+const SpellRadiusEntry* SpellSupportDb::radius(uint32_t id) const {
+    auto it = radii_.find(id); return it == radii_.end() ? nullptr : &it->second;
+}
+const SpellRangeEntry* SpellSupportDb::range(uint32_t id) const {
+    auto it = ranges_.find(id); return it == ranges_.end() ? nullptr : &it->second;
+}
+
 CharHairGeosetEntry charHairGeosetEntry(const Dbc& dbc, uint32_t rec) {
     CharHairGeosetEntry e;
     e.id        = dbc.getU32(rec, 0);
