@@ -142,7 +142,32 @@ void test_wmo() {
     putf(mopt, 7.5f);                        // planeDist
     chunk(root, "MOPT", mopt);
 
+    // MOPR: two 8-byte SMOPortalRefs (portal 0 -> group 1 side +1; portal 0 ->
+    // group 2 side -1).
+    std::vector<uint8_t> mopr;
+    put16(mopr, 0); put16(mopr, 1); put16(mopr, 1);      put16(mopr, 0);   // ref 0
+    put16(mopr, 0); put16(mopr, 2); put16(mopr, 0xFFFF); put16(mopr, 0);   // ref 1 (side -1)
+    chunk(root, "MOPR", mopr);
+
     WmoRoot wr = parseWmoRoot(root);
+    CHECK(wr.portalRefs.size() == 2);
+    CHECK(wr.portalRefs[0].portalIndex == 0 && wr.portalRefs[0].groupIndex == 1);
+    CHECK(wr.portalRefs[0].side == 1);
+    CHECK(wr.portalRefs[1].groupIndex == 2 && wr.portalRefs[1].side == -1);
+
+    // groupPortalRefs slices the root array by a group's MOGP moprIndex/count.
+    {
+        WmoGroup g; g.moprIndex = 0; g.moprCount = 2;
+        auto refs = groupPortalRefs(wr, g);
+        CHECK(refs.size() == 2 && refs[1].side == -1);
+        WmoGroup g1; g1.moprIndex = 1; g1.moprCount = 1;
+        CHECK(groupPortalRefs(wr, g1).size() == 1);
+        // Out-of-range range -> clamped/empty, never a crash.
+        WmoGroup gbad; gbad.moprIndex = 5; gbad.moprCount = 3;
+        CHECK(groupPortalRefs(wr, gbad).empty());
+        WmoGroup gover; gover.moprIndex = 1; gover.moprCount = 99;   // count past end
+        CHECK(groupPortalRefs(wr, gover).size() == 1);              // clamped to array
+    }
     CHECK(wr.nGroups == 1 && wr.nTextures == 2);
     CHECK_APPROX(wr.bboxMax.z, 30.0f);
     CHECK(wr.textures.size() == 2);

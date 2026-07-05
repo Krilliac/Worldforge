@@ -74,6 +74,17 @@ struct WmoPortal {                    // MOPT entry (20 bytes), SMOPortal
     float    planeDist = 0.0f;        // plane distance
 };
 
+// MOPR entry (8 bytes), SMOPortalRef: which group a portal connects, and which
+// side of the portal plane that group is on. A group's MOGP header names a range
+// [moprIndex, moprIndex+moprCount) into the root MOPR array -- its adjacency list
+// for interior portal-based visibility (draw a connected group only if its portal
+// is visible through the current one).
+struct WmoPortalRef {
+    uint16_t portalIndex = 0;         // index into MOPT (which portal)
+    uint16_t groupIndex  = 0;         // the group on the far side of that portal
+    int16_t  side        = 0;         // +1 / -1: which side of the plane the group is
+};
+
 struct WmoRoot {
     uint32_t version = 0;   // MVER (17 for vanilla..Cata); 0 if no MVER chunk
     uint32_t nTextures = 0, nGroups = 0, nPortals = 0, nLights = 0;
@@ -91,6 +102,7 @@ struct WmoRoot {
     std::vector<WmoFog>       fogs;             // MOFG
     std::vector<Vec3>         portalVertices;   // MOPV
     std::vector<WmoPortal>    portals;          // MOPT
+    std::vector<WmoPortalRef> portalRefs;       // MOPR (group -> portal adjacency)
 };
 
 // Parse a WMO root file. `profile` gates the WMO version this client understands
@@ -130,6 +142,8 @@ struct WmoLiquid {                   // MLIQ chunk (SMOLiquid), interior water/l
 struct WmoGroup {
     uint32_t flags = 0;
     Vec3     bboxMin, bboxMax;
+    uint16_t moprIndex = 0;           // MOGP: first MOPR ref for this group
+    uint16_t moprCount = 0;           // MOGP: number of MOPR refs (portal adjacency)
 
     std::vector<Vec3>     vertices;   // MOVT
     std::vector<Vec3>     normals;    // MONR
@@ -144,6 +158,12 @@ struct WmoGroup {
 };
 
 WmoGroup parseWmoGroup(const std::vector<uint8_t>& buf);
+
+// The portal references for one group: root.portalRefs[group.moprIndex ..
+// +group.moprCount), clamped to the array. Each names a portal (into MOPT) and
+// the group it opens onto -- a group's interior-visibility adjacency list.
+// Out-of-range ranges yield an empty list (defensive against odd data).
+std::vector<WmoPortalRef> groupPortalRefs(const WmoRoot& root, const WmoGroup& group);
 
 // A whole WMO: the root plus its parsed group geometry. Built by the asset
 // loader (root file + the `_NNN.wmo` group files) and used for tight,

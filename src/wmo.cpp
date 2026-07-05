@@ -149,6 +149,16 @@ WmoRoot parseWmoRoot(const std::vector<uint8_t>& buf, const ClientProfile& profi
                 p.planeDist   = r.f32();
                 root.portals.push_back(p);
             }
+        } else if (c.magic == "MOPR") {
+            // 8-byte SMOPortalRef records: portalIndex, groupIndex, side, filler.
+            while (r.remaining() >= 8) {
+                WmoPortalRef pr;
+                pr.portalIndex = r.u16();
+                pr.groupIndex  = r.u16();
+                pr.side        = static_cast<int16_t>(r.u16());
+                r.u16();                     // filler
+                root.portalRefs.push_back(pr);
+            }
         }
         return true;
     });
@@ -181,6 +191,8 @@ WmoGroup parseWmoGroup(const std::vector<uint8_t>& buf) {
         h.seek(0x08); grp.flags = h.u32();
         grp.bboxMin = { h.f32(), h.f32(), h.f32() };
         grp.bboxMax = { h.f32(), h.f32(), h.f32() };
+        grp.moprIndex = h.u16();          // portal-ref range into the root MOPR array
+        grp.moprCount = h.u16();
 
         const uint8_t* sub = c.data + 0x44;
         size_t subLen = c.size - 0x44;
@@ -260,6 +272,16 @@ WmoGroup parseWmoGroup(const std::vector<uint8_t>& buf) {
     });
 
     return grp;
+}
+
+std::vector<WmoPortalRef> groupPortalRefs(const WmoRoot& root, const WmoGroup& group) {
+    std::vector<WmoPortalRef> out;
+    const size_t begin = group.moprIndex;
+    const size_t end   = begin + group.moprCount;
+    if (begin > root.portalRefs.size()) return out;      // start past the array
+    for (size_t i = begin; i < end && i < root.portalRefs.size(); ++i)
+        out.push_back(root.portalRefs[i]);
+    return out;
 }
 
 // ---- collision raycast ------------------------------------------------------
