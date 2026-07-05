@@ -36,6 +36,8 @@ constexpr size_t kOffSizeMCSH   = 0x30;   // shadow map sub-chunk size
 constexpr size_t kOffAreaId     = 0x34;
 constexpr size_t kOffNMapObjRefs= 0x38;   // count of MCRF map-object (MODF) indices
 constexpr size_t kOffHoles      = 0x3C;
+constexpr size_t kOffPredTex    = 0x40;   // 16-byte 2-bit-per-cell ground-effect layer map
+constexpr size_t kOffNoEffectDoodad = 0x50;  // 8-byte 1-bit-per-cell doodad suppression
 constexpr size_t kOffNSndEmitters= 0x58;  // count of MCSE sound emitters
 constexpr size_t kOffOfsMCSE    = 0x5C;   // sound emitter sub-chunk offset
 constexpr size_t kOffOfsMCLQ    = 0x60;   // liquid sub-chunk offset
@@ -60,6 +62,20 @@ bool cellIsHole(uint16_t holes, int cellRow, int cellCol) {
     return (holes & (1u << holeBit)) != 0;
 }
 
+void setHoleBit(MapChunk& mc, int subX, int subY) {
+    // Same bit layout cellIsHole() reads: sub-row (north-south) * 4 + sub-col.
+    if (subX < 0 || subX > 3 || subY < 0 || subY > 3) return;
+    mc.holes |= static_cast<uint16_t>(1u << (subY * 4 + subX));
+}
+
+void clearHoleBit(MapChunk& mc, int subX, int subY) {
+    if (subX < 0 || subX > 3 || subY < 0 || subY > 3) return;
+    mc.holes &= static_cast<uint16_t>(~(1u << (subY * 4 + subX)));
+}
+
+void setAllHoles(MapChunk& mc)   { mc.holes = 0xFFFF; }
+void clearAllHoles(MapChunk& mc) { mc.holes = 0; }
+
 bool shadowAt(const MapChunk& mc, int row, int col) {
     if (mc.shadow.empty() || row < 0 || col < 0 || row >= 64 || col >= 64) return false;
     const size_t bit = static_cast<size_t>(row) * 64 + static_cast<size_t>(col);
@@ -73,10 +89,22 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
     MapChunk mc;
     ByteReader h(data, kHdrSize);
     h.seek(kOffFlags);    mc.flags  = h.u32();
+
+    // WoW 5.3+ repurposes the 8 bytes at +0x14 (vanilla ofsMCVT/ofsMCNR) as an
+    // 8x8 high-res hole bitmap when this flag is set -- those "offsets" are
+    // bitmap bits, not file positions, and dereferencing them would read
+    // garbage. We don't support such ADTs; leave the chunk at defaults.
+    if (mc.flags & MCNK_HIGH_RES_HOLES)
+        return mc;
+
     h.seek(kOffIndexX);   mc.indexX = h.u32();
     h.seek(kOffIndexY);   mc.indexY = h.u32();
     h.seek(kOffAreaId);   mc.areaId = h.u32();
     h.seek(kOffHoles);    mc.holes  = h.u16();
+    h.seek(kOffPredTex);
+    for (uint8_t& b : mc.predTex)        b = h.u8();
+    h.seek(kOffNoEffectDoodad);
+    for (uint8_t& b : mc.noEffectDoodad) b = h.u8();
     h.seek(kOffPosition);
     mc.position = { h.f32(), h.f32(), h.f32() };
 
@@ -167,8 +195,10 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
         }
         if (auto [p, sz] = sub(ofsMCRF, "MCRF"); p)
             parseMcrf(mc, p, sz, nDoodadRefs, nMapObjRefs);
-        if (auto [p, sz] = sub(ofsMCSH, "MCSH"); p)
+        if (auto [p, sz] = sub(ofsMCSH, "MCSH"); p) {
+            mc.mcshOffset = static_cast<uint32_t>(p - data);   // chunk-relative; made absolute by parseChunks
             parseMcsh(mc, p, sz);
+        }
         if (auto [p, sz] = sub(ofsMCSE, "MCSE"); p)
             parseMcse(mc, p, sz, nSndEmitters);
         if (auto [p, sz] = sub(ofsMCLQ, "MCLQ"); p)
@@ -209,6 +239,7 @@ static MapChunk parseOneChunk(const uint8_t* data, uint32_t size) {
         } else if (c.magic == "MCRF") {
             parseMcrf(mc, c.data, c.size, nDoodadRefs, nMapObjRefs);
         } else if (c.magic == "MCSH") {
+            mc.mcshOffset = static_cast<uint32_t>(c.data - data);   // chunk-relative; made absolute by parseChunks
             parseMcsh(mc, c.data, c.size);
         } else if (c.magic == "MCSE") {
             parseMcse(mc, c.data, c.size, nSndEmitters);
@@ -337,60 +368,115 @@ static void parseMcrf(MapChunk& mc, const uint8_t* data, uint32_t size,
 
 // Parse MCSH: a 64x64-bit (512-byte) baked shadow bitmap. Truncated maps are
 // zero-padded so shadowAt() can index any texel safely.
+//
+// Like MCAL, the last row/column carries no real data, and the client
+// duplicates the previous one unless MCNK_DO_NOT_FIX_ALPHA is set (the flag
+// governs both maps). Unlike the alpha path -- where the fix is deferred to
+// draw time so decode/encode stays a loss-less codec -- there is no shadow
+// write path yet, so the fix is applied here at parse time and shadowAt() /
+// the renderer see fixed data directly.
 static void parseMcsh(MapChunk& mc, const uint8_t* data, uint32_t size) {
     constexpr uint32_t kBytes = 64u * 64u / 8u;   // 512
     uint32_t n = std::min(size, kBytes);
     mc.shadow.assign(data, data + n);
     if (mc.shadow.size() < kBytes) mc.shadow.resize(kBytes, 0);
+
+    if (mc.flags & MCNK_DO_NOT_FIX_ALPHA) return;
+
+    // 63->64 duplication at the bit level (rows are 8 bytes, LSB-first).
+    // Column first: bit 63 of each row := bit 62 (both live in the row's last
+    // byte, at bit positions 7 and 6). Then row 63 := row 62 wholesale, so the
+    // corner inherits texel (62,62) -- same order as fixAlphaMapEdges.
+    for (int row = 0; row < 64; ++row) {
+        uint8_t& last = mc.shadow[static_cast<size_t>(row) * 8 + 7];
+        const uint8_t bit62 = (last >> 6) & 1u;
+        last = static_cast<uint8_t>((last & 0x7F) | (bit62 << 7));
+    }
+    std::copy(mc.shadow.begin() + 62 * 8, mc.shadow.begin() + 63 * 8,
+              mc.shadow.begin() + 63 * 8);
 }
 
-// Parse MCSE: nSndEmitters 28-byte SoundEmitterRec records (sound entry id +
-// position + two trailing C3Vectors). Only the id and position are kept; the
-// rest of each record is skipped to keep the 28-byte stride. The count is
-// clamped to what the chunk actually holds.
+// Parse MCSE: nSndEmitters 52-byte 1.12.1 sound-emitter records --
+//   uint32 soundPointID, uint32 soundNameID, float pos[3] (at +0x08),
+//   float minDistance, maxDistance, cutoffDistance,
+//   uint16 startTime, endTime, mode, uint8 loopCountMin, loopCountMax,
+//   uint16 groupSilenceMin/Max, playInstancesMin/Max, interSoundGapMin/Max.
+// (The 28-byte SoundEmitterRec with the position at +0x04 is the TBC+ layout;
+// vanilla files use this fatter record.) The ids, position and the three
+// distances are kept; the 20-byte timing/count tail is skipped to hold the
+// 52-byte stride. The count is clamped to what the chunk actually holds, so a
+// short MCSE stops cleanly rather than reading a partial record.
 static void parseMcse(MapChunk& mc, const uint8_t* data, uint32_t size, uint32_t nSndEmitters) {
-    constexpr uint32_t kStride = 28u;   // uint32 + 6 floats
+    constexpr uint32_t kStride = 52u;
     ByteReader r(data, size);
     for (uint32_t i = 0; i < nSndEmitters && r.remaining() >= kStride; ++i) {
         SoundEmitter e;
-        e.soundId  = r.u32();
-        e.position = { r.f32(), r.f32(), r.f32() };
-        r.skip(kStride - 16u);   // skip the trailing size/min-max C3Vectors
+        e.soundPointID   = r.u32();
+        e.soundNameID    = r.u32();
+        e.soundId        = e.soundPointID;   // legacy alias
+        e.position       = { r.f32(), r.f32(), r.f32() };
+        e.minDistance    = r.f32();
+        e.maxDistance    = r.f32();
+        e.cutoffDistance = r.f32();
+        r.skip(kStride - 32u);   // skip the timing/count tail
         mc.soundEmitters.push_back(e);
     }
 }
 
-// Parse one MCLQ liquid layer (min/max height, 9x9 vertex grid, 8x8 flags).
+// Parse the MCLQ liquid layers. The chunk's declared size is unreliable in
+// real vanilla files, so the layout is driven by the MCNK header instead: one
+// 804-byte block per LQ flag set, in fixed river/ocean/magma/slime order.
+// Each block is CRange min/max (8 B) + 81 vertices x 8 B (a 4-byte per-type
+// union, then the height float) + 64 tile-flag bytes + uint32 nFlowvs + two
+// 40-byte SWFlowv records that are ALWAYS on disk regardless of nFlowvs
+// (8 + 648 + 64 + 4 + 80 = 804). Truncated data stops the walk, keeping the
+// layers already parsed. The first layer is mirrored into hasLiquid /
+// liquidType / liquid for the existing single-layer consumers.
 static void parseMclq(MapChunk& mc, const uint8_t* data, uint32_t size) {
-    LiquidType t = LiquidType::None;
-    if      (mc.flags & MCNK_LQ_RIVER) t = LiquidType::River;
-    else if (mc.flags & MCNK_LQ_OCEAN) t = LiquidType::Ocean;
-    else if (mc.flags & MCNK_LQ_MAGMA) t = LiquidType::Magma;
-    else if (mc.flags & MCNK_LQ_SLIME) t = LiquidType::Slime;
+    constexpr size_t kCoreBytes = 8u + 81u * 8u + 64u;   // through the tile flags
+    constexpr size_t kFlowBytes = 4u + 2u * 40u;         // nFlowvs + 2 fixed SWFlowv
+
+    static constexpr struct { uint32_t flag; LiquidType type; } kOrder[] = {
+        { MCNK_LQ_RIVER, LiquidType::River },
+        { MCNK_LQ_OCEAN, LiquidType::Ocean },
+        { MCNK_LQ_MAGMA, LiquidType::Magma },
+        { MCNK_LQ_SLIME, LiquidType::Slime },
+    };
 
     ByteReader r(data, size);
-    // 2 floats + 81 verts * 8 bytes + 64 flag bytes = 720 bytes per layer.
-    if (r.remaining() < 8u + 81u * 8u + 64u) return;
+    for (const auto& o : kOrder) {
+        if (!(mc.flags & o.flag)) continue;
+        if (r.remaining() < kCoreBytes) break;   // truncated: keep parsed layers
 
-    const bool isWater = (t == LiquidType::River || t == LiquidType::Ocean);
+        const bool isWater = (o.type == LiquidType::River || o.type == LiquidType::Ocean);
 
-    MclqLayer L;
-    L.minHeight = r.f32();
-    L.maxHeight = r.f32();
-    for (int i = 0; i < 81; ++i) {
-        // The 4-byte union is water {depth,flow0,flow1,filler} or magma {x,y}.
-        // For water the first byte is the depth (0..255) that drives shoreline
-        // transparency; magma/slime store texcoords we don't need here.
-        uint8_t b0 = r.u8();
-        r.skip(3);                // remaining union bytes (flow / texcoord tail)
-        L.depth[i]   = isWater ? b0 : 0;
-        L.heights[i] = r.f32();   // height is always the last 4 bytes
+        MclqLayer L;
+        L.type      = o.type;
+        L.minHeight = r.f32();
+        L.maxHeight = r.f32();
+        for (int i = 0; i < 81; ++i) {
+            // The 4-byte union is water {depth,flow0Pct,flow1Pct,filler}, ocean
+            // {depth,foam,wet,filler} or magma/slime {uint16 s, uint16 t}. For
+            // water/ocean the first byte is the depth (0..255) that drives
+            // shoreline transparency; magma texcoords we don't need here.
+            uint8_t b0 = r.u8();
+            r.skip(3);                // remaining union bytes (flow / texcoord tail)
+            L.depth[i]   = isWater ? b0 : 0;
+            L.heights[i] = r.f32();   // height is always the last 4 bytes
+        }
+        for (int i = 0; i < 64; ++i) L.renderFlags[i] = r.u8();
+        mc.liquidLayers.push_back(L);
+
+        // Flow tail: without it the next layer can't be located, so a short
+        // tail ends the walk (this layer is already kept).
+        if (r.remaining() < kFlowBytes) break;
+        r.skip(kFlowBytes);
     }
-    for (int i = 0; i < 64; ++i) L.renderFlags[i] = r.u8();
 
+    if (mc.liquidLayers.empty()) return;
     mc.hasLiquid  = true;
-    mc.liquidType = t;
-    mc.liquid     = L;
+    mc.liquidType = mc.liquidLayers.front().type;
+    mc.liquid     = mc.liquidLayers.front();
 }
 
 std::vector<MapChunk> parseChunks(const std::vector<uint8_t>& adtBuf) {
@@ -405,6 +491,11 @@ std::vector<MapChunk> parseChunks(const std::vector<uint8_t>& adtBuf) {
             const uint32_t base = static_cast<uint32_t>(c.data - adtBuf.data());
             if (mc.mcvtOffset) mc.mcvtOffset += base;
             if (mc.mcnrOffset) mc.mcnrOffset += base;
+            if (mc.mcshOffset) mc.mcshOffset += base;
+            // The 128-byte header sits at the chunk data start. Left 0 for
+            // unsupported high-res-hole chunks so the header patchers skip them
+            // (their parsed fields are defaults, not the file's values).
+            if (!(mc.flags & MCNK_HIGH_RES_HOLES)) mc.mcnkHeaderOffset = base;
             out.push_back(std::move(mc));
         }
         return true;
@@ -453,6 +544,88 @@ std::vector<uint8_t> writeAdtNormals(const std::vector<uint8_t>& adtBuf,
         }
     }
     return out;
+}
+
+// Shared plumbing for the MCNK-header patchers: copy adtBuf, then let `poke`
+// write into each chunk's 128-byte header (located via mcnkHeaderOffset;
+// chunks with offset 0 -- not parsed from a buffer, or unsupported -- are
+// skipped). Bounds are checked once here so every patcher inherits the same
+// "chunks must match this buffer" guarantee writeAdtHeights gives.
+namespace {
+template <class Poke>
+std::vector<uint8_t> patchMcnkHeaders(const std::vector<uint8_t>& adtBuf,
+                                      const std::vector<MapChunk>& chunks,
+                                      const char* who, Poke&& poke) {
+    std::vector<uint8_t> out = adtBuf;   // start byte-identical to the original
+    for (const MapChunk& mc : chunks) {
+        if (mc.mcnkHeaderOffset == 0) continue;          // no in-file header to patch
+        const size_t base = mc.mcnkHeaderOffset;
+        if (base + kHdrSize > out.size())
+            throw std::runtime_error(std::string(who) +
+                                     ": MCNK header offset past end of ADT "
+                                     "(chunks do not match this buffer)");
+        poke(out, mc, base);
+    }
+    return out;
+}
+
+void pokeU16(std::vector<uint8_t>& buf, size_t off, uint16_t v) {
+    buf[off]     = static_cast<uint8_t>(v & 0xFF);       // little-endian, like ByteReader::u16
+    buf[off + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+}
+void pokeU32(std::vector<uint8_t>& buf, size_t off, uint32_t v) {
+    for (int b = 0; b < 4; ++b)
+        buf[off + static_cast<size_t>(b)] = static_cast<uint8_t>((v >> (8 * b)) & 0xFF);
+}
+} // namespace
+
+std::vector<uint8_t> writeAdtHoles(const std::vector<uint8_t>& adtBuf,
+                                   const std::vector<MapChunk>& chunks) {
+    return patchMcnkHeaders(adtBuf, chunks, "writeAdtHoles",
+        [](std::vector<uint8_t>& out, const MapChunk& mc, size_t base) {
+            pokeU16(out, base + kOffHoles, mc.holes);
+        });
+}
+
+std::vector<uint8_t> writeAdtAreaIds(const std::vector<uint8_t>& adtBuf,
+                                     const std::vector<MapChunk>& chunks) {
+    return patchMcnkHeaders(adtBuf, chunks, "writeAdtAreaIds",
+        [](std::vector<uint8_t>& out, const MapChunk& mc, size_t base) {
+            pokeU32(out, base + kOffAreaId, mc.areaId);
+        });
+}
+
+std::vector<uint8_t> writeAdtChunkFlags(const std::vector<uint8_t>& adtBuf,
+                                        const std::vector<MapChunk>& chunks) {
+    return patchMcnkHeaders(adtBuf, chunks, "writeAdtChunkFlags",
+        [](std::vector<uint8_t>& out, const MapChunk& mc, size_t base) {
+            pokeU32(out, base + kOffFlags, mc.flags);
+        });
+}
+
+std::vector<uint8_t> writeAdtPredTex(const std::vector<uint8_t>& adtBuf,
+                                     const std::vector<MapChunk>& chunks) {
+    return patchMcnkHeaders(adtBuf, chunks, "writeAdtPredTex",
+        [](std::vector<uint8_t>& out, const MapChunk& mc, size_t base) {
+            for (size_t i = 0; i < mc.predTex.size(); ++i)
+                out[base + kOffPredTex + i] = mc.predTex[i];
+            for (size_t i = 0; i < mc.noEffectDoodad.size(); ++i)
+                out[base + kOffNoEffectDoodad + i] = mc.noEffectDoodad[i];
+        });
+}
+
+std::array<uint8_t, 64> decodePredTex(const uint8_t* packed) {
+    std::array<uint8_t, 64> cells{};
+    for (int k = 0; k < 64; ++k)
+        cells[k] = (packed[k / 4] >> ((k % 4) * 2)) & 0x3;
+    return cells;
+}
+
+std::array<uint8_t, 16> encodePredTex(const std::array<uint8_t, 64>& cells) {
+    std::array<uint8_t, 16> packed{};
+    for (int k = 0; k < 64; ++k)
+        packed[k / 4] |= static_cast<uint8_t>((cells[k] & 0x3) << ((k % 4) * 2));
+    return packed;
 }
 
 void recomputeTileNormals(std::vector<MapChunk>& chunks) {

@@ -29,11 +29,16 @@ struct TexLayer {              // MCLY entry (16 bytes)
 
 // MCNK header flag bits we act on (ADT/v18).
 constexpr uint32_t MCNK_HAS_MCSH         = 0x0001;
+constexpr uint32_t MCNK_IMPASSABLE       = 0x0002;
 constexpr uint32_t MCNK_LQ_RIVER         = 0x0004;
 constexpr uint32_t MCNK_LQ_OCEAN         = 0x0008;
 constexpr uint32_t MCNK_LQ_MAGMA         = 0x0010;
 constexpr uint32_t MCNK_LQ_SLIME         = 0x0020;
 constexpr uint32_t MCNK_DO_NOT_FIX_ALPHA = 0x8000;
+// WoW 5.3+ only: the 8 bytes at header +0x14 (vanilla ofsMCVT/ofsMCNR) are an
+// 8x8 high-res hole bitmap, NOT sub-chunk offsets. We never write this flag;
+// the parser refuses such chunks rather than dereference bitmap bits.
+constexpr uint32_t MCNK_HIGH_RES_HOLES   = 0x10000;
 
 // Liquid category, derived from the MCNK header liquid flags.
 enum class LiquidType : uint32_t { None = 0, River, Ocean, Magma, Slime };
@@ -41,8 +46,11 @@ enum class LiquidType : uint32_t { None = 0, River, Ocean, Magma, Slime };
 // One MCLQ liquid layer: a 9x9 height grid over the chunk plus an 8x8 render
 // mask. The per-vertex depth/flow (water) or texture-coord (magma) union is not
 // retained; only the height (the last 4 bytes of each 8-byte vertex) is kept,
-// which is all the mesh/water surface needs.
+// which is all the mesh/water surface needs. A chunk can stack several layers
+// (e.g. a river surface over an ocean floor): vanilla stores one 804-byte block
+// per LQ flag set in the MCNK header, in flag order river/ocean/magma/slime.
 struct MclqLayer {
+    LiquidType type = LiquidType::None;    // which LQ flag this block belongs to
     float minHeight = 0.0f;
     float maxHeight = 0.0f;
     std::array<float, 81>  heights{};      // 9x9 outer grid
@@ -53,12 +61,19 @@ struct MclqLayer {
 // True if an MCLQ 8x8 tile flag indicates the tile should be drawn.
 inline bool liquidTileRenders(uint8_t flag) { return (flag & 0x0F) != 0x0F; }
 
-// One MCSE sound emitter (28-byte SoundEmitterRec). Only the sound entry id and
-// world position are retained; the trailing size/min-max distance C3Vectors are
-// skipped over (advanced past for the full 28-byte stride) but not kept.
+// One MCSE sound emitter. The 1.12.1 record is 52 bytes: uint32 soundPointID,
+// uint32 soundNameID, float pos[3] (at +0x08), float min/max/cutoff distance,
+// then a 20-byte timing/count tail (uint16 startTime, endTime, mode; uint8
+// loopCountMin, loopCountMax; uint16 groupSilenceMin/Max, playInstancesMin/Max,
+// interSoundGapMin/Max) that is skipped over but not kept.
 struct SoundEmitter {
-    uint32_t soundId = 0;   // SoundEntriesAdvanced.dbc id
-    Vec3     position;      // emitter position
+    uint32_t soundPointID   = 0;   // record field 0
+    uint32_t soundNameID    = 0;   // record field 1
+    uint32_t soundId        = 0;   // legacy alias of soundPointID (kept source-compatible)
+    Vec3     position;             // emitter position (record offset 0x08)
+    float    minDistance    = 0.0f;
+    float    maxDistance    = 0.0f;
+    float    cutoffDistance = 0.0f;
 };
 
 // Base translucent tint for a liquid category (RGBA). Water/ocean are a
@@ -90,8 +105,16 @@ struct MapChunk {
     std::vector<SoundEmitter> soundEmitters;  // MCSE: per-chunk sound emitters
 
     bool       hasLiquid  = false;      // MCLQ present
-    LiquidType liquidType = LiquidType::None;
-    MclqLayer  liquid;                  // valid when hasLiquid
+    LiquidType liquidType = LiquidType::None;   // first layer's type
+    MclqLayer  liquid;                  // FIRST liquid layer (back-compat view)
+    std::vector<MclqLayer> liquidLayers;  // ALL MCLQ layers, in LQ-flag order
+
+    // MCNK header +0x40: 'ReallyLowQualityTextureingMap' (predTex), 8x8 cells x
+    // 2 bits each = the MCLY layer index whose effectId spawns ground-effect
+    // doodads in that cell; +0x50: noEffectDoodad, 8x8 x 1 bit suppression mask.
+    // Kept in their packed on-disk form (decode via decodePredTex).
+    std::array<uint8_t, 16> predTex{};
+    std::array<uint8_t, 8>  noEffectDoodad{};
 
     // Absolute byte offsets of this chunk's MCVT height floats / MCNR normal
     // bytes within the source ADT buffer parseChunks() read (0 if absent). Let
@@ -99,6 +122,11 @@ struct MapChunk {
     // rewriting the rest of the file. Not part of the rendered model.
     uint32_t   mcvtOffset = 0;
     uint32_t   mcnrOffset = 0;
+    // Same idea for the 128-byte MCNK header itself (lets writeAdtHoles /
+    // writeAdtAreaIds / writeAdtChunkFlags / writeAdtPredTex poke header fields
+    // in place) and for the MCSH shadow payload. 0 if unknown/absent.
+    uint32_t   mcnkHeaderOffset = 0;
+    uint32_t   mcshOffset = 0;
 };
 
 // Sample the MCSH shadow bitmap at (row, col) in [0,64): true == the texel is in
@@ -202,6 +230,34 @@ std::vector<uint8_t> writeAdtHeights(const std::vector<uint8_t>& adtBuf,
 std::vector<uint8_t> writeAdtNormals(const std::vector<uint8_t>& adtBuf,
                                      const std::vector<MapChunk>& chunks);
 
+// MCNK-header patchers, the surgical siblings of writeAdtHeights: each returns
+// a copy of adtBuf with ONE header field poked per chunk -- located through
+// mc.mcnkHeaderOffset (chunks with offset 0 are skipped) -- and every other
+// byte untouched. Throws if a header runs past the buffer (a sign `chunks` and
+// `adtBuf` don't match).
+//   writeAdtHoles      holes            -> header+0x3C (uint16)
+//   writeAdtAreaIds    areaId           -> header+0x34 (uint32)
+//   writeAdtChunkFlags flags            -> header+0x00 (uint32; this is how the
+//                                          impassable bit MCNK_IMPASSABLE 0x2
+//                                          is painted onto a chunk)
+//   writeAdtPredTex    predTex (16 B) + noEffectDoodad (8 B) -> header+0x40..0x57
+std::vector<uint8_t> writeAdtHoles(const std::vector<uint8_t>& adtBuf,
+                                   const std::vector<MapChunk>& chunks);
+std::vector<uint8_t> writeAdtAreaIds(const std::vector<uint8_t>& adtBuf,
+                                     const std::vector<MapChunk>& chunks);
+std::vector<uint8_t> writeAdtChunkFlags(const std::vector<uint8_t>& adtBuf,
+                                        const std::vector<MapChunk>& chunks);
+std::vector<uint8_t> writeAdtPredTex(const std::vector<uint8_t>& adtBuf,
+                                     const std::vector<MapChunk>& chunks);
+
+// Decode the MCNK header's 16-byte predTex map to one byte per 8x8 cell (value
+// 0..3 = MCLY layer index), row-major, 4 cells per byte packed LSB-first (cell
+// k lives in bits (k%4)*2 .. (k%4)*2+1 of byte k/4). encodePredTex is the exact
+// inverse; the pair is loss-less both ways (every 2-bit field maps to one cell
+// and back), so a decode->encode round-trip is byte-identical.
+std::array<uint8_t, 64> decodePredTex(const uint8_t* packed);   // packed: 16 bytes
+std::array<uint8_t, 16> encodePredTex(const std::array<uint8_t, 64>& cells);
+
 // Recompute every chunk's MCNR vertex normals from the (possibly edited) MCVT
 // height field of the whole tile. Used after a terrain sculpt so lighting tracks
 // the new slopes. Normals come from central differences over the tile's shared
@@ -230,5 +286,16 @@ Mesh buildTileMesh(const std::vector<MapChunk>& chunks, int blockX, int blockY);
 
 // True if inner cell (cellRow,cellCol) in 0..7 lies in a low-res hole.
 bool cellIsHole(uint16_t holes, int cellRow, int cellCol);
+
+// Editor write path for the low-res 4x4 hole grid: set/clear one bit at
+// (subX = west-east sub-column, subY = north-south sub-row), both 0..3; the
+// bit index is subY*4 + subX from the LSB. Each bit voids a 2x2 block of the
+// 8x8 render cells -- exactly the mapping cellIsHole() reads, so
+// cellIsHole(mc.holes, subY*2, subX*2) flips with the bit. Out-of-range
+// coordinates are ignored. Persist edits with writeAdtHoles().
+void setHoleBit(MapChunk& mc, int subX, int subY);
+void clearHoleBit(MapChunk& mc, int subX, int subY);
+void setAllHoles(MapChunk& mc);    // holes = 0xFFFF: the whole chunk is void
+void clearAllHoles(MapChunk& mc);  // holes = 0: solid ground
 
 } // namespace wf

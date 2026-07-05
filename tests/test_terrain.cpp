@@ -326,6 +326,76 @@ void test_terrain() {
         CHECK_APPROX(mcl.liquid.heights[40], 15.0f);
         CHECK(!liquidTileRenders(mcl.liquid.renderFlags[0]));  // 0x0F -> skip
         CHECK(liquidTileRenders(mcl.liquid.renderFlags[1]));   // 0x00 -> draw
+        // The layer list carries the same (single) layer, typed.
+        CHECK(mcl.liquidLayers.size() == 1);
+        CHECK(mcl.liquidLayers[0].type == LiquidType::River);
+        CHECK_APPROX(mcl.liquidLayers[0].minHeight, 10.0f);
+    }
+
+    // --- MCLQ stacked layers: one 804-byte block per set LQ flag -------------
+    {
+        // River over magma: MCNK_LQ_RIVER | MCNK_LQ_MAGMA -> two blocks in flag
+        // order. Each block = min/max (8) + 81*8 verts + 64 tile bytes + uint32
+        // nFlowvs + two 40-byte SWFlowv always on disk = 804 bytes.
+        auto putLayer = [&](std::vector<uint8_t>& b, float minH, float maxH,
+                            float height, uint8_t union0, uint8_t tileFlag) {
+            size_t start = b.size();
+            putf(b, minH); putf(b, maxH);
+            for (int i = 0; i < 81; ++i) {
+                b.push_back(union0);                       // depth (water) / tc low byte
+                b.push_back(0); b.push_back(0); b.push_back(0);
+                putf(b, height);
+            }
+            for (int i = 0; i < 64; ++i) b.push_back(tileFlag);
+            put32(b, 0);                                   // nFlowvs
+            for (int i = 0; i < 2 * 40; ++i) b.push_back(0xAB);  // 2 fixed SWFlowv
+            CHECK(b.size() - start == 804u);
+        };
+
+        std::vector<uint8_t> hdr(128, 0);
+        auto h32 = [&](size_t off, uint32_t v){ for(int i=0;i<4;i++) hdr[off+i]=(v>>(8*i))&0xFF; };
+        h32(0x00, MCNK_LQ_RIVER | MCNK_LQ_MAGMA);
+
+        std::vector<uint8_t> mclq;
+        putLayer(mclq, 10.0f, 20.0f, 15.0f, /*depth*/200, /*tile: river*/0x04);
+        putLayer(mclq, 30.0f, 40.0f, 35.0f, /*tc byte*/ 99, /*tile: magma*/0x06);
+
+        std::vector<uint8_t> body = hdr;
+        chunk(body, "MCLQ", mclq);
+        std::vector<uint8_t> adt2;
+        chunk(adt2, "MCNK", body);
+
+        MapChunk mc2 = parseChunks(adt2)[0];
+        CHECK(mc2.liquidLayers.size() == 2);
+        CHECK(mc2.liquidLayers[0].type == LiquidType::River);
+        CHECK(mc2.liquidLayers[1].type == LiquidType::Magma);
+        CHECK_APPROX(mc2.liquidLayers[0].minHeight, 10.0f);
+        CHECK_APPROX(mc2.liquidLayers[0].heights[40], 15.0f);
+        CHECK(mc2.liquidLayers[0].depth[40] == 200);       // water keeps its depth
+        CHECK(mc2.liquidLayers[0].renderFlags[0] == 0x04);
+        CHECK_APPROX(mc2.liquidLayers[1].minHeight, 30.0f);
+        CHECK_APPROX(mc2.liquidLayers[1].heights[40], 35.0f);
+        CHECK(mc2.liquidLayers[1].depth[40] == 0);         // magma: texcoords, no depth
+        CHECK(mc2.liquidLayers[1].renderFlags[63] == 0x06);
+        // Back-compat view: hasLiquid/liquidType/liquid mirror the FIRST layer.
+        CHECK(mc2.hasLiquid);
+        CHECK(mc2.liquidType == LiquidType::River);
+        CHECK_APPROX(mc2.liquid.minHeight, mc2.liquidLayers[0].minHeight);
+        CHECK_APPROX(mc2.liquid.heights[40], mc2.liquidLayers[0].heights[40]);
+        CHECK(mc2.liquid.renderFlags[0] == mc2.liquidLayers[0].renderFlags[0]);
+
+        // Truncated second block: the first full layer is kept, the walk stops.
+        std::vector<uint8_t> mclqT;
+        putLayer(mclqT, 10.0f, 20.0f, 15.0f, 200, 0x04);
+        for (int i = 0; i < 100; ++i) mclqT.push_back(0);  // partial magma block
+        std::vector<uint8_t> bodyT = hdr;
+        chunk(bodyT, "MCLQ", mclqT);
+        std::vector<uint8_t> adtT;
+        chunk(adtT, "MCNK", bodyT);
+        MapChunk mcT = parseChunks(adtT)[0];
+        CHECK(mcT.liquidLayers.size() == 1);
+        CHECK(mcT.liquidLayers[0].type == LiquidType::River);
+        CHECK(mcT.hasLiquid && mcT.liquidType == LiquidType::River);
     }
 
     // --- real vanilla MCNK layout: header offsets + uncounted MCNR padding ---
@@ -388,7 +458,7 @@ void test_terrain() {
         h32(0x00, MCNK_HAS_MCSH);   // flags: shadow map present
         h32(0x10, 2);               // nDoodadRefs
         h32(0x38, 1);               // nMapObjRefs
-        h32(0x58, 1);               // nSndEmitters
+        h32(0x58, 3);               // nSndEmitters (one MORE than stored: clamp)
 
         std::vector<uint8_t> mcrf;
         put32(mcrf, 11); put32(mcrf, 22);   // doodad (MDDF) indices
@@ -398,12 +468,25 @@ void test_terrain() {
         mcsh[0] = 0x01;             // texel (0,0): bit 0
         mcsh[8] = 0x04;             // texel (1,2): bit index 66 -> byte 8, bit 2
 
-        // MCSE: one 28-byte SoundEmitterRec (id + position + two trailing
-        // C3Vectors we don't keep).
+        // MCSE: two 52-byte vanilla sound-emitter records -- soundPointID,
+        // soundNameID, pos[3] at +0x08, min/max/cutoff distance, then the
+        // 20-byte timing/count tail we skip.
+        auto putEmitter = [&](std::vector<uint8_t>& b, uint32_t point, uint32_t name,
+                              float x, float y, float z,
+                              float minD, float maxD, float cutD) {
+            put32(b, point); put32(b, name);
+            putf(b, x); putf(b, y); putf(b, z);
+            putf(b, minD); putf(b, maxD); putf(b, cutD);
+            put16(b, 100); put16(b, 200); put16(b, 1);   // startTime, endTime, mode
+            b.push_back(2); b.push_back(4);              // loopCountMin/Max
+            put16(b, 5); put16(b, 6);                    // groupSilenceMin/Max
+            put16(b, 7); put16(b, 8);                    // playInstancesMin/Max
+            put16(b, 9); put16(b, 10);                   // interSoundGapMin/Max
+        };
         std::vector<uint8_t> mcse;
-        put32(mcse, 555);                      // soundEntryId
-        putf(mcse, 10.0f); putf(mcse, 20.0f); putf(mcse, 30.0f);  // position
-        putf(mcse, 1.0f);  putf(mcse, 2.0f);  putf(mcse, 3.0f);   // size/min-max (skipped)
+        putEmitter(mcse, 555, 777, 10.0f, 20.0f, 30.0f,  5.0f, 45.0f, 60.0f);
+        putEmitter(mcse, 556, 778, -1.0f, -2.0f, -3.0f, 12.0f, 90.0f, 99.0f);
+        CHECK(mcse.size() == 2u * 52u);   // the vanilla record really is 52 B
 
         std::vector<uint8_t> body = hdr;
         chunk(body, "MCRF", mcrf);
@@ -421,11 +504,22 @@ void test_terrain() {
         CHECK(!shadowAt(mc, 0, 1));
         CHECK(!shadowAt(mc, 63, 63));
         CHECK(!shadowAt(mc, 100, 0));   // out of range -> false
-        CHECK(mc.soundEmitters.size() == 1);
-        CHECK(mc.soundEmitters[0].soundId == 555);
-        CHECK(mc.soundEmitters[0].position.x == 10.0f);
+        // nSndEmitters says 3 but only 2 records fit: stop cleanly at 2.
+        CHECK(mc.soundEmitters.size() == 2);
+        CHECK(mc.soundEmitters[0].soundPointID == 555);
+        CHECK(mc.soundEmitters[0].soundNameID  == 777);
+        CHECK(mc.soundEmitters[0].soundId == 555);            // legacy alias
+        CHECK(mc.soundEmitters[0].position.x == 10.0f);       // pos read at +0x08
         CHECK(mc.soundEmitters[0].position.y == 20.0f);
         CHECK(mc.soundEmitters[0].position.z == 30.0f);
+        CHECK_APPROX(mc.soundEmitters[0].minDistance,     5.0f);
+        CHECK_APPROX(mc.soundEmitters[0].maxDistance,    45.0f);
+        CHECK_APPROX(mc.soundEmitters[0].cutoffDistance, 60.0f);
+        CHECK(mc.soundEmitters[1].soundPointID == 556);       // 52-byte stride held
+        CHECK(mc.soundEmitters[1].position.x == -1.0f);
+        CHECK(mc.soundEmitters[1].position.z == -3.0f);
+        CHECK_APPROX(mc.soundEmitters[1].minDistance, 12.0f);
+        CHECK_APPROX(mc.soundEmitters[1].cutoffDistance, 99.0f);
     }
 
     // --- writeAdtHeights: surgical height patch round-trips -----------------
@@ -546,5 +640,193 @@ void test_terrain() {
         // Empty refs -> empty result; the returned pointers alias `defs`.
         CHECK(resolveChunkRefs(std::vector<uint32_t>{}, defs).empty());
         CHECK(got[0] == &defs[0]);
+    }
+
+    // --- MCSH 63->64 edge fix (parse time, gated by DO_NOT_FIX_ALPHA) --------
+    {
+        // Craft a bitmap whose rows/cols 62 and 63 differ, so the duplication
+        // is observable: (62,5), (10,62) and the corner source (62,62) set;
+        // (63,7) set in the RAW data (row 62 bit 7 clear) so the fix erases it.
+        std::vector<uint8_t> mcsh(512, 0);
+        auto setBit = [&](int row, int col) {
+            size_t bit = static_cast<size_t>(row) * 64 + col;
+            mcsh[bit >> 3] |= static_cast<uint8_t>(1u << (bit & 7));
+        };
+        setBit(62,  5);
+        setBit(10, 62);
+        setBit(62, 62);
+        setBit(63,  7);
+
+        auto makeShadowAdt = [&](uint32_t flags) {
+            std::vector<uint8_t> hdr(128, 0);
+            for (int i = 0; i < 4; ++i) hdr[i] = (flags >> (8 * i)) & 0xFF;
+            std::vector<uint8_t> body = hdr;
+            chunk(body, "MCSH", mcsh);
+            std::vector<uint8_t> adtSh;
+            chunk(adtSh, "MCNK", body);
+            return adtSh;
+        };
+
+        // Flag NOT set -> the fix runs: row 63 := row 62, col 63 := col 62.
+        MapChunk fx = parseChunks(makeShadowAdt(MCNK_HAS_MCSH))[0];
+        CHECK(shadowAt(fx, 62,  5));       // source texels intact
+        CHECK(shadowAt(fx, 10, 62));
+        CHECK(shadowAt(fx, 63,  5));       // row 63 duplicated from row 62
+        CHECK(shadowAt(fx, 10, 63));       // col 63 duplicated from col 62
+        CHECK(shadowAt(fx, 63, 63));       // corner inherits (62,62)
+        CHECK(!shadowAt(fx, 63,  7));      // raw row-63 data overwritten by the fix
+        CHECK(!shadowAt(fx, 61, 63));      // (61,62) clear -> stays clear
+
+        // Flag set -> the bitmap is untouched.
+        MapChunk raw = parseChunks(makeShadowAdt(MCNK_HAS_MCSH | MCNK_DO_NOT_FIX_ALPHA))[0];
+        CHECK(shadowAt(raw, 63,  7));      // raw edge data preserved
+        CHECK(!shadowAt(raw, 63,  5));
+        CHECK(!shadowAt(raw, 10, 63));
+        CHECK(!shadowAt(raw, 63, 63));
+    }
+
+    // --- high-res-hole guard: flag 0x10000 chunks parse to defaults ----------
+    {
+        // Build a chunk with a perfectly valid MCVT *and* the high_res_holes
+        // flag: at +0x14 the "ofsMCVT" bytes are really hole-bitmap bits, so
+        // the parser must not follow them. Everything stays at defaults.
+        std::vector<uint8_t> src = makeMCNK(/*holes*/0, /*baseZ*/1000.0f, /*idxX*/3, /*idxY*/5);
+        // Patch the MCNK header flags in place (header starts at byte 8).
+        const uint32_t fl = MCNK_HIGH_RES_HOLES;
+        for (int i = 0; i < 4; ++i) src[8 + i] = (fl >> (8 * i)) & 0xFF;
+
+        auto hc = parseChunks(src);
+        CHECK(hc.size() == 1);
+        CHECK(hc[0].flags & MCNK_HIGH_RES_HOLES);
+        CHECK_APPROX(hc[0].heights[144], 0.0f);   // MCVT NOT read (makeMCNK stores 144)
+        CHECK(hc[0].indexX == 0 && hc[0].indexY == 0);   // header left at defaults
+        CHECK(hc[0].layers.empty());
+        CHECK(hc[0].mcvtOffset == 0);
+        CHECK(hc[0].mcnkHeaderOffset == 0);       // header patchers skip it too
+        // ... so the patchers pass such a chunk through byte-identically.
+        CHECK(writeAdtHoles(src, hc) == src);
+    }
+
+    // --- setHoleBit / clearHoleBit round-trip against cellIsHole -------------
+    {
+        MapChunk m;
+        clearAllHoles(m);
+        CHECK(m.holes == 0);
+        setHoleBit(m, /*subX*/2, /*subY*/1);        // bit 1*4+2 == 6
+        CHECK(m.holes == (1u << 6));
+        // That bit voids exactly the 2x2 cell block (rows 2-3, cols 4-5).
+        CHECK(cellIsHole(m.holes, 2, 4));
+        CHECK(cellIsHole(m.holes, 3, 5));
+        CHECK(!cellIsHole(m.holes, 2, 3));
+        CHECK(!cellIsHole(m.holes, 4, 4));
+        clearHoleBit(m, 2, 1);
+        CHECK(m.holes == 0);
+
+        // Full grid round-trip: every (subX,subY) maps to its own bit and back.
+        bool roundTrip = true;
+        for (int sy = 0; sy < 4; ++sy)
+            for (int sx = 0; sx < 4; ++sx) {
+                MapChunk t;
+                setHoleBit(t, sx, sy);
+                if (t.holes != (1u << (sy * 4 + sx)))            roundTrip = false;
+                if (!cellIsHole(t.holes, sy * 2, sx * 2))        roundTrip = false;
+                if (!cellIsHole(t.holes, sy * 2 + 1, sx * 2 + 1)) roundTrip = false;
+                clearHoleBit(t, sx, sy);
+                if (t.holes != 0)                                roundTrip = false;
+            }
+        CHECK(roundTrip);
+
+        setAllHoles(m);
+        CHECK(m.holes == 0xFFFF);
+        CHECK(cellIsHole(m.holes, 0, 0) && cellIsHole(m.holes, 7, 7));
+        // Out-of-range coordinates are ignored, not wrapped.
+        clearAllHoles(m);
+        setHoleBit(m, 4, 0);  setHoleBit(m, 0, -1);
+        CHECK(m.holes == 0);
+    }
+
+    // --- MCNK-header patchers: holes / areaId / flags / predTex --------------
+    {
+        std::vector<uint8_t> src = makeMCNK(/*holes*/0x1, /*baseZ*/0.0f, /*idxX*/1, /*idxY*/2);
+        std::vector<MapChunk> cs = parseChunks(src);
+        CHECK(cs[0].mcnkHeaderOffset == 8);          // header right after magic+size
+        const size_t hdr = cs[0].mcnkHeaderOffset;
+
+        // Checks one patcher: only [hdr+field, hdr+field+len) may differ.
+        auto onlySpanChanged = [&](const std::vector<uint8_t>& patched,
+                                   size_t field, size_t len) {
+            if (patched.size() != src.size()) return false;
+            for (size_t i = 0; i < src.size(); ++i) {
+                if (i >= hdr + field && i < hdr + field + len) continue;
+                if (patched[i] != src[i]) return false;
+            }
+            return true;
+        };
+
+        // Holes -> header+0x3C (uint16).
+        setHoleBit(cs[0], 3, 3);                     // 0x1 | bit 15
+        std::vector<uint8_t> pH = writeAdtHoles(src, cs);
+        CHECK(onlySpanChanged(pH, 0x3C, 2));
+        CHECK(parseChunks(pH)[0].holes == (0x1u | (1u << 15)));
+
+        // AreaId -> header+0x34 (uint32). makeMCNK seeds 1234.
+        cs[0].areaId = 98765;
+        std::vector<uint8_t> pA = writeAdtAreaIds(src, cs);
+        CHECK(onlySpanChanged(pA, 0x34, 4));
+        CHECK(parseChunks(pA)[0].areaId == 98765);
+
+        // Flags -> header+0x00 (uint32): paint the impassable bit.
+        cs[0].flags |= MCNK_IMPASSABLE;
+        std::vector<uint8_t> pF = writeAdtChunkFlags(src, cs);
+        CHECK(onlySpanChanged(pF, 0x00, 4));
+        CHECK(parseChunks(pF)[0].flags & MCNK_IMPASSABLE);
+
+        // predTex + noEffectDoodad -> header+0x40..0x57.
+        std::array<uint8_t, 64> cells{};
+        for (int k = 0; k < 64; ++k) cells[k] = static_cast<uint8_t>(k % 4);
+        cs[0].predTex = encodePredTex(cells);
+        for (int i = 0; i < 8; ++i) cs[0].noEffectDoodad[i] = static_cast<uint8_t>(0xA0 + i);
+        std::vector<uint8_t> pP = writeAdtPredTex(src, cs);
+        CHECK(onlySpanChanged(pP, 0x40, 16 + 8));
+        MapChunk rp = parseChunks(pP)[0];
+        CHECK(rp.predTex == cs[0].predTex);          // parse reads the fields back
+        CHECK(rp.noEffectDoodad == cs[0].noEffectDoodad);
+        CHECK(decodePredTex(rp.predTex.data()) == cells);
+
+        // No-edit writes reproduce the original byte-for-byte.
+        std::vector<MapChunk> clean = parseChunks(src);
+        CHECK(writeAdtHoles(src, clean) == src);
+        CHECK(writeAdtAreaIds(src, clean) == src);
+        CHECK(writeAdtChunkFlags(src, clean) == src);
+        CHECK(writeAdtPredTex(src, clean) == src);
+    }
+
+    // --- predTex codec: 2-bit pack/unpack identity ---------------------------
+    {
+        // Cell k lives in bits (k%4)*2..+1 of byte k/4, LSB-first.
+        std::array<uint8_t, 16> packed{};
+        packed[0] = 0xE4;                            // 11 10 01 00 -> cells 0..3 = 0,1,2,3
+        std::array<uint8_t, 64> cells = decodePredTex(packed.data());
+        CHECK(cells[0] == 0 && cells[1] == 1 && cells[2] == 2 && cells[3] == 3);
+        CHECK(cells[4] == 0);                        // next byte untouched
+        CHECK(encodePredTex(cells) == packed);
+
+        // Identity over every possible byte value: each byte is exactly four
+        // 2-bit fields, so decode->encode is loss-less for all 256 patterns.
+        bool identity = true;
+        for (int v = 0; v < 256; ++v) {
+            std::array<uint8_t, 16> in{};
+            in.fill(static_cast<uint8_t>(v));
+            std::array<uint8_t, 64> mid = decodePredTex(in.data());
+            for (int k = 0; k < 64; ++k)
+                if (mid[k] != ((v >> ((k % 4) * 2)) & 0x3)) identity = false;
+            if (encodePredTex(mid) != in) identity = false;
+        }
+        CHECK(identity);
+
+        // encode masks out-of-range cell values to their low 2 bits.
+        std::array<uint8_t, 64> hot{};
+        hot[0] = 0xFF;                               // -> 3
+        CHECK(encodePredTex(hot)[0] == 0x03);
     }
 }
