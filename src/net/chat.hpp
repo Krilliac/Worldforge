@@ -114,6 +114,40 @@ inline std::vector<uint8_t> encodeChatMessage(const ChatMessage& m) {
     return w.data();
 }
 
+// ---- CMSG_MESSAGECHAT (client → server) -------------------------------------
+// The outgoing form the client sends. Simpler than the broadcast: a u32 type
+// (NOT u8 like SMSG), u32 language, an optional target/channel name, then the
+// message -- all BARE cstrings (no length prefix, unlike SMSG's lpstr). Verified
+// vs mangos-zero HandleMessagechatOpcode: WHISPER reads a target name first,
+// CHANNEL reads a channel name first, everything else just the message.
+struct ChatSend {
+    uint32_t    type     = CHAT_MSG_SAY;
+    uint32_t    language = LANG_UNIVERSAL;
+    std::string target;    // CHAT_MSG_WHISPER: recipient name
+    std::string channel;   // CHAT_MSG_CHANNEL: channel name
+    std::string text;
+};
+
+inline std::vector<uint8_t> encodeChatSend(const ChatSend& c) {
+    ByteWriter w;
+    w.u32(c.type);
+    w.u32(c.language);
+    if (c.type == CHAT_MSG_WHISPER) writeCString(w, c.target);
+    if (c.type == CHAT_MSG_CHANNEL) writeCString(w, c.channel);
+    writeCString(w, c.text);
+    return w.data();
+}
+
+inline ChatSend decodeChatSend(ByteReader& r) {
+    ChatSend c;
+    c.type     = r.u32();
+    c.language = r.u32();
+    if (c.type == CHAT_MSG_WHISPER) c.target  = readCString(r);
+    if (c.type == CHAT_MSG_CHANNEL) c.channel = readCString(r);
+    c.text = readCString(r);
+    return c;
+}
+
 inline ChatMessage decodeChatMessage(ByteReader& r) {
     ChatMessage m;
     m.type     = r.u8();

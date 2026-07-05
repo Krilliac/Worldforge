@@ -72,6 +72,34 @@ void test_chat() {
         CHECK(out.text.empty() && out.type == CHAT_MSG_SYSTEM);
     }
 
+    // --- CMSG_MESSAGECHAT (client send): u32 type/lang + bare cstrings ------
+    {
+        // SAY: type + lang + just the message (no target/channel).
+        ChatSend s; s.type = CHAT_MSG_SAY; s.language = LANG_COMMON; s.text = "hi";
+        std::vector<uint8_t> b = encodeChatSend(s);
+        CHECK(b.size() == 4 + 4 + 3);            // u32 type + u32 lang + "hi\0"
+        ByteReader r(b.data(), b.size());
+        ChatSend out = decodeChatSend(r);
+        CHECK(out.type == CHAT_MSG_SAY && out.language == LANG_COMMON && out.text == "hi");
+        CHECK(r.remaining() == 0);
+    }
+    {
+        // WHISPER: a target name precedes the message.
+        ChatSend s; s.type = CHAT_MSG_WHISPER; s.target = "Jaina"; s.text = "hello";
+        std::vector<uint8_t> b = encodeChatSend(s);
+        ByteReader r(b.data(), b.size());
+        ChatSend out = decodeChatSend(r);
+        CHECK(out.target == "Jaina" && out.text == "hello" && r.remaining() == 0);
+    }
+    {
+        // CHANNEL: a channel name precedes the message.
+        ChatSend s; s.type = CHAT_MSG_CHANNEL; s.channel = "Trade"; s.text = "wts";
+        std::vector<uint8_t> b = encodeChatSend(s);
+        ByteReader r(b.data(), b.size());
+        ChatSend out = decodeChatSend(r);
+        CHECK(out.channel == "Trade" && out.text == "wts" && r.remaining() == 0);
+    }
+
     // Opcode values match the vanilla table.
     CHECK(CMSG_MESSAGECHAT == 0x095);
     CHECK(SMSG_MESSAGECHAT == 0x096);
