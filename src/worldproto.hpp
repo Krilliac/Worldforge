@@ -42,6 +42,17 @@ enum Opcode : uint32_t {
     CMSG_MESSAGECHAT              = 0x095,
     SMSG_MESSAGECHAT             = 0x096,
 
+    // Query / template subsystems (fleet-reconstructed; codecs in src/net/)
+    CMSG_GUILD_QUERY                = 0x054,
+    SMSG_GUILD_QUERY_RESPONSE       = 0x055,
+    CMSG_ITEM_QUERY_SINGLE          = 0x056,
+    SMSG_ITEM_QUERY_SINGLE_RESPONSE = 0x058,
+    CMSG_QUEST_QUERY                = 0x05C,
+    SMSG_QUEST_QUERY_RESPONSE       = 0x05D,
+    CMSG_TEXT_EMOTE                 = 0x104,
+    SMSG_TEXT_EMOTE                 = 0x105,
+    SMSG_LOOT_RESPONSE              = 0x160,
+
     // Player movement (MSG_* = same opcode both ways: client sends its own move,
     // server relays other players'). Vanilla 1.12.1 values, cross-checked vs
     // cmangos / mangos-zero Opcodes.h. Each body is a MovementInfo; the server
